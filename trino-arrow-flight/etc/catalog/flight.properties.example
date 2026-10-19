@@ -1,0 +1,22 @@
+# Copy to  <trino>/etc/catalog/flight.properties  and adjust.
+connector.name=arrow_flight
+
+arrow-flight.host=localhost
+arrow-flight.port=32010
+
+# Auth: use EITHER user+password (BasicAuth) OR bearer-token.
+arrow-flight.user=test-user
+arrow-flight.bearer-token=test-token
+# arrow-flight.password=secret
+
+# Optional
+# arrow-flight.default-schema=test_schema
+# arrow-flight.tls.enabled=true
+# arrow-flight.tls.verify-server=true
+# arrow-flight.tls.truststore-path=/etc/trino/flight-truststore.jks
+# arrow-flight.tls.truststore-password=changeit
+# arrow-flight.routing-tag=bi
+# arrow-flight.routing-queue=adhoc
+# arrow-flight.max-retries=3
+# arrow-flight.retry-backoff-millis=1000
+# arrow-flight.request-timeout-millis=0

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>pro.surpin</groupId>
+    <artifactId>arrow-flight-connectors</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>Arrow Flight SQL connectors</name>
+    <description>
+        Query-engine connectors for the Hadoop Arrow Flight SQL server
+        (https://github.com/VadimSurpin/arrow-flight-server).
+    </description>
+
+    <modules>
+        <module>arrow-flight-common</module>
+        <module>trino-arrow-flight</module>
+        <!--
+          starrocks-arrow-flight is NOT built by default: StarRocks does not publish a
+          Frontend API artifact to Maven Central, so this module must be compiled against
+          a locally built StarRocks source tree. Build it explicitly with:
+              mvn -pl starrocks-arrow-flight -Pstarrocks package
+          See starrocks-arrow-flight/DESIGN.md.
+        -->
+    </modules>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- The official trinodb/trino:455 image runs JDK 22, so the plugin must target <= 22.
+             The build itself needs JDK 25 (the trino-maven-plugin is compiled for Java 25). -->
+        <maven.compiler.release>22</maven.compiler.release>
+
+        <dep.trino.version>455</dep.trino.version>
+        <dep.airlift.version>252</dep.airlift.version>
+        <dep.arrow.version>18.1.0</dep.arrow.version>
+        <!-- Arrow 18.1.0 brings grpc 1.65.0 with part of Netty at 4.1.114 and part at 4.1.100.
+             grpc-netty 1.65.0 on Netty 4.1.111+ nests the receive buffers of a connection, and a
+             busy stream then dies with "Failed to read message" (StackOverflowError when the
+             nested buffers are released). 1.65.1 fixes that; Netty is kept on one version. -->
+        <dep.grpc.version>1.65.1</dep.grpc.version>
+        <dep.netty.version>4.1.114.Final</dep.netty.version>
+        <dep.guice.version>7.0.0</dep.guice.version>
+        <dep.slf4j.version>2.0.16</dep.slf4j.version>
+        <dep.guava.version>33.4.0-jre</dep.guava.version>
+        <dep.junit.version>5.11.4</dep.junit.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-bom</artifactId>
+                <version>${dep.grpc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>${dep.netty.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.arrow</groupId>
+                <artifactId>arrow-bom</artifactId>
+                <version>${dep.arrow.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <dependency>
+                <groupId>pro.surpin</groupId>
+                <artifactId>arrow-flight-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${dep.slf4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>${dep.guava.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <version>${dep.junit.version}</version>
+                <scope>test</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                    <configuration>
+                        <release>${maven.compiler.release}</release>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.2</version>
+                </plugin>
+                <plugin>
+                    <groupId>io.trino</groupId>
+                    <artifactId>trino-maven-plugin</artifactId>
+                    <version>24</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>

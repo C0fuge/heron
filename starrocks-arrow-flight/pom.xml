@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>pro.surpin</groupId>
+        <artifactId>arrow-flight-connectors</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>starrocks-arrow-flight</artifactId>
+    <packaging>jar</packaging>
+
+    <name>StarRocks Arrow Flight SQL connector (skeleton)</name>
+    <description>
+        Not wired into the default build. StarRocks does not publish its Frontend API to
+        Maven Central, so this connector must be compiled against a locally built StarRocks
+        source tree (see DESIGN.md). Only the engine-neutral planner compiles today.
+    </description>
+
+    <properties>
+        <!-- version of the locally installed com.starrocks:fe-core artifact
+             (the StarRocks source tree on 'main' publishes it as com.starrocks:fe-core:main) -->
+        <starrocks.fe.version>main</starrocks.fe.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>pro.surpin</groupId>
+            <artifactId>arrow-flight-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <profiles>
+        <!--
+            Enable once you have run, inside a checkout of https://github.com/StarRocks/starrocks :
+                cd fe && mvn -q -DskipTests install
+            which publishes com.starrocks:fe-core to your local ~/.m2. Then:
+                mvn -pl starrocks-arrow-flight -Pstarrocks package
+        -->
+        <profile>
+            <id>starrocks</id>
+            <dependencies>
+                <dependency>
+                    <groupId>com.starrocks</groupId>
+                    <artifactId>fe-core</artifactId>
+                    <version>${starrocks.fe.version}</version>
+                    <scope>provided</scope>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <version>3.6.0</version>
+                        <executions>
+                            <execution>
+                                <id>add-starrocks-sources</id>
+                                <phase>generate-sources</phase>
+                                <goals><goal>add-source</goal></goals>
+                                <configuration>
+                                    <sources>
+                                        <source>src/starrocks/java</source>
+                                    </sources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>

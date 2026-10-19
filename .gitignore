@@ -1,0 +1,6 @@
+# build output
+**/target/
+# old packaged artifacts (binaries; rebuilt from source)
+/dist-out/
+/dist/trino-arrow-flight/plugin/
+*.log
