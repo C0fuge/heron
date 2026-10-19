@@ -26,6 +26,8 @@ public final class FlightConfig
     private final int maxRetries;
     private final long retryBackoffMillis;
     private final long requestTimeoutMillis;
+    private final long connectTimeoutMillis;
+    private final long keepAliveMillis;
 
     private FlightConfig(Builder b)
     {
@@ -44,6 +46,14 @@ public final class FlightConfig
         this.maxRetries = b.maxRetries;
         this.retryBackoffMillis = b.retryBackoffMillis;
         this.requestTimeoutMillis = b.requestTimeoutMillis;
+        if (b.connectTimeoutMillis < 0 || b.connectTimeoutMillis > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("connectTimeoutMillis out of range: " + b.connectTimeoutMillis);
+        }
+        if (b.keepAliveMillis < 0) {
+            throw new IllegalArgumentException("keepAliveMillis must not be negative: " + b.keepAliveMillis);
+        }
+        this.connectTimeoutMillis = b.connectTimeoutMillis;
+        this.keepAliveMillis = b.keepAliveMillis;
     }
 
     public static Builder builder(String host)
@@ -66,6 +76,13 @@ public final class FlightConfig
     public int getMaxRetries() { return maxRetries; }
     public long getRetryBackoffMillis() { return retryBackoffMillis; }
     public long getRequestTimeoutMillis() { return requestTimeoutMillis; }
+    /** TCP connect timeout of a data-stream connection, per location tried; 0 = Netty's default (30 s). */
+    public long getConnectTimeoutMillis() { return connectTimeoutMillis; }
+    /**
+     * Keepalive ping interval of data-stream connections to a server that lists backup locations;
+     * a node that does not answer a ping within the connect timeout is taken as gone. 0 = no pings.
+     */
+    public long getKeepAliveMillis() { return keepAliveMillis; }
 
     public static final class Builder
     {
@@ -84,6 +101,8 @@ public final class FlightConfig
         private int maxRetries = 3;
         private long retryBackoffMillis = 1000;
         private long requestTimeoutMillis;
+        private long connectTimeoutMillis = 5_000;
+        private long keepAliveMillis = 10_000;
 
         private Builder(String host)
         {
@@ -104,6 +123,8 @@ public final class FlightConfig
         public Builder maxRetries(int v) { this.maxRetries = v; return this; }
         public Builder retryBackoffMillis(long v) { this.retryBackoffMillis = v; return this; }
         public Builder requestTimeoutMillis(long v) { this.requestTimeoutMillis = v; return this; }
+        public Builder connectTimeoutMillis(long v) { this.connectTimeoutMillis = v; return this; }
+        public Builder keepAliveMillis(long v) { this.keepAliveMillis = v; return this; }
 
         public FlightConfig build()
         {

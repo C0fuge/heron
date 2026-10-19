@@ -5,6 +5,7 @@ import org.apache.arrow.flight.CallOptions;
 import org.apache.arrow.flight.FlightCallHeaders;
 import org.apache.arrow.flight.FlightClient;
 import org.apache.arrow.flight.FlightEndpoint;
+import org.apache.arrow.flight.FlightGrpcUtils;
 import org.apache.arrow.flight.FlightInfo;
 import org.apache.arrow.flight.FlightRuntimeException;
 import org.apache.arrow.flight.FlightStatusCode;
@@ -23,6 +24,11 @@ import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Schema;
+import io.grpc.netty.GrpcSslContexts;
+import io.grpc.netty.NettyChannelBuilder;
+import io.netty.channel.ChannelOption;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Deque;
 import java.util.Enumeration;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -56,6 +63,12 @@ import static java.util.Objects.requireNonNull;
  *
  * <p>The coordinator connection is opened lazily on first use, so a temporarily unreachable
  * server does not break connector/catalog creation.
+ *
+ * <p>A data stream is read from the endpoint's locations in order: when the first cannot be
+ * reached before any data was read, the next one is tried (see {@link FlightDataStream}). Data
+ * connections time out connecting after {@link FlightConfig#getConnectTimeoutMillis()}; with a
+ * server that lists backup locations they also send keepalive pings, so that a node that vanished
+ * without closing its connections is noticed within seconds instead of TCP's ~15 minutes.
  *
  * <p>Every data stream gets a connection to itself. gRPC keeps the bytes of all streams of one
  * HTTP/2 connection in one chain of buffers; with many parallel streams, some of them read
@@ -243,46 +256,62 @@ public class FlightSqlSession
     /**
      * Opens the Arrow stream for a single endpoint ticket on a connection of its own (reused
      * once the stream is closed). The coordinator-issued credential is forwarded on the
-     * getStream call.
+     * getStream call. The endpoint's locations are tried in order, see {@link FlightDataStream}.
      */
     public FlightDataStream openStream(byte[] ticket, List<String> locationUris)
     {
         ensureConnected();
         Ticket flightTicket = new Ticket(requireNonNull(ticket, "ticket is null"));
+        // Only a server that lists backup locations is known to accept keepalive pings; any other
+        // closes a connection that pings more often than every 5 minutes, with its streams.
+        boolean keepAlive = locationUris.size() > 1 && config.getKeepAliveMillis() > 0;
+        return new FlightDataStream(
+                streamLocations(locationUris),
+                uri -> openAt(flightTicket, uri, keepAlive),
+                (uri, e) -> {
+                    if (isConnectionLost(e)) {
+                        reconnect();
+                    }
+                });
+    }
 
-        String uri = streamLocation(locationUris);
+    private FlightDataStream.Opened openAt(Ticket ticket, String uri, boolean keepAlive)
+    {
+        String poolKey = keepAlive ? "keepalive " + uri : uri;
         int leasedGeneration = generation;
-        FlightClient client = leaseStreamClient(uri);
+        FlightClient client = leaseStreamClient(poolKey, uri, keepAlive);
         FlightStream stream;
         try {
-            stream = client.getStream(flightTicket, callOptions());
+            stream = client.getStream(ticket, callOptions());
         }
         catch (RuntimeException e) {
             closeQuietly(client);
             throw e;
         }
-        return new FlightDataStream(
-                stream,
-                e -> {
-                    if (isConnectionLost(e)) {
-                        reconnect();
-                    }
-                },
-                reusable -> releaseStreamClient(uri, client, reusable && leasedGeneration == generation));
+        return new FlightDataStream.Opened(stream,
+                reusable -> releaseStreamClient(poolKey, client, reusable && leasedGeneration == generation));
     }
 
-    /** The coordinator, unless every advertised location is another node. */
-    private String streamLocation(List<String> locationUris)
+    /**
+     * The locations to read an endpoint from, in order: the advertised ones, the coordinator by
+     * the address this catalog knows it by; the coordinator itself when none is advertised.
+     */
+    List<String> streamLocations(List<String> locationUris)
     {
-        if (!locationUris.isEmpty() && locationUris.stream().noneMatch(this::isCoordinator)) {
-            return locationUris.get(0);
+        String coordinator = (config.isTlsEnabled() ? "grpc+tls://" : "grpc+tcp://") + config.getHost() + ":" + config.getPort();
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        for (String uri : locationUris) {
+            result.add(isCoordinator(uri) ? coordinator : uri);
         }
-        return (config.isTlsEnabled() ? "grpc+tls://" : "grpc+tcp://") + config.getHost() + ":" + config.getPort();
+        if (result.isEmpty()) {
+            result.add(coordinator);
+        }
+        return List.copyOf(result);
     }
 
-    private FlightClient leaseStreamClient(String uri)
+    private FlightClient leaseStreamClient(String poolKey, String uri, boolean keepAlive)
     {
-        Deque<IdleClient> idle = idleStreamClients.get(uri);
+        Deque<IdleClient> idle = idleStreamClients.get(poolKey);
         if (idle != null) {
             IdleClient candidate;
             while ((candidate = idle.pollFirst()) != null) {
@@ -292,12 +321,12 @@ public class FlightSqlSession
                 closeQuietly(candidate.client());
             }
         }
-        return buildClient(location(uri), false);
+        return buildStreamClient(location(uri), keepAlive);
     }
 
-    private void releaseStreamClient(String uri, FlightClient client, boolean reusable)
+    private void releaseStreamClient(String poolKey, FlightClient client, boolean reusable)
     {
-        Deque<IdleClient> idle = idleStreamClients.computeIfAbsent(uri, key -> new ConcurrentLinkedDeque<>());
+        Deque<IdleClient> idle = idleStreamClients.computeIfAbsent(poolKey, key -> new ConcurrentLinkedDeque<>());
         if (!reusable || closed || idle.size() >= MAX_IDLE_STREAM_CLIENTS) {
             closeQuietly(client);
             return;
@@ -353,6 +382,55 @@ public class FlightSqlSession
         return builder.build();
     }
 
+    /**
+     * A data-stream connection: like {@link #buildClient} without middleware (same TLS settings),
+     * plus a connect timeout and, if asked, keepalive pings answered within the connect timeout.
+     */
+    private FlightClient buildStreamClient(Location location, boolean keepAlive)
+    {
+        String scheme = Optional.ofNullable(location.getUri().getScheme()).orElse("").toLowerCase(Locale.ROOT);
+        boolean tls = scheme.equals("grpc+tls");
+        if (!tls && !scheme.equals("grpc+tcp") && !scheme.equals("grpc")) {
+            // e.g. grpc+unix: Arrow's own builder knows how to reach it
+            return buildClient(location, false);
+        }
+        NettyChannelBuilder builder = NettyChannelBuilder.forAddress(location.toSocketAddress());
+        if (tls) {
+            builder.useTransportSecurity();
+            SslContextBuilder ssl = GrpcSslContexts.forClient();
+            Optional<byte[]> certs = trustedCertificates();
+            if (certs.isPresent()) {
+                ssl.trustManager(new ByteArrayInputStream(certs.get()));
+            }
+            else if (!config.isTlsVerifyServer()) {
+                ssl.trustManager(InsecureTrustManagerFactory.INSTANCE);
+            }
+            try {
+                builder.sslContext(ssl.build());
+            }
+            catch (javax.net.ssl.SSLException e) {
+                throw new RuntimeException("Cannot set up TLS for " + location.getUri() + ": " + e.getMessage(), e);
+            }
+        }
+        else {
+            builder.usePlaintext();
+        }
+        // as FlightClient.Builder: no trace events, no size limit on Arrow messages
+        builder.maxTraceEvents(0)
+                .maxInboundMessageSize(Integer.MAX_VALUE)
+                .maxInboundMetadataSize(Integer.MAX_VALUE);
+        long connectTimeout = config.getConnectTimeoutMillis();
+        if (connectTimeout > 0) {
+            builder.withOption(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) connectTimeout);
+        }
+        if (keepAlive) {
+            builder.keepAliveTime(config.getKeepAliveMillis(), TimeUnit.MILLISECONDS)
+                    .keepAliveTimeout(connectTimeout > 0 ? connectTimeout : 20_000, TimeUnit.MILLISECONDS)
+                    .keepAliveWithoutCalls(true);
+        }
+        return FlightGrpcUtils.createFlightClient(allocator, builder.build());
+    }
+
     private CredentialCallOption authenticate(FlightClient client)
     {
         List<CallOption> handshakeOptions = new ArrayList<>();
@@ -381,11 +459,14 @@ public class FlightSqlSession
 
     // This connector merges the parts each Flight node computes from its own files (parallel,
     // close to the data); the server's default for other clients is one complete answer.
+    // It also tries an endpoint's locations in order, so the server may list the node this
+    // catalog plans with as a backup of the other nodes' endpoints.
     private static final HeaderCallOption PARTIAL_RESULTS;
 
     static {
         FlightCallHeaders headers = new FlightCallHeaders();
         headers.insert("x-flight-result-mode", "partial");
+        headers.insert("x-flight-location-failover", "1");
         PARTIAL_RESULTS = new HeaderCallOption(headers);
     }
 

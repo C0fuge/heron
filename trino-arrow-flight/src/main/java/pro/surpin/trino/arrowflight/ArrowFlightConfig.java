@@ -35,6 +35,9 @@ public class ArrowFlightConfig
     private int maxRetries = 3;
     private long retryBackoffMillis = 1000;
     private long requestTimeoutMillis = 0;
+    // A data connection to a node that is gone fails after this long; the next location is tried.
+    private long connectTimeoutMillis = 5_000;
+    private long keepAliveMillis = 10_000;
 
     // Empty by default: the reference server parses SQL with regexes and expects bare
     // schema.table / column names. Set to "\"" only if your server accepts quoted identifiers.
@@ -247,6 +250,34 @@ public class ArrowFlightConfig
         return this;
     }
 
+    @Min(0)
+    public long getConnectTimeoutMillis()
+    {
+        return connectTimeoutMillis;
+    }
+
+    @Config("arrow-flight.connect-timeout-millis")
+    @ConfigDescription("Connect timeout of a data stream per endpoint location; on timeout or refusal before any data the next location is tried. 0 = Netty default (30 s)")
+    public ArrowFlightConfig setConnectTimeoutMillis(long connectTimeoutMillis)
+    {
+        this.connectTimeoutMillis = connectTimeoutMillis;
+        return this;
+    }
+
+    @Min(0)
+    public long getKeepAliveMillis()
+    {
+        return keepAliveMillis;
+    }
+
+    @Config("arrow-flight.keepalive-millis")
+    @ConfigDescription("Keepalive ping interval of data streams from servers that list backup locations; a node that does not answer within the connect timeout is taken as gone. 0 = no pings")
+    public ArrowFlightConfig setKeepAliveMillis(long keepAliveMillis)
+    {
+        this.keepAliveMillis = keepAliveMillis;
+        return this;
+    }
+
     public String getIdentifierQuote()
     {
         return identifierQuote;
@@ -412,6 +443,8 @@ public class ArrowFlightConfig
                 .maxRetries(maxRetries)
                 .retryBackoffMillis(retryBackoffMillis)
                 .requestTimeoutMillis(requestTimeoutMillis)
+                .connectTimeoutMillis(connectTimeoutMillis)
+                .keepAliveMillis(keepAliveMillis)
                 .build();
     }
 }

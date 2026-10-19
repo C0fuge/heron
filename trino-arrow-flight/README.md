@@ -135,6 +135,8 @@ return correct results against 50k rows.
 | `arrow-flight.max-retries` | `3` | |
 | `arrow-flight.retry-backoff-millis` | `1000` | exponential |
 | `arrow-flight.request-timeout-millis` | `0` | `0` = no deadline |
+| `arrow-flight.connect-timeout-millis` | `5000` | connect timeout of a data stream, per endpoint location. When a location refuses, times out or drops the connection **before any data was read**, the endpoint's next location (a backup node the server lists, server fo1+) is read instead; after the first batch a failure is final (no duplicate rows). `0` = Netty default (30 s) |
+| `arrow-flight.keepalive-millis` | `10000` | keepalive pings on data streams of servers that list backup locations (they accept pings every 5 s); a node that does not answer within the connect timeout counts as gone, so a vanished node costs seconds, not TCP's ~15 min. `0` = no pings |
 
 ## Limitations / TODO
 

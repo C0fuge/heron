@@ -47,5 +47,24 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- tests run in-process Flight servers -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-netty</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- Arrow needs off-heap access, as in Trino's jvm.config -->
+                    <argLine>--add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true</argLine>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

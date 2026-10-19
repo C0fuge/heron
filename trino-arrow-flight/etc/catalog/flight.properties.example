@@ -20,3 +20,7 @@ arrow-flight.bearer-token=test-token
 # arrow-flight.max-retries=3
 # arrow-flight.retry-backoff-millis=1000
 # arrow-flight.request-timeout-millis=0
+# Data streams: per-location connect timeout; on refusal/timeout before any data the endpoint's
+# next location (backup node) is tried. Keepalive pings only to servers that list backups.
+# arrow-flight.connect-timeout-millis=5000
+# arrow-flight.keepalive-millis=10000
