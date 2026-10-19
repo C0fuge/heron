@@ -80,6 +80,10 @@ class FlightSqlSessionFailoverTest
                     return;
                 }
             }
+            if (stopping) {
+                listener.error(CallStatus.CANCELLED.withDescription("shutting down").toRuntimeException());
+                return;
+            }
             if (mode == Mode.FAIL_UNAVAILABLE) {
                 listener.error(CallStatus.UNAVAILABLE.withDescription("going away").toRuntimeException());
                 return;
