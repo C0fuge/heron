@@ -12,6 +12,9 @@ on:
       result-mode:
         description: 'Server result mode (partial or complete)'
         default: 'partial'
+      servers:
+        description: 'Flight servers: 1, 3 (cluster + failover checks) or both'
+        default: 'both'
   push:
     branches: [main, 'claude/**']
     paths:
@@ -23,7 +26,7 @@ on:
       - '.github/workflows/e2e.yml'
 
 concurrency:
-  group: e2e-${{ github.ref }}
+  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}
   cancel-in-progress: true
 
 # contents: write only because e2e-assets is a draft release (drafts are invisible to read tokens).
@@ -34,7 +37,12 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        servers: ${{ fromJSON((inputs.servers == '1' && '[1]') || (inputs.servers == '3' && '[3]') || '[1,3]') }}
     env:
+      SERVERS: ${{ matrix.servers }}
       TRINO_VERSION: ${{ inputs.trino || '455' }}
       RESULT_MODE: ${{ inputs.result-mode || 'partial' }}
     steps:
@@ -66,6 +74,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-${{ env.TRINO_VERSION }}-${{ env.RESULT_MODE }}
+          name: e2e-${{ env.TRINO_VERSION }}-${{ env.RESULT_MODE }}-${{ matrix.servers }}srv
           path: ${{ runner.temp }}/out/
           retention-days: 7

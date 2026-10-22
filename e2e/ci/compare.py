@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare Trino TSV answers with the DuckDB reference answers in e2e/ci/reference/<sf>.
 
-    compare.py <reference-dir> <actual-dir> <queries-dir> <summary.tsv>
+    compare.py <reference-dir> <actual-dir> <queries-dir> <summary.tsv> ["q01 q03 ..."]
 
 Normalisation (same as the reference generator): numeric cells are compared after rounding to
 4 decimal places (doubles also pass within a relative 1e-9); rows are sorted unless the query has
@@ -92,6 +92,8 @@ def compare(name, ref_dir, act_dir, q_dir):
 def main():
     ref_dir, act_dir, q_dir, summary = sys.argv[1:5]
     names = sorted(f[:-4] for f in os.listdir(q_dir) if f.endswith(".sql"))
+    if len(sys.argv) > 5:
+        names = [n for n in names if n in sys.argv[5].replace(",", " ").split()]
     failed = 0
     with open(summary, "w", encoding="utf-8") as out:
         out.write("query\tresult\tdetail\n")

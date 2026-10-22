@@ -3,7 +3,11 @@
 # compared with e2e/ci/reference/sf1.
 #
 #   ASSETS=<dir with the e2e-assets release files>  PLUGIN_ZIP=<plugin zip>  OUT=<results dir>
-#   TRINO_VERSION=455  RESULT_MODE=partial  e2e/ci/run-e2e.sh
+#   TRINO_VERSION=455  RESULT_MODE=partial  SERVERS=1|3  e2e/ci/run-e2e.sh
+#
+# SERVERS=3 forms a cluster (backup locations) and then checks endpoint failover: a node killed
+# before the queries (answers must still be exact) and a node killed during a read (clean error or
+# exact answer, never wrong rows).
 #
 # Docker on the host (GitHub runner); S3 = rclone serve s3; everything on the private network 'afe2e'.
 # Credentials (S3, Flight token) are throwaway values generated per run.
@@ -12,6 +16,8 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 ASSETS="${ASSETS:?}"; PLUGIN_ZIP="${PLUGIN_ZIP:?}"; OUT="${OUT:?}"
 TRINO_VERSION="${TRINO_VERSION:-455}"; RESULT_MODE="${RESULT_MODE:-partial}"
+SERVERS="${SERVERS:-1}"; SERVER_HEAP="${SERVER_HEAP:-2g}"
+FAILOVER_QUERIES="${FAILOVER_QUERIES:-q01 q03 q05 q06 q18}"
 WORK="${WORK:-$(mktemp -d)}"
 NET=afe2e
 DUCKDB_EXT_VERSION=v1.4.5
@@ -59,27 +65,34 @@ for i in $(seq 1 30); do aws --endpoint-url http://127.0.0.1:9000 s3 ls s3://lak
 aws --endpoint-url http://127.0.0.1:9000 s3 ls --recursive s3://lake/parquet/ > "$WORK/s3-listing.txt"
 head -5 "$WORK/s3-listing.txt"; wc -l < "$WORK/s3-listing.txt"
 
-log "flight server (result mode $RESULT_MODE)"
-mkdir -p "$WORK/flight1"  # writable cwd: DuckDB temp dir (.tmp)
-docker run -d --name flight1 --network $NET \
-  -v "$WORK/server":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro \
-  -v "$WORK/flight1":/work -w /work \
-  -e LANG=C.UTF-8 -e FLIGHT_S3_ACCESS_KEY="$S3_KEY" -e FLIGHT_S3_SECRET_KEY="$S3_SECRET" \
-  -e FLIGHT_AUTH_PROVIDER=token -e FLIGHT_AUTH_TOKEN="$TOKEN" \
-  eclipse-temurin:21-jdk \
-  java --add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true \
-       -DdataDir=s3://lake/parquet -Ds3Endpoint=http://s3:9000 -Ds3UrlStyle=path -Ds3Region=us-east-1 -Darrowflight.plugins.dir=/app/plugins \
-       -Darrowflight.duckdb.extensionDir=/ext/duckdb-home/extensions \
-       -DresultMode="$RESULT_MODE" \
-       -cp "/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
-       --port 32010 --localhost flight1 --hosts flight1 >/dev/null
-for i in $(seq 1 90); do
-  grep -q 'Server Arrow Flight SQL started' <(docker logs flight1 2>&1) && break
-  docker ps -q -f name=flight1 -f status=running | grep -q . || break
-  sleep 2
-done
-docker logs flight1 > "$OUT/flight1.log" 2>&1 || true
-grep -q 'Server Arrow Flight SQL started' "$OUT/flight1.log" || { tail -50 "$OUT/flight1.log"; exit 1; }
+HOSTS="$(seq -s, -f 'flight%g' 1 "$SERVERS")"
+log "flight servers $HOSTS (result mode $RESULT_MODE)"
+start_server() {  # name
+  mkdir -p "$WORK/$1"  # writable cwd: DuckDB temp dir (.tmp)
+  docker run -d --name "$1" --network $NET \
+    -v "$WORK/server":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro \
+    -v "$WORK/$1":/work -w /work \
+    -e LANG=C.UTF-8 -e FLIGHT_S3_ACCESS_KEY="$S3_KEY" -e FLIGHT_S3_SECRET_KEY="$S3_SECRET" \
+    -e FLIGHT_AUTH_PROVIDER=token -e FLIGHT_AUTH_TOKEN="$TOKEN" \
+    eclipse-temurin:21-jdk \
+    java -Xmx$SERVER_HEAP --add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true \
+         -DdataDir=s3://lake/parquet -Ds3Endpoint=http://s3:9000 -Ds3UrlStyle=path -Ds3Region=us-east-1 \
+         -Darrowflight.plugins.dir=/app/plugins -Darrowflight.duckdb.extensionDir=/ext/duckdb-home/extensions \
+         -DresultMode="$RESULT_MODE" \
+         -cp "/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
+         --port 32010 --localhost "$1" --hosts "$HOSTS" >/dev/null
+}
+wait_server() {  # name
+  for i in $(seq 1 90); do
+    grep -q 'Server Arrow Flight SQL started' <(docker logs "$1" 2>&1) && break
+    docker ps -q -f name="$1" -f status=running | grep -q . || break
+    sleep 2
+  done
+  docker logs "$1" > "$OUT/$1.log" 2>&1 || true
+  grep -q 'Server Arrow Flight SQL started' "$OUT/$1.log" || { tail -50 "$OUT/$1.log"; exit 1; }
+}
+for h in ${HOSTS//,/ }; do start_server "$h"; done
+for h in ${HOSTS//,/ }; do wait_server "$h"; done
 
 log "trino $TRINO_VERSION"
 mkdir -p "$WORK/etc/catalog"
@@ -111,18 +124,49 @@ for i in $(seq 1 90); do
 done
 docker exec trino trino --execute 'SHOW SCHEMAS FROM flight' | tee "$OUT/schemas.txt"
 
-log "TPC-H SF1"
-mkdir -p "$OUT/sf1"
-for q in "$REPO"/e2e/ci/queries/q*.sql; do
-  n="$(basename "$q" .sql)"; start=$(date +%s.%N)
-  if docker exec trino trino --catalog flight --schema tpch --output-format TSV -f "/queries/$n.sql" \
-       > "$OUT/sf1/$n.tsv" 2> "$OUT/sf1/$n.err"; then
-    rm -f "$OUT/sf1/$n.err"
+run_query() {  # query-name out-dir
+  local start; start=$(date +%s.%N)
+  if docker exec trino trino --catalog flight --schema tpch --output-format TSV -f "/queries/$1.sql" \
+       > "$2/$1.tsv" 2> "$2/$1.err"; then
+    rm -f "$2/$1.err"
   else
-    rm -f "$OUT/sf1/$n.tsv"
+    rm -f "$2/$1.tsv"
   fi
-  printf '%s\t%.2f\n' "$n" "$(echo "$(date +%s.%N) - $start" | bc)" >> "$OUT/sf1-times.tsv"
-done
-docker logs trino > "$OUT/trino.log" 2>&1 || true
-docker logs flight1 > "$OUT/flight1.log" 2>&1 || true
-python3 "$REPO/e2e/ci/compare.py" "$REPO/e2e/ci/reference/sf1" "$OUT/sf1" "$REPO/e2e/ci/queries" "$OUT/sf1-summary.tsv"
+  printf '%s\t%s\t%.2f\n' "$(basename "$2")" "$1" "$(echo "$(date +%s.%N) - $start" | bc)" >> "$OUT/times.tsv"
+}
+save_logs() { for c in trino ${HOSTS//,/ }; do docker logs "$c" > "$OUT/$c.log" 2>&1 || true; done; }
+COMPARE=(python3 "$REPO/e2e/ci/compare.py" "$REPO/e2e/ci/reference/sf1")
+QUERIES="$REPO/e2e/ci/queries"
+
+log "TPC-H SF1 ($SERVERS server(s))"
+mkdir -p "$OUT/sf1"
+for q in "$QUERIES"/q*.sql; do run_query "$(basename "$q" .sql)" "$OUT/sf1"; done
+save_logs
+status=0
+"${COMPARE[@]}" "$OUT/sf1" "$QUERIES" "$OUT/sf1-summary.tsv" || status=1
+
+if [ "$SERVERS" -ge 3 ]; then
+  # Node lost before a query: the endpoints it served must be read from their backup locations.
+  log "failover: flight2 killed before the queries"
+  docker kill flight2 >/dev/null
+  sleep "${KILL_SETTLE_SECONDS:-10}"
+  mkdir -p "$OUT/killed-before"
+  for q in $FAILOVER_QUERIES; do run_query "$q" "$OUT/killed-before"; done
+  "${COMPARE[@]}" "$OUT/killed-before" "$QUERIES" "$OUT/killed-before-summary.tsv" "$FAILOVER_QUERIES" || status=1
+
+  # Node lost while a query reads from it: a clean error or the exact answer, never wrong rows.
+  log "failover: flight3 killed during a read"
+  mkdir -p "$OUT/killed-during"
+  run_query q18 "$OUT/killed-during" &
+  sleep "${KILL_DURING_DELAY_SECONDS:-2}"
+  docker kill flight3 >/dev/null
+  wait
+  if [ -f "$OUT/killed-during/q18.tsv" ]; then
+    "${COMPARE[@]}" "$OUT/killed-during" "$QUERIES" "$OUT/killed-during-summary.tsv" q18 || status=1
+  else
+    printf 'query\tresult\tdetail\nq18\tOK\tclean error: %s\n' \
+      "$(grep -m1 -E 'Query .* failed|ERROR' "$OUT/killed-during/q18.err" | cut -c1-200)" | tee "$OUT/killed-during-summary.tsv"
+  fi
+  save_logs
+fi
+exit $status
