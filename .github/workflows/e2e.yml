@@ -1,0 +1,71 @@
+name: e2e
+
+# End-to-end: MinIO + Flight SQL server (release e2e-assets) + Trino with this plugin, TPC-H SF1
+# vs e2e/ci/reference/sf1. Runs on request, and on pushes that change plugin code or the e2e setup
+# (Actions minutes are limited).
+on:
+  workflow_dispatch:
+    inputs:
+      trino:
+        description: 'Trino version (455, 477, 483)'
+        default: '455'
+      result-mode:
+        description: 'Server result mode (partial or complete)'
+        default: 'partial'
+  push:
+    branches: [main, 'claude/**']
+    paths:
+      - 'arrow-flight-common/src/main/**'
+      - 'trino-arrow-flight/src/**'
+      - '**/pom.xml'
+      - 'e2e/ci/*.sh'
+      - 'e2e/ci/*.py'
+      - '.github/workflows/e2e.yml'
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+# contents: write only because e2e-assets is a draft release (drafts are invisible to read tokens).
+permissions:
+  contents: write
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TRINO_VERSION: ${{ inputs.trino || '455' }}
+      RESULT_MODE: ${{ inputs.result-mode || 'partial' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Build plugin
+        run: mvn -B -ntp -P trino-$TRINO_VERSION -DskipTests clean package
+      - name: Download e2e assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/assets"
+          gh api "repos/$GITHUB_REPOSITORY/releases" \
+            --jq '.[] | select(.tag_name == "e2e-assets") | .assets[] | "\(.id) \(.name)"' |
+          while read -r id name; do
+            gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "$RUNNER_TEMP/assets/$name"
+          done
+          cd "$RUNNER_TEMP/assets" && ls -l && sha256sum --check --ignore-missing SHA256SUMS
+      - name: Run e2e
+        run: |
+          ASSETS="$RUNNER_TEMP/assets" OUT="$RUNNER_TEMP/out" WORK="$RUNNER_TEMP/work" \
+          PLUGIN_ZIP="$(ls trino-arrow-flight/target/trino-arrow-flight-*.zip)" \
+          e2e/ci/run-e2e.sh
+      - name: Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ env.TRINO_VERSION }}-${{ env.RESULT_MODE }}
+          path: ${{ runner.temp }}/out/
+          retention-days: 7
