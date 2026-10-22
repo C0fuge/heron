@@ -1,0 +1,54 @@
+name: build
+
+# Maven build + unit tests. Trino 455 on every push that touches code; 477/483 only on request
+# (workflow_dispatch with all-versions=true) to save Actions minutes.
+on:
+  push:
+    branches: [main, 'claude/**']
+    paths-ignore: ['docs/**', '**.md', 'e2e/ci/reference/**']
+  workflow_dispatch:
+    inputs:
+      all-versions:
+        description: 'Also build Trino 477 and 483'
+        type: boolean
+        default: false
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        trino: ${{ fromJSON(inputs.all-versions && '["455","477","483"]' || '["455"]') }}
+    steps:
+      - uses: actions/checkout@v4
+      # JDK 25: the trino-maven-plugin (packaging 'trino-plugin') is compiled for Java 25.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Build and unit-test (Trino ${{ matrix.trino }})
+        run: mvn -B -ntp -P trino-${{ matrix.trino }} clean verify
+      - name: Upload plugin zip
+        if: matrix.trino == '455'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trino-arrow-flight-${{ matrix.trino }}
+          path: trino-arrow-flight/target/trino-arrow-flight-*.zip
+          retention-days: 5
+      - name: Test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-${{ matrix.trino }}
+          path: '**/target/surefire-reports/'
+          retention-days: 5
