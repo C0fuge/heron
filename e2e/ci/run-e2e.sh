@@ -7,8 +7,10 @@
 #   TRINO_VERSION=455  RESULT_MODE=partial  SERVERS=1|3  SERVER_BUILD=int4|int5  e2e/ci/run-e2e.sh
 #
 # SERVERS=3 forms a cluster (backup locations) and then checks endpoint failover: a node killed
-# before the queries (answers must still be exact) and a node killed during a read (clean error or
-# exact answer, never wrong rows).
+# before the queries (answers must still be exact, and in partial mode the plugin log must show
+# its streams re-read from backup locations), a node killed during a read (clean error or exact
+# answer, never wrong rows; retried with other delays until the kill hits a read of that node),
+# and two of three nodes down (exact or clean error).
 #
 # Docker on the host (GitHub runner); S3 = rclone serve s3; everything on the private network 'afe2e'.
 # Credentials (S3, Flight token) are throwaway values generated per run.
@@ -155,28 +157,83 @@ if [ -n "$TYPES" ]; then
   save_logs
 fi
 
+# Trino log lines written since mark_log (plugin WARNs about failed streams name the location).
+mark_log() { LOG_MARK=$(docker logs trino 2>&1 | wc -l); }
+log_since_mark() { docker logs trino 2>&1 | tail -n +$((LOG_MARK + 1)); }
+FAILOVER_MARKER='Flight stream at .* failed before any data'
+# exact answers or clean errors for the given queries in dir $1 -> summary $2
+check_exact_or_error() {  # dir summary queries...
+  local dir=$1 summary=$2; shift 2
+  local ok=() q
+  for q in "$@"; do [ -f "$dir/$q.tsv" ] && ok+=("$q"); done
+  printf 'query\tresult\tdetail\n' > "$summary"
+  if [ ${#ok[@]} -gt 0 ]; then
+    "${COMPARE[@]}" "$dir" "$QUERIES" "$dir/compare.tsv" "${ok[*]}" || status=1
+    tail -n +2 "$dir/compare.tsv" >> "$summary"
+  fi
+  for q in "$@"; do
+    [ -f "$dir/$q.tsv" ] && continue
+    printf '%s\tOK\tclean error: %s\n' "$q" \
+      "$(grep -m1 -E 'Query .* failed|ERROR' "$dir/$q.err" | cut -c1-200)" >> "$summary"
+  done
+  cat "$summary"
+}
+
 if [ "$SERVERS" -ge 3 ]; then
   # Node lost before a query: the endpoints it served must be read from their backup locations.
+  # Evidence: the plugin's "failed before any data; reading it from <backup>" WARN naming flight2.
   log "failover: flight2 killed before the queries"
   docker kill flight2 >/dev/null
   sleep "${KILL_SETTLE_SECONDS:-10}"
   mkdir -p "$OUT/killed-before"
+  mark_log
   for q in $FAILOVER_QUERIES; do run_query "$q" "$OUT/killed-before"; done
   "${COMPARE[@]}" "$OUT/killed-before" "$QUERIES" "$OUT/killed-before-summary.tsv" "$FAILOVER_QUERIES" || status=1
+  log_since_mark | grep -E "$FAILOVER_MARKER" > "$OUT/killed-before/failover-lines.txt" || true
+  n=$(grep -c 'flight2' "$OUT/killed-before/failover-lines.txt" || true)
+  echo "killed-before: $n stream(s) of flight2 read from a backup location"
+  head -3 "$OUT/killed-before/failover-lines.txt" | cut -c1-300
+  # Only partial mode hands out one endpoint per node; complete mode may never read flight2 directly.
+  evidence=$([ "$n" -gt 0 ] && echo OK || { [ "$RESULT_MODE" = partial ] && echo FAIL || echo INFO; })
+  printf 'backup-reads\t%s\t%s stream(s) at flight2 re-read from a backup location\n' "$evidence" "$n" \
+    >> "$OUT/killed-before-summary.tsv"
+  [ "$evidence" != FAIL ] || status=1
 
   # Node lost while a query reads from it: a clean error or the exact answer, never wrong rows.
+  # The kill must hit a read of flight3: evidence is a failed query or a Trino log line naming
+  # flight3 after the kill; otherwise flight3 is restarted and the kill retried with the next delay.
   log "failover: flight3 killed during a read"
-  mkdir -p "$OUT/killed-during"
-  run_query q18 "$OUT/killed-during" &
-  sleep "${KILL_DURING_DELAY_SECONDS:-2}"
-  docker kill flight3 >/dev/null
-  wait
-  if [ -f "$OUT/killed-during/q18.tsv" ]; then
-    "${COMPARE[@]}" "$OUT/killed-during" "$QUERIES" "$OUT/killed-during-summary.tsv" q18 || status=1
-  else
-    printf 'query\tresult\tdetail\nq18\tOK\tclean error: %s\n' \
-      "$(grep -m1 -E 'Query .* failed|ERROR' "$OUT/killed-during/q18.err" | cut -c1-200)" | tee "$OUT/killed-during-summary.tsv"
-  fi
+  printf 'attempt\tdelay_s\tq18\tflight3_hit\n' > "$OUT/killed-during-attempts.tsv"
+  attempt=0; hit=no
+  for delay in ${KILL_DURING_DELAYS:-2 1 4 6}; do
+    attempt=$((attempt + 1))
+    dir="$OUT/killed-during/$attempt"; mkdir -p "$dir"
+    if [ "$attempt" -gt 1 ]; then
+      docker rm -f flight3 >/dev/null; start_server flight3; wait_server flight3; sleep 5
+    fi
+    mark_log
+    run_query q18 "$dir" &
+    sleep "$delay"
+    docker kill flight3 >/dev/null
+    wait
+    check_exact_or_error "$dir" "$dir/summary.tsv" q18
+    result=$([ -f "$dir/q18.tsv" ] && echo answer || echo error)
+    if [ "$result" = error ] || grep -q 'flight3' <(log_since_mark); then hit=yes; fi
+    log_since_mark | grep -E 'flight3' | head -5 | cut -c1-300 > "$dir/flight3-lines.txt" || true
+    printf '%s\t%s\t%s\t%s\n' "$attempt" "$delay" "$result" "$hit" | tee -a "$OUT/killed-during-attempts.tsv"
+    [ "$hit" = yes ] && break
+  done
+  evidence=$([ "$hit" = yes ] && echo OK || { [ "$RESULT_MODE" = partial ] && echo FAIL || echo INFO; })
+  { printf 'query\tresult\tdetail\n'
+    printf 'q18\t%s\t%s attempt(s), all exact or clean errors; kill hit a read of flight3: %s\n' \
+      "$evidence" "$attempt" "$hit"; } | tee "$OUT/killed-during-summary.tsv"
+  [ "$evidence" != FAIL ] || status=1
+
+  # Two of three nodes lost (flight2 and flight3): every answer exact, or a clean error.
+  log "failover: flight2 and flight3 down"
+  mkdir -p "$OUT/two-killed"
+  for q in $FAILOVER_QUERIES; do run_query "$q" "$OUT/two-killed"; done
+  check_exact_or_error "$OUT/two-killed" "$OUT/two-killed-summary.tsv" $FAILOVER_QUERIES
   save_logs
 fi
 exit $status
