@@ -181,22 +181,31 @@ check_exact_or_error() {  # dir summary queries...
 
 if [ "$SERVERS" -ge 3 ]; then
   # Node lost before a query: the endpoints it served must be read from their backup locations.
-  # Evidence: the plugin's "failed before any data; reading it from <backup>" WARN naming flight2.
+  # Round 1 right after the kill (the server still lists the node: the plugin must fail over;
+  # evidence is its "failed before any data; reading it from <backup>" WARN naming flight2),
+  # round 2 after KILL_SETTLE_SECONDS (the cluster has noticed). Both must be exact.
   log "failover: flight2 killed before the queries"
   docker kill flight2 >/dev/null
-  sleep "${KILL_SETTLE_SECONDS:-10}"
-  mkdir -p "$OUT/killed-before"
-  mark_log
-  for q in $FAILOVER_QUERIES; do run_query "$q" "$OUT/killed-before"; done
-  "${COMPARE[@]}" "$OUT/killed-before" "$QUERIES" "$OUT/killed-before-summary.tsv" "$FAILOVER_QUERIES" || status=1
-  log_since_mark | grep -E "$FAILOVER_MARKER" > "$OUT/killed-before/failover-lines.txt" || true
-  n=$(grep -c 'flight2' "$OUT/killed-before/failover-lines.txt" || true)
-  echo "killed-before: $n stream(s) of flight2 read from a backup location"
-  head -3 "$OUT/killed-before/failover-lines.txt" | cut -c1-300
+  n=0
+  for round in now settled; do
+    [ "$round" = settled ] && sleep "${KILL_SETTLE_SECONDS:-10}"
+    dir="$OUT/killed-before/$round"; mkdir -p "$dir"
+    mark_log
+    for q in $FAILOVER_QUERIES; do run_query "$q" "$dir"; done
+    "${COMPARE[@]}" "$dir" "$QUERIES" "$dir/summary.tsv" "$FAILOVER_QUERIES" || status=1
+    log_since_mark | grep -E 'flight2' > "$dir/flight2-lines.txt" || true
+    m=$(grep -cE "$FAILOVER_MARKER" "$dir/flight2-lines.txt" || true)
+    echo "killed-before/$round: $m stream(s) of flight2 re-read from a backup location;" \
+      "$(wc -l < "$dir/flight2-lines.txt") Trino log line(s) name flight2:"
+    head -5 "$dir/flight2-lines.txt" | cut -c1-400
+    n=$((n + m))
+  done
   # Only partial mode hands out one endpoint per node; complete mode may never read flight2 directly.
   evidence=$([ "$n" -gt 0 ] && echo OK || { [ "$RESULT_MODE" = partial ] && echo FAIL || echo INFO; })
-  printf 'backup-reads\t%s\t%s stream(s) at flight2 re-read from a backup location\n' "$evidence" "$n" \
-    >> "$OUT/killed-before-summary.tsv"
+  { tail -n +2 "$OUT/killed-before/now/summary.tsv" | sed 's/^/now:/'
+    tail -n +2 "$OUT/killed-before/settled/summary.tsv" | sed 's/^/settled:/'
+    printf 'backup-reads\t%s\t%s stream(s) at flight2 re-read from a backup location\n' "$evidence" "$n"
+  } > "$OUT/killed-before-summary.tsv"
   [ "$evidence" != FAIL ] || status=1
 
   # Node lost while a query reads from it: a clean error or the exact answer, never wrong rows.
@@ -219,7 +228,8 @@ if [ "$SERVERS" -ge 3 ]; then
     check_exact_or_error "$dir" "$dir/summary.tsv" q18
     result=$([ -f "$dir/q18.tsv" ] && echo answer || echo error)
     if [ "$result" = error ] || grep -q 'flight3' <(log_since_mark); then hit=yes; fi
-    log_since_mark | grep -E 'flight3' | head -5 | cut -c1-300 > "$dir/flight3-lines.txt" || true
+    log_since_mark | grep -E 'flight3' > "$dir/flight3-lines.txt" || true
+    head -5 "$dir/flight3-lines.txt" | cut -c1-400
     printf '%s\t%s\t%s\t%s\n' "$attempt" "$delay" "$result" "$hit" | tee -a "$OUT/killed-during-attempts.tsv"
     [ "$hit" = yes ] && break
   done
