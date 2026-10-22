@@ -1,0 +1,23 @@
+query	result	detail
+q01	OK	OK 4 rows, 40/40 cells textually identical, others DOUBLE within rel 0.0e+00
+q02	OK	OK 100 rows, 800/800 cells textually identical, others DOUBLE within rel 0.0e+00
+q03	OK	OK 10 rows, 40/40 cells textually identical, others DOUBLE within rel 0.0e+00
+q04	OK	OK 5 rows, 10/10 cells textually identical, others DOUBLE within rel 0.0e+00
+q05	OK	OK 5 rows, 10/10 cells textually identical, others DOUBLE within rel 0.0e+00
+q06	OK	OK 1 rows, 1/1 cells textually identical, others DOUBLE within rel 0.0e+00
+q07	OK	OK 4 rows, 16/16 cells textually identical, others DOUBLE within rel 0.0e+00
+q08	OK	OK 2 rows, 4/4 cells textually identical, others DOUBLE within rel 0.0e+00
+q09	OK	OK 175 rows, 525/525 cells textually identical, others DOUBLE within rel 0.0e+00
+q10	OK	OK 20 rows, 160/160 cells textually identical, others DOUBLE within rel 0.0e+00
+q11	OK	OK 1048 rows, 2096/2096 cells textually identical, others DOUBLE within rel 0.0e+00
+q12	OK	OK 2 rows, 6/6 cells textually identical, others DOUBLE within rel 0.0e+00
+q13	OK	OK 42 rows, 84/84 cells textually identical, others DOUBLE within rel 0.0e+00
+q14	OK	OK 1 rows, 1/1 cells textually identical, others DOUBLE within rel 0.0e+00
+q15	OK	OK 1 rows, 5/5 cells textually identical, others DOUBLE within rel 0.0e+00
+q16	OK	OK 18314 rows, 73256/73256 cells textually identical, others DOUBLE within rel 0.0e+00
+q17	OK	OK 1 rows, 1/1 cells textually identical, others DOUBLE within rel 0.0e+00
+q18	OK	OK 57 rows, 342/342 cells textually identical, others DOUBLE within rel 0.0e+00
+q19	OK	OK 1 rows, 1/1 cells textually identical, others DOUBLE within rel 0.0e+00
+q20	OK	OK 186 rows, 372/372 cells textually identical, others DOUBLE within rel 0.0e+00
+q21	OK	OK 100 rows, 200/200 cells textually identical, others DOUBLE within rel 0.0e+00
+q22	OK	OK 7 rows, 21/21 cells textually identical, others DOUBLE within rel 0.0e+00

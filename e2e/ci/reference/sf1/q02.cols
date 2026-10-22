@@ -1,0 +1,8 @@
+s_acctbal	DECIMAL(15,2)	key
+s_name	VARCHAR	key
+n_name	VARCHAR	key
+p_partkey	BIGINT	key
+p_mfgr	VARCHAR	
+s_address	VARCHAR	
+s_phone	VARCHAR	
+s_comment	VARCHAR	

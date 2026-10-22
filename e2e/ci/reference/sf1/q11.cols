@@ -1,0 +1,2 @@
+ps_partkey	BIGINT	
+value	DECIMAL(38,2)	key

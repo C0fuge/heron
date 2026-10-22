@@ -1,0 +1,4 @@
+supp_nation	VARCHAR	key
+cust_nation	VARCHAR	key
+l_year	BIGINT	key
+revenue	DECIMAL(38,4)	

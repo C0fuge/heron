@@ -1,0 +1,6 @@
+c_name	VARCHAR	
+c_custkey	BIGINT	
+o_orderkey	BIGINT	
+o_orderdate	DATE	key
+o_totalprice	DECIMAL(15,2)	key
+sum(l_quantity)	DECIMAL(38,2)	

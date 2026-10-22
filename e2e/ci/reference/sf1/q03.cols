@@ -1,0 +1,4 @@
+l_orderkey	BIGINT	
+revenue	DECIMAL(38,4)	key
+o_orderdate	DATE	key
+o_shippriority	INTEGER	

@@ -1,0 +1,3 @@
+cntrycode	VARCHAR	key
+numcust	BIGINT	
+totacctbal	DECIMAL(38,2)	

@@ -5,7 +5,7 @@ StarRocks has no connector plugin SPI — connectors are hardcoded in the
 must patch the FE source and rebuild.
 
 ```bash
-SR=$HOME/src/starrocks        # your StarRocks checkout
+SR=<path to your StarRocks checkout>
 
 # 1. drop the FE-side connector classes into the source tree
 mkdir -p "$SR/fe/fe-core/src/main/java/com/starrocks/connector/arrowflight"

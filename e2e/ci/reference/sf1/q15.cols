@@ -1,0 +1,5 @@
+s_suppkey	BIGINT	key
+s_name	VARCHAR	
+s_address	VARCHAR	
+s_phone	VARCHAR	
+total_revenue	DECIMAL(38,4)	

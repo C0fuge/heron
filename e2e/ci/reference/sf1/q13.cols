@@ -1,0 +1,2 @@
+c_count	BIGINT	key
+custdist	BIGINT	key

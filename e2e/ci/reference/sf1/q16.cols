@@ -1,0 +1,4 @@
+p_brand	VARCHAR	key
+p_type	VARCHAR	key
+p_size	INTEGER	key
+supplier_cnt	BIGINT	key

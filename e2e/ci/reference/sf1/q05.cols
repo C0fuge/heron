@@ -1,0 +1,2 @@
+n_name	VARCHAR	
+revenue	DECIMAL(38,4)	key

@@ -1,0 +1,10 @@
+l_returnflag	VARCHAR	key
+l_linestatus	VARCHAR	key
+sum_qty	DECIMAL(38,2)	
+sum_base_price	DECIMAL(38,2)	
+sum_disc_price	DECIMAL(38,4)	
+sum_charge	DECIMAL(38,6)	
+avg_qty	DOUBLE	
+avg_price	DOUBLE	
+avg_disc	DOUBLE	
+count_order	BIGINT	

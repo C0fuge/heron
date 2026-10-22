@@ -1,0 +1,8 @@
+c_custkey	BIGINT	
+c_name	VARCHAR	
+revenue	DECIMAL(38,4)	key
+c_acctbal	DECIMAL(15,2)	
+n_name	VARCHAR	
+c_address	VARCHAR	
+c_phone	VARCHAR	
+c_comment	VARCHAR	

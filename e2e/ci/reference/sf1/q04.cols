@@ -1,0 +1,2 @@
+o_orderpriority	VARCHAR	key
+order_count	BIGINT	

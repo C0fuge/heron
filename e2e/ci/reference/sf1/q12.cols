@@ -1,0 +1,3 @@
+l_shipmode	VARCHAR	key
+high_line_count	HUGEINT	
+low_line_count	HUGEINT	
