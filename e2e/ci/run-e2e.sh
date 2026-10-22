@@ -6,9 +6,9 @@
 #   ASSETS=<dir with the e2e-assets release files>  PLUGIN_ZIP=<plugin zip>  OUT=<results dir>
 #   TRINO_VERSION=455  RESULT_MODE=partial  SERVERS=1|3  SERVER_BUILD=int4|int5  e2e/ci/run-e2e.sh
 #
-# SERVERS=3 forms a cluster (backup locations) and then checks endpoint failover: a node killed
-# before the queries (answers must still be exact, and in partial mode the plugin log must show
-# its streams re-read from backup locations), a node killed during a read (clean error or exact
+# SERVERS=3 forms a cluster (backup locations) and then checks endpoint failover: a node lost
+# before the queries (partitioned, then killed: answers must still be exact, and in partial mode
+# the plugin log must show its streams re-read from backup locations), a node killed during a read (clean error or exact
 # answer, never wrong rows; retried with other delays until the kill hits a read of that node),
 # and two of three nodes down (exact or clean error).
 #
@@ -181,14 +181,16 @@ check_exact_or_error() {  # dir summary queries...
 
 if [ "$SERVERS" -ge 3 ]; then
   # Node lost before a query: the endpoints it served must be read from their backup locations.
-  # Round 1 right after the kill (the server still lists the node: the plugin must fail over;
-  # evidence is its "failed before any data; reading it from <backup>" WARN naming flight2),
-  # round 2 after KILL_SETTLE_SECONDS (the cluster has noticed). Both must be exact.
-  log "failover: flight2 killed before the queries"
-  docker kill flight2 >/dev/null
+  # Round 'partitioned': flight2 cut off the network right before the queries. A killed node is
+  # dropped by the cluster at once (its connections reset), a partitioned one is still handed out
+  # for a while, so the plugin itself must fail over; evidence is its "failed before any data;
+  # reading it from <backup>" WARN naming flight2. Round 'killed': flight2 killed and
+  # KILL_SETTLE_SECONDS later (the cluster has noticed). Both must be exact.
+  log "failover: flight2 lost before the queries"
+  docker network disconnect $NET flight2
   n=0
-  for round in now settled; do
-    [ "$round" = settled ] && sleep "${KILL_SETTLE_SECONDS:-10}"
+  for round in partitioned killed; do
+    if [ "$round" = killed ]; then docker kill flight2 >/dev/null; sleep "${KILL_SETTLE_SECONDS:-10}"; fi
     dir="$OUT/killed-before/$round"; mkdir -p "$dir"
     mark_log
     for q in $FAILOVER_QUERIES; do run_query "$q" "$dir"; done
@@ -202,8 +204,8 @@ if [ "$SERVERS" -ge 3 ]; then
   done
   # Only partial mode hands out one endpoint per node; complete mode may never read flight2 directly.
   evidence=$([ "$n" -gt 0 ] && echo OK || { [ "$RESULT_MODE" = partial ] && echo FAIL || echo INFO; })
-  { tail -n +2 "$OUT/killed-before/now/summary.tsv" | sed 's/^/now:/'
-    tail -n +2 "$OUT/killed-before/settled/summary.tsv" | sed 's/^/settled:/'
+  { tail -n +2 "$OUT/killed-before/partitioned/summary.tsv" | sed 's/^/partitioned:/'
+    tail -n +2 "$OUT/killed-before/killed/summary.tsv" | sed 's/^/killed:/'
     printf 'backup-reads\t%s\t%s stream(s) at flight2 re-read from a backup location\n' "$evidence" "$n"
   } > "$OUT/killed-before-summary.tsv"
   [ "$evidence" != FAIL ] || status=1
