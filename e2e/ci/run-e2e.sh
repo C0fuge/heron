@@ -4,14 +4,14 @@
 # (pip duckdb==1.4.1) reading the same Parquet files (e2e/ci/types_check.py).
 #
 #   ASSETS=<dir with the e2e-assets release files>  PLUGIN_ZIP=<plugin zip>  OUT=<results dir>
-#   TRINO_VERSION=455  RESULT_MODE=partial  SERVERS=1|3  SERVER_BUILD=int4|int5  e2e/ci/run-e2e.sh
+#   TRINO_VERSION=455  RESULT_MODE=partial  SERVERS=1|3  SERVER_BUILD=int4|int5|int6  e2e/ci/run-e2e.sh
 #
 # SERVERS=3 forms a cluster (backup locations) and then checks endpoint failover: a node lost
 # before the queries (partitioned, then killed: answers must still be exact), a node killed during a read (clean error or exact
 # answer, never wrong rows; retried with other delays until the kill hits a read of that node),
 # and two of three nodes down (exact or clean error).
 #
-# ICEBERG=1 (default for server builds int5+, which carry the 'iceberg' catalog plugin): Spark writes
+# ICEBERG=1 (default for server builds after int4: int5, int6, which carry the 'iceberg' catalog plugin): Spark writes
 # Iceberg tables (schema 'ice') and they are checked against the Parquet tables; see e2e/ci/iceberg.sh.
 #
 # Docker on the host (GitHub runner); S3 = rclone serve s3; everything on the private network 'afe2e'.
