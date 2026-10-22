@@ -60,6 +60,14 @@ Kept up to date after every work session so work can be resumed from this reposi
       read from backup locations (killed before) and that flight3 had an open stream when killed (killed
       during; else retry with another delay); add a 2-of-3-killed case (must error or be exact);
    c) a `complete` result-mode run on 3 servers.
+1b. **Server int5 with Iceberg** (release asset `arrow-flight-server-1.0.0-int5.jar` sha256 01feeb77…5808 +
+   `int5-plugins.tar.zst` sha256 f600585d…5f68 with `plugins/{s3,lakefs,iceberg}` and START-NOTES.txt = int4 + catalog
+   plugin `iceberg`: kinds `iceberg-hadoop` (warehouse dir on local/HDFS/S3) and `iceberg-rest` (Gravitino/Polaris);
+   `-Dcatalog=` list; partial mode pins the snapshot per query, falls back to a complete answer with delete files /
+   nested schema changes / joins). Add an Iceberg variant to CI: generate Iceberg tables in the job (e.g. pyiceberg
+   with a local SQL catalog writing parquet into the S3 bucket, or Spark/iceberg if simpler): TPC-H SF1 lineitem/orders
+   as Iceberg + a table with position/equality deletes + a renamed column; check the engine sees them, results equal
+   the parquet tables / DuckDB, partial and complete modes; a commit between two queries is seen by the second only.
 2. **Connection reset after one failed stream**: today one failed stream makes the plugin drop all its pooled
    connections (small inefficiency). Keep healthy connections; unit test.
 3. **`ORDER BY … LIMIT` (TopN) pushdown** to the server (`applyTopN`): render `ORDER BY … LIMIT n` in
