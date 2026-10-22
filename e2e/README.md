@@ -50,3 +50,11 @@ Tear down: `podman rm -f lab` (removes the lab and everything nested in it).
   Arrow `MemoryUtil` fails on the data path.
 * The server parses SQL with regexes → identifiers must be **unquoted**
   (`arrow-flight.identifier-quote` defaults to empty).
+
+## CI (GitHub Actions)
+
+`e2e/ci/run-e2e.sh` is what `.github/workflows/e2e.yml` runs on a runner with plain Docker: S3 via
+`rclone serve s3`, Flight server(s) from the release `e2e-assets`, Trino image + this plugin, TPC-H SF1
+22/22 compared with `e2e/ci/reference/sf1` by `e2e/ci/compare.py`; `SERVERS=3` adds the node-kill
+failover checks. Manual start: Actions → e2e → Run workflow (inputs: Trino version, result mode, servers).
+Results: `docs/E2E-RESULTS.md`.

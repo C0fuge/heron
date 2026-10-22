@@ -32,7 +32,15 @@ Kept up to date after every work session so work can be resumed from this reposi
   (`sf1/tpch/<table>/*.parquet`, `types/<table>/*.parquet`), `SHA256SUMS`.
 - In the repo: `e2e/ci/queries/q01..q22.sql` (TPC-H as run on the stand, schema `tpch`),
   `e2e/ci/reference/sf1/` (DuckDB 1.4.1 answers on the same SF1 files: `qNN.tsv`, `qNN.cols`, `MANIFEST.tsv`).
-- Server start (S3 mode through MinIO is the simplest in CI; see START-NOTES): JDK 21, `LANG=C.UTF-8`,
+- CI implementation: `.github/workflows/build.yml` (push; `mvn -P trino-455 clean verify`, JDK 25; 477/483 via
+  workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
+  (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
+  MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
+  `rclone/rclone:1.68.2 serve s3`. The server needs a writable working directory (DuckDB `.tmp`). The release
+  is a draft, so the e2e job needs `contents: write` to download assets. Job logs: `gh api .../logs` is blocked
+  by the session proxy (blob storage); the GitHub MCP `get_job_logs` tool works; artifacts can't be downloaded
+  from the session.
+- Server start (S3 mode; see START-NOTES, printed at the start of every e2e job): JDK 21, `LANG=C.UTF-8`,
   `-cp "<jar>:libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer --localhost <host> --hosts <all>`,
   `-DdataDir=s3://lake/parquet -Ds3Endpoint=http://minio:9000 -Darrowflight.plugins.dir=<dir>/plugins`,
   httpfs **v1.4.5** (`http://extensions.duckdb.org/v1.4.5/linux_amd64/httpfs.duckdb_extension.gz`, keep the
@@ -45,12 +53,13 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
-1. **CI**: workflow `build.yml` (Maven build + unit tests on push, Trino 455; matrix 477/483 on request) and
-   `e2e.yml` (manual + on plugin changes: MinIO + 1 server + Trino 455; TPC-H SF1 22/22 vs `e2e/ci/reference/sf1`
-   with the same normalisation as the reference generator — decimals rounded to 4 places, sort unless ORDER BY;
-   types table `SELECT *` vs DuckDB; token auth on; then a 3-server variant with a node killed before a query
-   (must still answer via backup) and during a read (clean error, never wrong rows)). Results summary to
-   `docs/E2E-RESULTS.md`.
+1. **CI, remaining parts** (build + e2e are in place and green, see Log and `docs/E2E-RESULTS.md`):
+   a) types table: `SELECT *` from `types.alltypes` / `types.alltypes_full` vs DuckDB on the same Parquet
+      (pip `duckdb==1.4.1` in the job, same normalisation; reference generated in the job, not committed);
+   b) make the failover checks prove what they claim: assert from logs that the killed node's endpoints were
+      read from backup locations (killed before) and that flight3 had an open stream when killed (killed
+      during; else retry with another delay); add a 2-of-3-killed case (must error or be exact);
+   c) a `complete` result-mode run on 3 servers.
 2. **Connection reset after one failed stream**: today one failed stream makes the plugin drop all its pooled
    connections (small inefficiency). Keep healthy connections; unit test.
 3. **`ORDER BY … LIMIT` (TopN) pushdown** to the server (`applyTopN`): render `ORDER BY … LIMIT n` in
@@ -65,9 +74,19 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Open questions
 
-(none yet)
+- e2e S3 is `rclone serve s3` instead of MinIO (MinIO images/binaries are no longer downloadable). OK, or is
+  there a MinIO build you want to put into `e2e-assets`?
+- `e2e-assets` is a draft release, so the e2e job runs with `contents: write`. Publishing it as a (private-repo)
+  pre-release would let the job use `contents: read`. Your call — no change made.
 
 ## Log
 
 - 2026-10-22 (maintainer's local session): repo created from the local project (HEAD 07676d4 = plugin v10 +
   failover test fix); CI inputs added; e2e assets uploaded.
+- 2026-10-22 (cloud session 1): item 1 (CI). Added `build.yml` (green: run 39826570714) and `e2e.yml` +
+  `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`. Trino 455, int4, token auth: partial mode 1 server TPC-H SF1 22/22
+  (runs 39829220892, 39830281255) and 3 servers 22/22 + failover (flight2 killed before: 5/5 exact; flight3
+  killed during q18: exact answer) (run 39830281255); complete mode 1 server: see the Log line below / E2E-RESULTS.
+  q01/q17 differ from DuckDB only by Trino's DECIMAL avg/division scale (comparator accepts, counts them).
+  Fixes on the way: MinIO → rclone, writable server cwd, `extensionDir`, pipefail-safe pipes. No plugin code
+  changed; no invariant affected.
