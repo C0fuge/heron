@@ -18,6 +18,7 @@ in the detail ("N cells equal at Trino DECIMAL scale").
 |---|---|---|---|---|---|---|---|
 | 2026-10-22 | 39829220892 | 455 | partial | 1 | 22/22 | – | 5 min |
 | 2026-10-22 | 39830281255 | 455 | partial | 1 | 22/22 | – | 5 min |
+| 2026-10-22 | 39831337458 | 455 | complete | 1 | 22/22 | – | 5 min |
 | 2026-10-22 | 39830281255 | 455 | partial | 3 | 22/22 | killed before: 5/5 exact; killed during q18: exact answer | 6.5 min |
 
 Failover checks (3 servers, `--hosts flight1,flight2,flight3`, catalog points to flight1):

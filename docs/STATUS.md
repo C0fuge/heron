@@ -86,7 +86,7 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-10-22 (cloud session 1): item 1 (CI). Added `build.yml` (green: run 39826570714) and `e2e.yml` +
   `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`. Trino 455, int4, token auth: partial mode 1 server TPC-H SF1 22/22
   (runs 39829220892, 39830281255) and 3 servers 22/22 + failover (flight2 killed before: 5/5 exact; flight3
-  killed during q18: exact answer) (run 39830281255); complete mode 1 server: see the Log line below / E2E-RESULTS.
+  killed during q18: exact answer) (run 39830281255); complete mode 1 server 22/22 (run 39831337458).
   q01/q17 differ from DuckDB only by Trino's DECIMAL avg/division scale (comparator accepts, counts them).
   Fixes on the way: MinIO → rclone, writable server cwd, `extensionDir`, pipefail-safe pipes. No plugin code
   changed; no invariant affected.
