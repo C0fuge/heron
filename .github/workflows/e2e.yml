@@ -1,6 +1,6 @@
 name: e2e
 
-# End-to-end: MinIO + Flight SQL server (release e2e-assets) + Trino with this plugin, TPC-H SF1
+# End-to-end: S3 (rclone) + Flight SQL server (release e2e-assets) + Trino with this plugin, TPC-H SF1
 # vs e2e/ci/reference/sf1. Runs on request, and on pushes that change plugin code or the e2e setup
 # (Actions minutes are limited).
 on:

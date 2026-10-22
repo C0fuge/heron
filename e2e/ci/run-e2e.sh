@@ -5,7 +5,7 @@
 #   ASSETS=<dir with the e2e-assets release files>  PLUGIN_ZIP=<plugin zip>  OUT=<results dir>
 #   TRINO_VERSION=455  RESULT_MODE=partial  e2e/ci/run-e2e.sh
 #
-# Docker on the host (GitHub runner); everything on the private network 'afe2e'.
+# Docker on the host (GitHub runner); S3 = rclone serve s3; everything on the private network 'afe2e'.
 # Credentials (MinIO, Flight token) are throwaway values generated per run.
 set -euo pipefail
 
@@ -44,26 +44,19 @@ curl -fsSL "http://extensions.duckdb.org/$DUCKDB_EXT_VERSION/linux_amd64/httpfs.
 
 docker network create $NET >/dev/null
 
-log "minio"
-# The MinIO images are no longer pullable anonymously (Docker Hub repo gone, quay.io unauthorized):
-# run the release binary in a plain container.
-MINIO_URL=https://dl.min.io/server/minio/release/linux-amd64/archive/minio.RELEASE.2025-04-22T22-12-26Z
-mkdir -p "$WORK/minio"
-curl -fsSL -o "$WORK/minio/minio" "$MINIO_URL"
-echo "$(curl -fsSL "$MINIO_URL.sha256sum" | cut -d' ' -f1)  $WORK/minio/minio" | sha256sum --check
-chmod +x "$WORK/minio/minio"
-docker run -d --name minio --network $NET -p 127.0.0.1:9000:9000 -v "$WORK/minio":/opt/minio:ro \
-  -e MINIO_ROOT_USER="$S3_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET" \
-  ubuntu:24.04 /opt/minio/minio server /data >/dev/null
-for i in $(seq 1 60); do curl -fs http://127.0.0.1:9000/minio/health/ready && break; sleep 1; done
-export AWS_ACCESS_KEY_ID="$S3_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET" AWS_DEFAULT_REGION=us-east-1
-S3="aws --endpoint-url http://127.0.0.1:9000 s3"
-$S3 mb s3://lake >/dev/null
+log "s3 (rclone serve s3)"
+# MinIO is no longer distributed (images not pullable anonymously, release binaries 410 Gone):
+# rclone serves a local directory over the S3 API; directory 'lake' is bucket 'lake'.
 SF1_TPCH="$(dirname "$(find "$WORK/data" -type d -name lineitem | head -1)")"
 TYPES="$(find "$WORK/data" -maxdepth 2 -type d -name types | head -1)"
-$S3 cp --recursive --only-show-errors "$SF1_TPCH" s3://lake/parquet/tpch
-[ -n "$TYPES" ] && $S3 cp --recursive --only-show-errors "$TYPES" s3://lake/parquet/types
-$S3 ls --recursive s3://lake/parquet/ | head -5
+mkdir -p "$WORK/s3/lake/parquet"
+mv "$SF1_TPCH" "$WORK/s3/lake/parquet/tpch"
+[ -n "$TYPES" ] && mv "$TYPES" "$WORK/s3/lake/parquet/types"
+docker run -d --name s3 --network $NET -p 127.0.0.1:9000:9000 -v "$WORK/s3":/data \
+  rclone/rclone:1.68.2 serve s3 /data --addr :9000 --auth-key "$S3_KEY,$S3_SECRET" >/dev/null
+export AWS_ACCESS_KEY_ID="$S3_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET" AWS_DEFAULT_REGION=us-east-1
+for i in $(seq 1 30); do aws --endpoint-url http://127.0.0.1:9000 s3 ls s3://lake/ >/dev/null 2>&1 && break; sleep 1; done
+aws --endpoint-url http://127.0.0.1:9000 s3 ls --recursive s3://lake/parquet/ | head -5
 
 log "flight server (result mode $RESULT_MODE)"
 docker run -d --name flight1 --network $NET \
@@ -72,7 +65,7 @@ docker run -d --name flight1 --network $NET \
   -e FLIGHT_AUTH_PROVIDER=token -e FLIGHT_AUTH_TOKEN="$TOKEN" \
   eclipse-temurin:21-jdk \
   java --add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true \
-       -DdataDir=s3://lake/parquet -Ds3Endpoint=http://minio:9000 -Darrowflight.plugins.dir=/app/plugins \
+       -DdataDir=s3://lake/parquet -Ds3Endpoint=http://s3:9000 -Ds3UrlStyle=path -Ds3Region=us-east-1 -Darrowflight.plugins.dir=/app/plugins \
        -Darrowflight.duckdb.extensionDir=/ext/duckdb-home/extensions \
        -DresultMode="$RESULT_MODE" \
        -cp "/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
