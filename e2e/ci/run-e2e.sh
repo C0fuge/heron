@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# CI end-to-end run: MinIO + Flight SQL server(s) + Trino with this plugin, TPC-H SF1 22/22
+# CI end-to-end run: S3 (rclone) + Flight SQL server(s) + Trino with this plugin, TPC-H SF1 22/22
 # compared with e2e/ci/reference/sf1.
 #
 #   ASSETS=<dir with the e2e-assets release files>  PLUGIN_ZIP=<plugin zip>  OUT=<results dir>
 #   TRINO_VERSION=455  RESULT_MODE=partial  e2e/ci/run-e2e.sh
 #
 # Docker on the host (GitHub runner); S3 = rclone serve s3; everything on the private network 'afe2e'.
-# Credentials (MinIO, Flight token) are throwaway values generated per run.
+# Credentials (S3, Flight token) are throwaway values generated per run.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
