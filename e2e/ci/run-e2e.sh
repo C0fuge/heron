@@ -72,7 +72,7 @@ docker run -d --name flight1 --network $NET \
        -cp "/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
        --port 32010 --localhost flight1 --hosts flight1 >/dev/null
 for i in $(seq 1 90); do
-  docker logs flight1 2>&1 | grep -q 'Server Arrow Flight SQL started' && break
+  grep -q 'Server Arrow Flight SQL started' <(docker logs flight1 2>&1) && break
   docker ps -q -f name=flight1 -f status=running | grep -q . || break
   sleep 2
 done
