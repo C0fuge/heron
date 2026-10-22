@@ -23,7 +23,7 @@ ICEBERG_SERVER_ARGS=(-Dcatalog=iceberg-hadoop -Darrowflight.iceberg-hadoop.wareh
                      -Darrowflight.catalog.localRootsShared=true)
 
 spark_sql() {  # sql-file
-  docker run --rm --network none -u 0 -e HOME=/tmp \
+  docker run --rm --network "$NET" -u 0 -e HOME=/tmp -e SPARK_LOCAL_IP=127.0.0.1 \
     -v "$WORK/wh":/wh -v "$WORK/s3/lake/parquet":/data:ro -v "$WORK/spark":/spark:ro \
     "$SPARK_IMAGE" /opt/spark/bin/spark-sql --master 'local[4]' --driver-memory 3g \
       --jars /spark/iceberg-spark-runtime.jar \
