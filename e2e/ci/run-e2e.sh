@@ -60,8 +60,10 @@ aws --endpoint-url http://127.0.0.1:9000 s3 ls --recursive s3://lake/parquet/ > 
 head -5 "$WORK/s3-listing.txt"; wc -l < "$WORK/s3-listing.txt"
 
 log "flight server (result mode $RESULT_MODE)"
+mkdir -p "$WORK/flight1"  # writable cwd: DuckDB temp dir (.tmp)
 docker run -d --name flight1 --network $NET \
-  -v "$WORK/server":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro -w /app \
+  -v "$WORK/server":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro \
+  -v "$WORK/flight1":/work -w /work \
   -e LANG=C.UTF-8 -e FLIGHT_S3_ACCESS_KEY="$S3_KEY" -e FLIGHT_S3_SECRET_KEY="$S3_SECRET" \
   -e FLIGHT_AUTH_PROVIDER=token -e FLIGHT_AUTH_TOKEN="$TOKEN" \
   eclipse-temurin:21-jdk \
