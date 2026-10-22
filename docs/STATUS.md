@@ -64,7 +64,7 @@ Kept up to date after every work session so work can be resumed from this reposi
    DuckDB iceberg+avro v1.4.5, `core-site.xml` with `fs.file.impl` — see Open questions). Checks through Trino: tables
    listed; full copies lineitem/orders/customer = Parquet (row count + per-column `checksum`); rename (`c_comment` →
    `c_note`) OK; TPC-H q01 q03 q04 q06 q12 q13 q18 q22 on schema `ice` = DuckDB reference; a commit between two queries is
-   seen by the second only. Green parts on int6, partial, 1 server (run 39851301285). Open:
+   seen by the second only. Green on int6, partial, 1 server: run 39852719842 (TPC-H 22/22 + types 2/2 + Iceberg, deletes KNOWN). Open:
    a) `ice.orders_del` (merge-on-read position deletes): server bug, KNOWN in CI (see Open questions); recheck when a
       fixed server build arrives and turn KNOWN back into FAIL.
    b) run int6 with `result-mode=complete` (expected: every Iceberg table hits the same iceberg_scan refusal) and with
@@ -125,3 +125,12 @@ Kept up to date after every work session so work can be resumed from this reposi
   39840087384 (partial 1+3 srv, final, green); failing intermediate runs 39836535174, 39837701866, 39838862758
   were the evidence checks being tuned. int5 baseline (parquet only, 1 server, partial): 22/22 + types 2/2
   (run 39841317139). No plugin code changed; no invariant affected.
+- 2026-10-22 (cloud session 3): item 1 (Iceberg in CI). Added `e2e/ci/iceberg.sh` (sourced by `run-e2e.sh`, on for
+  server-build int5/int6): Spark-written HadoopCatalog warehouse, checks of copies/rename/TPC-H/commit visibility through
+  the plugin. int5 dropped as the maintainer asked (stack overflow at the first refresh with a catalog: the int5 run
+  39845246259 hung and was cancelled). int6 partial 1 server green: run 39852719842 (parquet 22/22, types 2/2, Iceberg
+  copies lineitem 6,001,215 / orders / customer equal, rename OK, 8/8 TPC-H on `ice`, commit seen by the later query;
+  `orders_del` KNOWN: server skips its iceberg_scan view, see Open questions). Intermediate failing runs 39844249030
+  (Spark hostname), 39844696722 (`No FileSystem for scheme "file"`), 39849017993 (CLI warning in output), 39850026875 and
+  39851301285 (orders_del, diagnosis). All commits `[skip ci]`; runs dispatched by hand. No plugin code changed; no
+  invariant affected (int4 path unchanged: `ICEBERG=0` by default for int4).
