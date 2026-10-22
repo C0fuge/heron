@@ -35,6 +35,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 - CI implementation: `.github/workflows/build.yml` (push; `mvn -P trino-455 clean verify`, JDK 25; 477/483 via
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
+  Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int4|int5.
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
   `rclone/rclone:1.68.2 serve s3`. The server needs a writable working directory (DuckDB `.tmp`). The release
   is a draft, so the e2e job needs `contents: write` to download assets. Job logs: `gh api .../logs` is blocked
@@ -53,14 +55,7 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
-1. **CI, remaining parts** (build + e2e are in place and green, see Log and `docs/E2E-RESULTS.md`):
-   a) types table: `SELECT *` from `types.alltypes` / `types.alltypes_full` vs DuckDB on the same Parquet
-      (pip `duckdb==1.4.1` in the job, same normalisation; reference generated in the job, not committed);
-   b) make the failover checks prove what they claim: assert from logs that the killed node's endpoints were
-      read from backup locations (killed before) and that flight3 had an open stream when killed (killed
-      during; else retry with another delay); add a 2-of-3-killed case (must error or be exact);
-   c) a `complete` result-mode run on 3 servers.
-1b. **Server int5 with Iceberg** (release asset `arrow-flight-server-1.0.0-int5.jar` sha256 01feeb77…5808 +
+1. **Server int5 with Iceberg** (release asset `arrow-flight-server-1.0.0-int5.jar` sha256 01feeb77…5808 +
    `int5-plugins.tar.zst` sha256 f600585d…5f68 with `plugins/{s3,lakefs,iceberg}` and START-NOTES.txt = int4 + catalog
    plugin `iceberg`: kinds `iceberg-hadoop` (warehouse dir on local/HDFS/S3) and `iceberg-rest` (Gravitino/Polaris);
    `-Dcatalog=` list; partial mode pins the snapshot per query, falls back to a complete answer with delete files /
@@ -68,6 +63,12 @@ Kept up to date after every work session so work can be resumed from this reposi
    with a local SQL catalog writing parquet into the S3 bucket, or Spark/iceberg if simpler): TPC-H SF1 lineitem/orders
    as Iceberg + a table with position/equality deletes + a renamed column; check the engine sees them, results equal
    the parquet tables / DuckDB, partial and complete modes; a commit between two queries is seen by the second only.
+   The e2e job already takes `server-build=int5` (workflow input / `SERVER_BUILD`); int5 baseline on parquet is green (run 39841317139).
+   Plan: an `iceberg` step in `run-e2e.sh` behind `SERVER_BUILD=int5`, pyiceberg (pinned) + SqlCatalog (sqlite) writing
+   to `s3://lake/iceberg` via rclone, server started with the catalog flags from START-NOTES; answers compared with
+   `types_check.py`-style DuckDB references.
+1b. **e2e: a kill in the middle of a stream** that already delivered data (must be a clean error, never fewer rows);
+   all kills so far landed before the first batch (needs a larger/slower read, e.g. `SELECT *` of lineitem).
 2. **Connection reset after one failed stream**: today one failed stream makes the plugin drop all its pooled
    connections (small inefficiency). Keep healthy connections; unit test.
 3. **`ORDER BY … LIMIT` (TopN) pushdown** to the server (`applyTopN`): render `ORDER BY … LIMIT n` in
@@ -84,6 +85,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 - e2e S3 is `rclone serve s3` instead of MinIO (MinIO images/binaries are no longer downloadable). OK, or is
   there a MinIO build you want to put into `e2e-assets`?
+- The release now holds int4 and int5; the e2e job picks one with `server-build` (default int4, the current
+  release candidate). Switch the default to int5 once you consider it the candidate?
 - `e2e-assets` is a draft release, so the e2e job runs with `contents: write`. Publishing it as a (private-repo)
   pre-release would let the job use `contents: read`. Your call — no change made.
 
@@ -98,3 +101,13 @@ Kept up to date after every work session so work can be resumed from this reposi
   q01/q17 differ from DuckDB only by Trino's DECIMAL avg/division scale (comparator accepts, counts them).
   Fixes on the way: MinIO → rclone, writable server cwd, `extensionDir`, pipefail-safe pipes. No plugin code
   changed; no invariant affected.
+- 2026-10-22 (cloud session 2): item 1 (CI) finished. a) `e2e/ci/types_check.py`: `types.alltypes` (23 cols) and
+  `types.alltypes_full` (25 cols) x 5000 rows equal to DuckDB; interval/list/struct/map not exposed (skipped).
+  b) failover checks rebuilt: node lost before (partitioned, then killed) 5+5 exact, but the int4 server never
+  hands out a lost node, so it tests server re-planning only; kill during q18 proves plugin failover (3–4 streams
+  "failed before any data … reading it from flight1", exact answer); two of three down 5/5 exact.
+  c) complete mode on 3 servers 22/22 + failover (run 39836376906). Also fixed e2e broken by the second server jar
+  in the release (`server-build` input). Runs: 39835656012 (1 srv), 39836376906 (complete 3 srv),
+  39840087384 (partial 1+3 srv, final, green); failing intermediate runs 39836535174, 39837701866, 39838862758
+  were the evidence checks being tuned. int5 baseline (parquet only, 1 server, partial): 22/22 + types 2/2
+  (run 39841317139). No plugin code changed; no invariant affected.
