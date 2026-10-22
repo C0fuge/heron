@@ -4,7 +4,7 @@
 # (pip duckdb==1.4.1) reading the same Parquet files (e2e/ci/types_check.py).
 #
 #   ASSETS=<dir with the e2e-assets release files>  PLUGIN_ZIP=<plugin zip>  OUT=<results dir>
-#   TRINO_VERSION=455  RESULT_MODE=partial  SERVERS=1|3  e2e/ci/run-e2e.sh
+#   TRINO_VERSION=455  RESULT_MODE=partial  SERVERS=1|3  SERVER_BUILD=int4|int5  e2e/ci/run-e2e.sh
 #
 # SERVERS=3 forms a cluster (backup locations) and then checks endpoint failover: a node killed
 # before the queries (answers must still be exact) and a node killed during a read (clean error or
@@ -17,7 +17,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 ASSETS="${ASSETS:?}"; PLUGIN_ZIP="${PLUGIN_ZIP:?}"; OUT="${OUT:?}"
 TRINO_VERSION="${TRINO_VERSION:-455}"; RESULT_MODE="${RESULT_MODE:-partial}"
-SERVERS="${SERVERS:-1}"; SERVER_HEAP="${SERVER_HEAP:-2g}"
+SERVERS="${SERVERS:-1}"; SERVER_HEAP="${SERVER_HEAP:-2g}"; SERVER_BUILD="${SERVER_BUILD:-int4}"
 FAILOVER_QUERIES="${FAILOVER_QUERIES:-q01 q03 q05 q06 q18}"
 WORK="${WORK:-$(mktemp -d)}"
 NET=afe2e
@@ -30,8 +30,8 @@ log() { echo "== $(date -u +%T) $*"; }
 
 log "unpack assets"
 mkdir -p "$WORK/server" "$WORK/data" "$WORK/plugin"
-cp "$ASSETS"/arrow-flight-server-*.jar "$WORK/server/server.jar"
-tar --zstd -xf "$ASSETS/int4-plugins.tar.zst" -C "$WORK/server"
+cp "$ASSETS/arrow-flight-server-1.0.0-$SERVER_BUILD.jar" "$WORK/server/server.jar"
+tar --zstd -xf "$ASSETS/$SERVER_BUILD-plugins.tar.zst" -C "$WORK/server"
 if [ -f "$ASSETS/flight-server-libs.tar.zst" ]; then
   tar --zstd -xf "$ASSETS/flight-server-libs.tar.zst" -C "$WORK/server"
 else
