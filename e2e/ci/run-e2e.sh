@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # CI end-to-end run: S3 (rclone) + Flight SQL server(s) + Trino with this plugin, TPC-H SF1 22/22
-# compared with e2e/ci/reference/sf1.
+# compared with e2e/ci/reference/sf1, and every table of schema 'types' compared with DuckDB
+# (pip duckdb==1.4.1) reading the same Parquet files (e2e/ci/types_check.py).
 #
 #   ASSETS=<dir with the e2e-assets release files>  PLUGIN_ZIP=<plugin zip>  OUT=<results dir>
 #   TRINO_VERSION=455  RESULT_MODE=partial  SERVERS=1|3  e2e/ci/run-e2e.sh
@@ -111,7 +112,7 @@ cat > "$WORK/etc/jvm.config" <<JVM
 --add-opens=java.base/java.nio=ALL-UNNAMED
 -Darrow.enable_unsafe_memory_access=true
 JVM
-docker run -d --name trino --network $NET \
+docker run -d --name trino --network $NET -p 127.0.0.1:8080:8080 \
   -v "$WORK/plugin":/usr/lib/trino/plugin/arrow-flight:ro \
   -v "$WORK/etc/catalog/flight.properties":/etc/trino/catalog/flight.properties:ro \
   -v "$WORK/etc/jvm.config":/etc/trino/jvm.config:ro \
@@ -144,6 +145,15 @@ for q in "$QUERIES"/q*.sql; do run_query "$(basename "$q" .sql)" "$OUT/sf1"; don
 save_logs
 status=0
 "${COMPARE[@]}" "$OUT/sf1" "$QUERIES" "$OUT/sf1-summary.tsv" || status=1
+
+if [ -n "$TYPES" ]; then
+  log "types: SELECT * per table vs DuckDB on the same Parquet"
+  python3 -m venv "$WORK/venv"
+  "$WORK/venv/bin/pip" install -q --disable-pip-version-check duckdb==1.4.1 trino==0.333.0
+  "$WORK/venv/bin/python" "$REPO/e2e/ci/types_check.py" "$WORK/s3/lake/parquet/types" 127.0.0.1:8080 \
+    "$OUT/types-summary.tsv" || status=1
+  save_logs
+fi
 
 if [ "$SERVERS" -ge 3 ]; then
   # Node lost before a query: the endpoints it served must be read from their backup locations.
