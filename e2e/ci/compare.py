@@ -5,12 +5,14 @@
 
 Normalisation (same as the reference generator): numeric cells are compared after rounding to
 4 decimal places (doubles also pass within a relative 1e-9); rows are sorted unless the query has
-an ORDER BY. Exit status 1 if any query differs or is missing.
+an ORDER BY. A Trino DECIMAL with fewer than 4 fractional digits also passes when it equals the
+DuckDB value rounded to that scale: Trino keeps the DECIMAL type for avg() and decimal division
+(TPC-H q01 avg_qty 25.52, q17), where DuckDB returns DOUBLE. Such cells are counted in the detail. Exit status 1 if any query differs or is missing.
 """
 import os
 import re
 import sys
-from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
+from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN, ROUND_HALF_UP
 
 Q4 = Decimal("0.0001")
 
@@ -20,6 +22,16 @@ def num(s):
         return Decimal(s)
     except InvalidOperation:
         return None
+
+
+def trino_scale_equal(expected, actual):
+    """actual is a DECIMAL rendered with scale < 4 and equals expected rounded to that scale."""
+    m = re.fullmatch(r"-?\d+\.(\d{1,3})", actual)
+    de = num(expected)
+    if not m or de is None or not de.is_finite():
+        return False
+    q = Decimal(1).scaleb(-len(m.group(1)))
+    return Decimal(actual) in (de.quantize(q, ROUND_HALF_UP), de.quantize(q, ROUND_HALF_EVEN))
 
 
 def cell_equal(a, b):
@@ -60,13 +72,21 @@ def compare(name, ref_dir, act_dir, q_dir):
         act.sort(key=lambda r: [norm_key(c) for c in r])
     if len(ref) != len(act):
         return "FAIL", f"rows: expected {len(ref)}, got {len(act)}"
+    scaled = 0
     for i, (r, a) in enumerate(zip(ref, act)):
         if len(r) != len(a):
             return "FAIL", f"row {i}: expected {len(r)} columns, got {len(a)}"
         for j, (x, y) in enumerate(zip(r, a)):
-            if not cell_equal(x, y):
-                return "FAIL", f"row {i} col {j}: expected {x!r}, got {y!r}"
-    return "OK", f"{len(ref)} rows"
+            if cell_equal(x, y):
+                continue
+            if trino_scale_equal(x, y):
+                scaled += 1
+                continue
+            return "FAIL", f"row {i} col {j}: expected {x!r}, got {y!r}"
+    detail = f"{len(ref)} rows"
+    if scaled:
+        detail += f", {scaled} cells equal at Trino DECIMAL scale"
+    return "OK", detail
 
 
 def main():

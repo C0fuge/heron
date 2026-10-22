@@ -5,7 +5,7 @@ name: build
 on:
   push:
     branches: [main, 'claude/**']
-    paths-ignore: ['docs/**', '**.md', 'e2e/ci/reference/**']
+    paths-ignore: ['docs/**', '**.md', 'e2e/**', '.github/workflows/e2e.yml']
   workflow_dispatch:
     inputs:
       all-versions:
