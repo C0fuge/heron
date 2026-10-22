@@ -33,7 +33,7 @@ fi
 mkdir -p "$WORK/server/libs"
 find "$WORK/server" -maxdepth 3 -name 'START-NOTES*' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
 tar --zstd -xf "$ASSETS/test-data-sf1-types.tar.zst" -C "$WORK/data"
-find "$WORK/data" -maxdepth 3 -type d | head -20
+find "$WORK/data" -maxdepth 3 -type d
 unzip -qj "$PLUGIN_ZIP" -d "$WORK/plugin"
 
 log "httpfs $DUCKDB_EXT_VERSION"
@@ -47,8 +47,8 @@ docker network create $NET >/dev/null
 log "s3 (rclone serve s3)"
 # MinIO is no longer distributed (images not pullable anonymously, release binaries 410 Gone):
 # rclone serves a local directory over the S3 API; directory 'lake' is bucket 'lake'.
-SF1_TPCH="$(dirname "$(find "$WORK/data" -type d -name lineitem | head -1)")"
-TYPES="$(find "$WORK/data" -maxdepth 2 -type d -name types | head -1)"
+SF1_TPCH="$(dirname "$(find "$WORK/data" -type d -name lineitem -print -quit)")"
+TYPES="$(find "$WORK/data" -maxdepth 2 -type d -name types -print -quit)"
 mkdir -p "$WORK/s3/lake/parquet"
 mv "$SF1_TPCH" "$WORK/s3/lake/parquet/tpch"
 [ -n "$TYPES" ] && mv "$TYPES" "$WORK/s3/lake/parquet/types"
@@ -56,7 +56,8 @@ docker run -d --name s3 --network $NET -p 127.0.0.1:9000:9000 -v "$WORK/s3":/dat
   rclone/rclone:1.68.2 serve s3 /data --addr :9000 --auth-key "$S3_KEY,$S3_SECRET" >/dev/null
 export AWS_ACCESS_KEY_ID="$S3_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET" AWS_DEFAULT_REGION=us-east-1
 for i in $(seq 1 30); do aws --endpoint-url http://127.0.0.1:9000 s3 ls s3://lake/ >/dev/null 2>&1 && break; sleep 1; done
-aws --endpoint-url http://127.0.0.1:9000 s3 ls --recursive s3://lake/parquet/ | head -5
+aws --endpoint-url http://127.0.0.1:9000 s3 ls --recursive s3://lake/parquet/ > "$WORK/s3-listing.txt"
+head -5 "$WORK/s3-listing.txt"; wc -l < "$WORK/s3-listing.txt"
 
 log "flight server (result mode $RESULT_MODE)"
 docker run -d --name flight1 --network $NET \
