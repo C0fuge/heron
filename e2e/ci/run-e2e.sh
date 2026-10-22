@@ -11,6 +11,9 @@
 # answer, never wrong rows; retried with other delays until the kill hits a read of that node),
 # and two of three nodes down (exact or clean error).
 #
+# ICEBERG=1 (default for server builds int5+, which carry the 'iceberg' catalog plugin): Spark writes
+# Iceberg tables (schema 'ice') and they are checked against the Parquet tables; see e2e/ci/iceberg.sh.
+#
 # Docker on the host (GitHub runner); S3 = rclone serve s3; everything on the private network 'afe2e'.
 # Credentials (S3, Flight token) are throwaway values generated per run.
 set -euo pipefail
@@ -23,7 +26,10 @@ FAILOVER_QUERIES="${FAILOVER_QUERIES:-q01 q03 q05 q06 q18}"
 WORK="${WORK:-$(mktemp -d)}"
 NET=afe2e
 DUCKDB_EXT_VERSION=v1.4.5
-mkdir -p "$OUT" "$WORK"
+case "$SERVER_BUILD" in int4) ICEBERG="${ICEBERG:-0}" ;; *) ICEBERG="${ICEBERG:-1}" ;; esac
+mkdir -p "$OUT" "$WORK" "$WORK/wh"
+# shellcheck source=e2e/ci/iceberg.sh
+. "$REPO/e2e/ci/iceberg.sh"
 
 S3_KEY="ci$(openssl rand -hex 8)"; S3_SECRET="$(openssl rand -hex 24)"; TOKEN="$(openssl rand -hex 24)"
 
@@ -67,20 +73,26 @@ for i in $(seq 1 30); do aws --endpoint-url http://127.0.0.1:9000 s3 ls s3://lak
 aws --endpoint-url http://127.0.0.1:9000 s3 ls --recursive s3://lake/parquet/ > "$WORK/s3-listing.txt"
 head -5 "$WORK/s3-listing.txt"; wc -l < "$WORK/s3-listing.txt"
 
+SERVER_EXTRA=()
+if [ "$ICEBERG" = 1 ]; then
+  iceberg_generate
+  SERVER_EXTRA=("${ICEBERG_SERVER_ARGS[@]}")
+fi
+
 HOSTS="$(seq -s, -f 'flight%g' 1 "$SERVERS")"
 log "flight servers $HOSTS (result mode $RESULT_MODE)"
 start_server() {  # name
   mkdir -p "$WORK/$1"  # writable cwd: DuckDB temp dir (.tmp)
   docker run -d --name "$1" --network $NET \
     -v "$WORK/server":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro \
-    -v "$WORK/$1":/work -w /work \
+    -v "$WORK/$1":/work -w /work -v "$WORK/wh":/wh:ro \
     -e LANG=C.UTF-8 -e FLIGHT_S3_ACCESS_KEY="$S3_KEY" -e FLIGHT_S3_SECRET_KEY="$S3_SECRET" \
     -e FLIGHT_AUTH_PROVIDER=token -e FLIGHT_AUTH_TOKEN="$TOKEN" \
     eclipse-temurin:21-jdk \
     java -Xmx$SERVER_HEAP --add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true \
          -DdataDir=s3://lake/parquet -Ds3Endpoint=http://s3:9000 -Ds3UrlStyle=path -Ds3Region=us-east-1 \
          -Darrowflight.plugins.dir=/app/plugins -Darrowflight.duckdb.extensionDir=/ext/duckdb-home/extensions \
-         -DresultMode="$RESULT_MODE" \
+         -DresultMode="$RESULT_MODE" "${SERVER_EXTRA[@]}" \
          -cp "/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
          --port 32010 --localhost "$1" --hosts "$HOSTS" >/dev/null
 }
@@ -128,7 +140,7 @@ docker exec trino trino --execute 'SHOW SCHEMAS FROM flight' | tee "$OUT/schemas
 
 run_query() {  # query-name out-dir
   local start; start=$(date +%s.%N)
-  if docker exec trino trino --catalog flight --schema tpch --output-format TSV -f "/queries/$1.sql" \
+  if docker exec trino trino --catalog flight --schema "${QUERY_SCHEMA:-tpch}" --output-format TSV -f "/queries/$1.sql" \
        > "$2/$1.tsv" 2> "$2/$1.err"; then
     rm -f "$2/$1.err"
   else
@@ -153,6 +165,11 @@ if [ -n "$TYPES" ]; then
   "$WORK/venv/bin/pip" install -q --disable-pip-version-check duckdb==1.4.1 trino==0.333.0
   "$WORK/venv/bin/python" "$REPO/e2e/ci/types_check.py" "$WORK/s3/lake/parquet/types" 127.0.0.1:8080 \
     "$OUT/types-summary.tsv" || status=1
+  save_logs
+fi
+
+if [ "$ICEBERG" = 1 ]; then
+  iceberg_check
   save_logs
 fi
 
