@@ -47,8 +47,8 @@ docker network create $NET >/dev/null
 log "minio"
 docker run -d --name minio --network $NET -p 127.0.0.1:9000:9000 \
   -e MINIO_ROOT_USER="$S3_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET" \
-  minio/minio:RELEASE.2025-04-22T22-12-26Z server /data >/dev/null
-until curl -fs http://127.0.0.1:9000/minio/health/ready; do sleep 1; done
+  quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data >/dev/null
+for i in $(seq 1 60); do curl -fs http://127.0.0.1:9000/minio/health/ready && break; sleep 1; done
 export AWS_ACCESS_KEY_ID="$S3_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET" AWS_DEFAULT_REGION=us-east-1
 S3="aws --endpoint-url http://127.0.0.1:9000 s3"
 $S3 mb s3://lake >/dev/null
@@ -60,12 +60,13 @@ $S3 ls --recursive s3://lake/parquet/ | head -5
 
 log "flight server (result mode $RESULT_MODE)"
 docker run -d --name flight1 --network $NET \
-  -v "$WORK/server":/app:ro -v "$WORK/duckdb":/root/.duckdb -w /app \
+  -v "$WORK/server":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro -w /app \
   -e LANG=C.UTF-8 -e FLIGHT_S3_ACCESS_KEY="$S3_KEY" -e FLIGHT_S3_SECRET_KEY="$S3_SECRET" \
   -e FLIGHT_AUTH_PROVIDER=token -e FLIGHT_AUTH_TOKEN="$TOKEN" \
   eclipse-temurin:21-jdk \
   java --add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true \
        -DdataDir=s3://lake/parquet -Ds3Endpoint=http://minio:9000 -Darrowflight.plugins.dir=/app/plugins \
+       -Darrowflight.duckdb.extensionDir=/ext/duckdb-home/extensions \
        -DresultMode="$RESULT_MODE" \
        -cp "/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
        --port 32010 --localhost flight1 --hosts flight1 >/dev/null
