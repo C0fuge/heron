@@ -77,6 +77,7 @@ SERVER_EXTRA=()
 if [ "$ICEBERG" = 1 ]; then
   iceberg_generate
   SERVER_EXTRA=("${ICEBERG_SERVER_ARGS[@]}")
+  SERVER_CP_EXTRA=$ICEBERG_SERVER_CP
 fi
 
 HOSTS="$(seq -s, -f 'flight%g' 1 "$SERVERS")"
@@ -93,7 +94,7 @@ start_server() {  # name
          -DdataDir=s3://lake/parquet -Ds3Endpoint=http://s3:9000 -Ds3UrlStyle=path -Ds3Region=us-east-1 \
          -Darrowflight.plugins.dir=/app/plugins -Darrowflight.duckdb.extensionDir=/ext/duckdb-home/extensions \
          -DresultMode="$RESULT_MODE" "${SERVER_EXTRA[@]}" \
-         -cp "/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
+         -cp "${SERVER_CP_EXTRA:-}/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
          --port 32010 --localhost "$1" --hosts "$HOSTS" >/dev/null
 }
 wait_server() {  # name

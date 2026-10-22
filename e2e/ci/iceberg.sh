@@ -18,6 +18,7 @@ SPARK_IMAGE="${SPARK_IMAGE:-apache/spark:3.5.3}"
 ICEBERG_SPARK_JAR="${ICEBERG_SPARK_JAR:-https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar}"
 ICEBERG_QUERIES="${ICEBERG_QUERIES:-q01 q03 q04 q06 q12 q13 q18 q22}"
 ICEBERG_COMMIT_WAIT="${ICEBERG_COMMIT_WAIT:-100}"
+ICEBERG_SERVER_CP=/app/conf:
 # server flags (start_server); the warehouse is a local directory shared by all nodes
 ICEBERG_SERVER_ARGS=(-Dcatalog=iceberg-hadoop -Darrowflight.iceberg-hadoop.warehouse=/wh
                      -Darrowflight.catalog.localRootsShared=true)
@@ -66,6 +67,15 @@ SQL
   find "$WORK/wh" -name 'version-hint.text' | sort
   find "$WORK/wh" -type f | sed 's#/[^/]*$##' | sort | uniq -c | head -40 > "$OUT/iceberg-layout.txt"
   [ -f "$WORK/wh/ice/commits/metadata/version-hint.text" ] || { log "iceberg: Spark did not write the tables"; return 1; }
+  # int5 server: the Hadoop jars in libs/ do not register the local FileSystem ("No FileSystem for
+  # scheme file" when the iceberg-hadoop warehouse is a local path); core-site.xml on the classpath
+  mkdir -p "$WORK/server/conf"
+  cat > "$WORK/server/conf/core-site.xml" <<XML
+<?xml version="1.0"?>
+<configuration>
+  <property><name>fs.file.impl</name><value>org.apache.hadoop.fs.LocalFileSystem</value></property>
+</configuration>
+XML
 }
 
 tq() { docker exec trino trino --catalog flight --output-format TSV --execute "$1" 2>&1; }
