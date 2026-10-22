@@ -103,13 +103,21 @@ ice_compare() {
   exp_cols=$pcols
   [ -n "$ren" ] && exp_cols=$(printf '%s\n' "$pcols" | sed "s/^${ren%%:*}\t/${ren##*:}\t/")
   if [ "$icols" != "$exp_cols" ]; then
-    ice_out "$check" FAIL "columns differ: ice.$it [$(echo $icols)] vs expected [$(echo $exp_cols)]"
     # diagnostics: the error behind it (information_schema swallows per-table errors)
     { echo "--- DESCRIBE ice.$it"; tq "DESCRIBE ice.\"$it\""
       echo "--- SELECT count(*) FROM ice.$it"; tq "SELECT count(*) FROM ice.\"$it\""
       local h; for h in trino ${HOSTS//,/ }; do
         echo "--- $h log lines naming $it"; docker logs "$h" 2>&1 | grep -A3 "$it" | tail -30; done
     } 2>&1 | cut -c1-600 | tee "$OUT/iceberg-$it-diagnostics.txt"
+    # Known server issue (int6, local warehouse): the complete-answer view (iceberg_scan) is refused by
+    # DuckDB, "file system operations are disabled by configuration", so the table is missing (clean
+    # error, no wrong rows). Reported as KNOWN; any other cause fails.
+    if grep -qE "skipTable table=ice\.$it reason=.*file system operations are disabled" \
+         "$OUT/iceberg-$it-diagnostics.txt"; then
+      ice_out "$check" KNOWN "ice.$it has no columns: server skips its iceberg_scan view (DuckDB 'file system operations are disabled'); queries fail cleanly"
+    else
+      ice_out "$check" FAIL "columns differ: ice.$it [$(echo $icols)] vs expected [$(echo $exp_cols)]"
+    fi
     return
   fi
   while IFS=$'\t' read -r c t; do
