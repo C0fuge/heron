@@ -78,7 +78,11 @@ SQL
 XML
 }
 
-tq() { docker exec trino trino --catalog flight --output-format TSV --execute "$1" 2>&1; }
+# Trino CLI, TSV; stderr kept (errors become part of the compared text) minus the jline warning
+tq() {
+  { docker exec trino trino --catalog flight --output-format TSV --execute "$1" 2>&1 || true; } |
+    grep -vE 'org\.jline|Unable to create a system terminal' || true
+}
 
 ice_out() {  # check result detail
   printf '%s\t%s\t%s\n' "$1" "$2" "$3" | tee -a "$OUT/iceberg-summary.tsv"
