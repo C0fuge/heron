@@ -45,9 +45,16 @@ curl -fsSL "http://extensions.duckdb.org/$DUCKDB_EXT_VERSION/linux_amd64/httpfs.
 docker network create $NET >/dev/null
 
 log "minio"
-docker run -d --name minio --network $NET -p 127.0.0.1:9000:9000 \
+# The MinIO images are no longer pullable anonymously (Docker Hub repo gone, quay.io unauthorized):
+# run the release binary in a plain container.
+MINIO_URL=https://dl.min.io/server/minio/release/linux-amd64/archive/minio.RELEASE.2025-04-22T22-12-26Z
+mkdir -p "$WORK/minio"
+curl -fsSL -o "$WORK/minio/minio" "$MINIO_URL"
+echo "$(curl -fsSL "$MINIO_URL.sha256sum" | cut -d' ' -f1)  $WORK/minio/minio" | sha256sum --check
+chmod +x "$WORK/minio/minio"
+docker run -d --name minio --network $NET -p 127.0.0.1:9000:9000 -v "$WORK/minio":/opt/minio:ro \
   -e MINIO_ROOT_USER="$S3_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET" \
-  quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data >/dev/null
+  ubuntu:24.04 /opt/minio/minio server /data >/dev/null
 for i in $(seq 1 60); do curl -fs http://127.0.0.1:9000/minio/health/ready && break; sleep 1; done
 export AWS_ACCESS_KEY_ID="$S3_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET" AWS_DEFAULT_REGION=us-east-1
 S3="aws --endpoint-url http://127.0.0.1:9000 s3"
