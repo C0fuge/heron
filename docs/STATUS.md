@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int4|int5.
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int4|int5|int6 (int5+ also run `e2e/ci/iceberg.sh`).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
   `rclone/rclone:1.68.2 serve s3`. The server needs a writable working directory (DuckDB `.tmp`). The release
   is a draft, so the e2e job needs `contents: write` to download assets. Job logs: `gh api .../logs` is blocked
@@ -57,18 +57,20 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 > **Use server int6 instead of int5** (2026-10-22, local coordinator): int5 overflows its stack on the first table refresh ~30 s after start when any catalog is configured AND the data dir has a table (then every call fails "Application error processing RPC"). int6 = int5 + fix + catalog plugin `hive` (Hive Metastore; SPI 1.1): assets `arrow-flight-server-1.0.0-int6.jar` sha256 78f06212…8d09, `int6-plugins.tar.zst` sha256 fa870ddb…adaf (plugins s3/lakefs/iceberg/hive + START-NOTES.txt). With the iceberg plugin present, `catalog=hive` needs the iceberg+avro extensions or `hive.icebergTables=skip`.
 
-1. **Server int5 with Iceberg** (release asset `arrow-flight-server-1.0.0-int5.jar` sha256 01feeb77…5808 +
-   `int5-plugins.tar.zst` sha256 f600585d…5f68 with `plugins/{s3,lakefs,iceberg}` and START-NOTES.txt = int4 + catalog
-   plugin `iceberg`: kinds `iceberg-hadoop` (warehouse dir on local/HDFS/S3) and `iceberg-rest` (Gravitino/Polaris);
-   `-Dcatalog=` list; partial mode pins the snapshot per query, falls back to a complete answer with delete files /
-   nested schema changes / joins). Add an Iceberg variant to CI: generate Iceberg tables in the job (e.g. pyiceberg
-   with a local SQL catalog writing parquet into the S3 bucket, or Spark/iceberg if simpler): TPC-H SF1 lineitem/orders
-   as Iceberg + a table with position/equality deletes + a renamed column; check the engine sees them, results equal
-   the parquet tables / DuckDB, partial and complete modes; a commit between two queries is seen by the second only.
-   The e2e job already takes `server-build=int5` (workflow input / `SERVER_BUILD`); int5 baseline on parquet is green (run 39841317139).
-   Plan: an `iceberg` step in `run-e2e.sh` behind `SERVER_BUILD=int5`, pyiceberg (pinned) + SqlCatalog (sqlite) writing
-   to `s3://lake/iceberg` via rclone, server started with the catalog flags from START-NOTES; answers compared with
-   `types_check.py`-style DuckDB references.
+1. **Iceberg in CI (server int6)** — in progress. Done (session 3): `e2e/ci/iceberg.sh`, on by default for
+   `server-build` int5/int6 (`ICEBERG=0|1`): Spark 3.5.3 + Iceberg 1.6.1 (`apache/spark:3.5.3`, runtime jar from Maven
+   Central) writes a HadoopCatalog warehouse `$WORK/wh` (namespace `ice`) from the SF1 Parquet; every server mounts it
+   at `/wh` (`-Dcatalog=iceberg-hadoop -Darrowflight.iceberg-hadoop.warehouse=/wh -Darrowflight.catalog.localRootsShared=true`,
+   DuckDB iceberg+avro v1.4.5, `core-site.xml` with `fs.file.impl` — see Open questions). Checks through Trino: tables
+   listed; full copies lineitem/orders/customer = Parquet (row count + per-column `checksum`); rename (`c_comment` →
+   `c_note`) OK; TPC-H q01 q03 q04 q06 q12 q13 q18 q22 on schema `ice` = DuckDB reference; a commit between two queries is
+   seen by the second only. Green parts on int6, partial, 1 server (run 39851301285). Open:
+   a) `ice.orders_del` (merge-on-read position deletes): server bug, KNOWN in CI (see Open questions); recheck when a
+      fixed server build arrives and turn KNOWN back into FAIL.
+   b) run int6 with `result-mode=complete` (expected: every Iceberg table hits the same iceberg_scan refusal) and with
+      `servers=3` (partial: files spread over nodes, snapshot pinning, failover with catalog tickets).
+   c) maybe an S3 warehouse (`s3://lake/parquet/...` under the dataDir) instead of the local one, if Spark+s3a is cheap
+      enough; equality deletes (need Flink/pyiceberg) are not covered.
 1b. **e2e: a kill in the middle of a stream** that already delivered data (must be a clean error, never fewer rows);
    all kills so far landed before the first batch (needs a larger/slower read, e.g. `SELECT *` of lineitem).
 2. **Connection reset after one failed stream**: today one failed stream makes the plugin drop all its pooled
@@ -84,11 +86,21 @@ Kept up to date after every work session so work can be resumed from this reposi
    build commands; keep 455 the default.
 
 ## Open questions
+- **Server int6, Iceberg tables with delete files are unusable (local warehouse)**: the complete-answer view
+  `iceberg_scan('/wh/ice/orders_del/metadata/v2.metadata.json')` is skipped at refresh — DuckDB: `Permission Error: Cannot
+  access file "file:/wh/ice/orders_del/metadata/snap-….avro" - file system operations are disabled by configuration` —
+  so the table is listed but `SELECT` fails "Table with name orders_del does not exist" (clean error, no wrong rows).
+  The same skip is logged for every Iceberg table's view (e.g. ice.commits), so complete mode probably cannot read
+  any Iceberg table from a local warehouse; partial mode works because it reads the data files. Metadata written by
+  Spark/Hadoop uses `file:/…` URIs. Server fix needed (allow the catalog roots / `file:` scheme in DuckDB).
+- **Server int6 with a local (`file`) warehouse fails at startup** with `No FileSystem for scheme "file"`
+  (HadoopDataStoreProvider; the Hadoop jars in `libs/` do not register LocalFileSystem). CI works around it with a
+  `core-site.xml` (`fs.file.impl=org.apache.hadoop.fs.LocalFileSystem`) on the server classpath. Fix in the server?
 
 - e2e S3 is `rclone serve s3` instead of MinIO (MinIO images/binaries are no longer downloadable). OK, or is
   there a MinIO build you want to put into `e2e-assets`?
-- The release now holds int4 and int5; the e2e job picks one with `server-build` (default int4, the current
-  release candidate). Switch the default to int5 once you consider it the candidate?
+- The release now holds int4, int5 and int6; the e2e job picks one with `server-build` (default int4, the current
+  release candidate). Switch the default to int6 once you consider it the candidate?
 - `e2e-assets` is a draft release, so the e2e job runs with `contents: write`. Publishing it as a (private-repo)
   pre-release would let the job use `contents: read`. Your call — no change made.
 
