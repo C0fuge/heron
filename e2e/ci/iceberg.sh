@@ -163,10 +163,10 @@ ice_compare() {
         # '|| true': with pipefail a node that never logged the table would end the job (set -e)
         echo "--- $h log lines naming $it"; docker logs "$h" 2>&1 | grep -A3 "$it" | tail -30 || true; done
     } 2>&1 | cut -c1-600 | tee "$OUT/iceberg-$it-diagnostics.txt"
-    # Known server issue (int6, local warehouse): the complete-answer view (iceberg_scan) is refused by
+    # Known server issue (int5/int6, local warehouse): the complete-answer view (iceberg_scan) is refused by
     # DuckDB, "file system operations are disabled by configuration", so the table is missing (clean
-    # error, no wrong rows). Reported as KNOWN; any other cause fails.
-    if grep -qE "skipTable table=ice\.$it reason=.*file system operations are disabled" \
+    # error, no wrong rows). Reported as KNOWN for those builds only; any other cause, or any later build, fails.
+    if [[ "$SERVER_BUILD" =~ ^int[56]$ ]] && grep -qE "skipTable table=ice\.$it reason=.*file system operations are disabled" \
          "$OUT/iceberg-$it-diagnostics.txt"; then
       ice_out "$check" KNOWN "ice.$it has no columns: server skips its iceberg_scan view (DuckDB 'file system operations are disabled'); queries fail cleanly"
     else
