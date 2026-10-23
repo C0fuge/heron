@@ -20,6 +20,8 @@
         <trino.compat.src>src/trino-455/java</trino.compat.src>
         <!-- must match the slice the target trino-spi was built with -->
         <dep.slice.version>2.3</dep.slice.version>
+        <!-- SPI-provided; must match the jackson-databind on the classpath (483 profile: Jackson 2.22) -->
+        <dep.jackson-annotations.version>2.18.2</dep.jackson-annotations.version>
     </properties>
 
     <dependencies>
@@ -52,7 +54,7 @@
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-annotations</artifactId>
-            <version>2.18.2</version>
+            <version>${dep.jackson-annotations.version}</version>
             <scope>provided</scope>
         </dependency>
         <!-- part of the Trino SPI surface: transitive from trino-spi, must not be bundled -->
@@ -189,6 +191,10 @@
                 <maven.compiler.release>25</maven.compiler.release>
                 <trino.compat.src>src/trino-483/java</trino.compat.src>
                 <dep.slice.version>2.8</dep.slice.version>
+                <!-- Jackson 2.20+ versions jackson-annotations without a patch number; 2.18.2 lacks
+                     classes jackson-databind 2.22 loads (JsonSerializeAs), which broke Arrow's Schema
+                     in the unit tests -->
+                <dep.jackson-annotations.version>2.22</dep.jackson-annotations.version>
             </properties>
             <!--
               Trino 483's JSON mapper uses Jackson Blackbird, which generates creator code inside the
