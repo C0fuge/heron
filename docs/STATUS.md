@@ -182,7 +182,11 @@ Kept up to date after every work session so work can be resumed from this reposi
    3 servers run 39998499713 (23 min) and 483 partial 3 servers `iceberg-warehouse=s3` run 39998502629 (27 min), both green
    (TPC-H, types, Iceberg, failover, two nodes down; mid-stream kill hit after data on attempt 1 in both = clean error, also
    in complete mode). Not yet run with int7: 483 complete 3 servers, 477 with `iceberg-warehouse=s3`, 477 partial — low value,
-   run only if a plugin change touches them. Maintainer answers in Open questions
+   run only if a plugin change touches them. Session 22: int7 does **not** need the CI `core-site.xml` (`fs.file.impl`)
+   workaround: new workflow input `iceberg-core-site` (`ICEBERG_CORE_SITE`, empty = 1 for int5/int6, 0 otherwise); int7
+   Trino 455 partial 1 server without it, run 40006799225, green (server starts, TPC-H 22/22, every Iceberg check OK incl.
+   `orders_del`). Not yet run without it: int7 with `iceberg-warehouse=s3` or 3 servers (same server code path; low risk).
+   Maintainer answers in Open questions
    (defaults for TopN, dynamic filters, split count / parallelism). Mid-stream kill in complete mode — investigated
    (session 12), stays INFO: delays now default to 50/65/80/90 % of the healthy baseline in complete mode; in run
    39927746471 (baseline 17.9 s, kills at 8/11/14/16 s) all 4 kills still found flight3's streams open but empty
@@ -249,7 +253,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   the server open a second store for it?
 - The release now holds int4…int7; the e2e job picks one with `server-build` (default int4, the current
   release candidate). Switch the push default to int7 once you consider it the candidate? (int7 not yet in `SHA256SUMS`.)
-  Does int7 still need the CI `core-site.xml` workaround (`fs.file.impl`), given its "LocalFileSystem" fix? Not tested.
+  (Answered, session 22: int7 runs without the `core-site.xml` workaround, run 40006799225; CI now adds it for int5/int6 only.)
 - (resolved, session 16) `e2e-assets` is a published pre-release (since 2026-10-22), so the e2e job now runs with
   `contents: read`; asset download verified in run 39964823185.
 
@@ -379,3 +383,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   39998499713 and Trino 483 partial 3 servers with `iceberg-warehouse=s3` run 39998502629: both green (TPC-H 22/22, types,
   Iceberg incl. `orders_del`, kill during a read, mid-stream kill hit after data = clean error, two nodes down). ~50 Actions
   minutes. No code changed; invariants hold.
+- 2026-10-23 (cloud session 22): item 7, open question "does int7 still need `core-site.xml`?". e2e input `iceberg-core-site`
+  (default: workaround only for int5/int6); int7 Trino 455 partial 1 server without it, run 40006799225: green (TPC-H 22/22,
+  TopN, dynfilter, types, Iceberg incl. `orders_del` deletes). e2e harness only, pushed with `[skip ci]` (int4 push matrix
+  would not exercise it). ~19 Actions minutes. No plugin code changed; invariants hold.
