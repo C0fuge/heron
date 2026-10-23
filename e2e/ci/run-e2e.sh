@@ -447,7 +447,8 @@ if [ "$SERVERS" -ge 3 ]; then
   # Node lost after its stream delivered data: the plugin must not retry (rows could be read twice),
   # so the query fails cleanly; an answer must equal the healthy baseline, never fewer rows. Evidence
   # of a hit is the plugin's "failed after delivering data" WARN for flight3; a miss on every delay
-  # is INFO (timing-dependent). The query streams all of lineitem (checksum is not pushed down); its
+  # fails the job in partial mode (attempt 1 hit in every 3-server run since 39891124604, Trino 455/477/483)
+  # and is INFO in complete mode (timing not established there). The query streams all of lineitem (checksum is not pushed down); its
   # streams open ~7-8 s after submission and one column took <1 s (runs 39886487789, 39888037652).
   # One checksum per column (written while checksum(ROW(...)) still looped the optimizer, run 39889582040;
   # the ROW form is now checked on its own above).
@@ -491,7 +492,7 @@ if [ "$SERVERS" -ge 3 ]; then
       [ "$wrong" = 1 ] && break
       [ "$hit" = yes ] && break
     done
-    evidence=$([ "$wrong" = 1 ] && echo FAIL || { [ "$hit" = yes ] && echo OK || echo INFO; })
+    evidence=$([ "$wrong" = 1 ] && echo FAIL || { [ "$hit" = yes ] && echo OK || { [ "$RESULT_MODE" = partial ] && echo FAIL || echo INFO; }; })
     { printf 'query\tresult\tdetail\n'
       printf 'stream\t%s\t%s attempt(s), wrong answers: %s; kill hit a stream of flight3 after data: %s\n' \
         "$evidence" "$attempt" "$wrong" "$hit"; } | tee "$OUT/killed-mid-stream-summary.tsv"
