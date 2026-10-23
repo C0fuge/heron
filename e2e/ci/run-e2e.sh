@@ -233,6 +233,20 @@ if [ "$SERVERS" -ge 3 ]; then
   # kill); otherwise flight3 is restarted and the kill retried with the next delay. In partial
   # mode a miss on every delay fails the job (schema tpch; for the Iceberg schema a miss is INFO:
   # whether flight3 serves any of its data files depends on how Spark split them).
+  # A server starts only once every --hosts member has joined, so flight3 cannot come back alone
+  # while flight2 is down: both are restarted (old logs kept as <host>-runN.log).
+  RESTARTS=0
+  restart_lost() {
+    local h
+    RESTARTS=$((RESTARTS + 1))
+    for h in flight2 flight3; do
+      docker logs "$h" > "$OUT/$h-run$RESTARTS.log" 2>&1 || true
+      docker rm -f "$h" >/dev/null 2>&1 || true
+      start_server "$h"
+    done
+    for h in flight2 flight3; do wait_server "$h"; done
+    sleep 5
+  }
   kill_during() {  # schema out-name; flight3 must be running
     local schema=$1 name=$2 attempt=0 hit=no delay dir result evidence
     log "failover: flight3 killed during a read (schema $schema)"
@@ -240,9 +254,7 @@ if [ "$SERVERS" -ge 3 ]; then
     for delay in ${KILL_DURING_DELAYS:-2 1 4 6}; do
       attempt=$((attempt + 1))
       dir="$OUT/$name/$attempt"; mkdir -p "$dir"
-      if [ "$attempt" -gt 1 ]; then
-        docker rm -f flight3 >/dev/null; start_server flight3; wait_server flight3; sleep 5
-      fi
+      [ "$attempt" -gt 1 ] && restart_lost
       mark_log
       QUERY_SCHEMA=$schema run_query q18 "$dir" &
       sleep "$delay"
@@ -266,12 +278,13 @@ if [ "$SERVERS" -ge 3 ]; then
   kill_during tpch killed-during
   if [ "$ICEBERG" = 1 ]; then
     # Iceberg tables: endpoints carry catalog (snapshot-pinned) tickets
-    docker rm -f flight3 >/dev/null; start_server flight3; wait_server flight3; sleep 5
+    restart_lost
     kill_during ice killed-during-ice
   fi
 
   # Two of three nodes lost (flight2 and flight3): every answer exact, or a clean error.
   log "failover: flight2 and flight3 down"
+  docker kill flight2 flight3 >/dev/null 2>&1 || true  # back up if kill_during restarted them
   mkdir -p "$OUT/two-killed"
   for q in $FAILOVER_QUERIES; do run_query "$q" "$OUT/two-killed"; done
   check_exact_or_error "$OUT/two-killed" "$OUT/two-killed-summary.tsv" $FAILOVER_QUERIES
