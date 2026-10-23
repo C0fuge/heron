@@ -27,6 +27,8 @@ in the detail ("N cells equal at Trino DECIMAL scale").
 | 2026-10-22 | 39840087384 | 455 | partial | 3 | 22/22, types 2/2 | lost before 5+5 exact; killed during q18 exact, 3 streams failed over to flight1; two killed 5/5 exact | 8 min |
 | 2026-10-23 | 39874470743 | 455 (int6) | complete | 1 | 22/22, types 2/2, Iceberg (deletes KNOWN) | – | 8.5 min |
 | 2026-10-23 | 39878210446 | 455 (int6) | partial | 3 | 22/22, types 2/2, Iceberg (deletes KNOWN) | lost before 5+5 exact; killed during q18 exact on tpch (attempt 1) and on ice (attempt 3, streams re-read from flight2); two killed 5/5 tpch + 3/3 ice exact | 11 min |
+| 2026-10-23 | 39886319914 | 455 (int6) | complete | 3 | 22/22, types 2/2, Iceberg (deletes KNOWN) | lost before 5+5 exact; killed during q18 exact (tpch; ice attempt 3, streams re-read from flight1); two killed 5/5 + 3/3 exact | 14 min |
+| 2026-10-23 | 39886487789 | 455 (int6) | partial | 3 | 22/22, types 2/2, Iceberg (deletes KNOWN) | killed during q18 (tpch): clean error, one flight3 stream "failed after delivering data; not retried" (first mid-stream hit); ice exact; mid-stream lineitem check 4 misses (INFO, delays too short), all exact; two killed exact | 15.5 min |
 
 Types (`e2e/ci/types_check.py`, every run): each table of schema `types` read with `SELECT` of all
 exposed columns through Trino (Python client, raw protocol values) vs DuckDB 1.4.1 (pip, in the job) on the
@@ -50,8 +52,14 @@ Failover checks (3 servers, `--hosts flight1,flight2,flight3`, catalog points to
 - *two killed*: flight2 and flight3 down, q01 q03 q05 q06 q18 → exact or clean error (observed: 5/5 exact,
   flight1 answers alone) With Iceberg on, also q01 q03 q18 on schema `ice`.
 
-Not covered yet: a kill in the middle of a stream that already delivered data (must be a clean error); every
-kill so far landed before the first batch.
+- *killed mid-stream*: `SELECT count(*), checksum(l_comment), checksum(l_orderkey), checksum(l_extendedprice)
+  FROM lineitem` (not pushed down, streams most of lineitem) run once on the healthy cluster as baseline, then
+  with `docker kill flight3` after 10, 13, 8, 16 s (`KILL_STREAM_DELAYS`; restart of flight2+flight3 between
+  attempts) → the answer must equal the baseline or the query fails cleanly; evidence of a hit is the plugin's
+  WARN `Flight stream at …flight3… failed after delivering data (…); not retried` (added 2026-10-23; behaviour
+  unchanged, such failures were always final). A miss on every delay is INFO. A wrong answer fails the job.
+  The *killed during* q18 check can also hit mid-stream (run 39886487789: clean error "Network closed for
+  unknown reason" plus that WARN).
 
 Server build: `SERVER_BUILD` / workflow input `server-build` (`int4` default, `int5`) picks
 `arrow-flight-server-1.0.0-<build>.jar` + `<build>-plugins.tar.zst` from the release.
