@@ -178,7 +178,11 @@ Kept up to date after every work session so work can be resumed from this reposi
    Session 12: 477 + int6 complete mode 3 servers: every check passed (TPC-H 22/22, projection, TopN, dynfilter,
    splits, types 2/2, Iceberg incl. failover on `ice`, two nodes down), but the job hit its 30-min limit 4 s before
    the end (run 39927746471, cancelled) → `timeout-minutes: 40`. Not run: 483 int6 on 1 server, 477 int6 1 server.
-7. Open follow-ups (pick by value): int7 on Trino 477 and on 483 with 3 servers / complete mode (483 partial 1 server done, run 39991939760) and with `iceberg-warehouse=s3` (not yet run); maintainer answers in Open questions
+7. Open follow-ups (pick by value): int7 coverage — done so far (session 21, after the session-20 dependency pins): 477 complete
+   3 servers run 39998499713 (23 min) and 483 partial 3 servers `iceberg-warehouse=s3` run 39998502629 (27 min), both green
+   (TPC-H, types, Iceberg, failover, two nodes down; mid-stream kill hit after data on attempt 1 in both = clean error, also
+   in complete mode). Not yet run with int7: 483 complete 3 servers, 477 with `iceberg-warehouse=s3`, 477 partial — low value,
+   run only if a plugin change touches them. Maintainer answers in Open questions
    (defaults for TopN, dynamic filters, split count / parallelism). Mid-stream kill in complete mode — investigated
    (session 12), stays INFO: delays now default to 50/65/80/90 % of the healthy baseline in complete mode; in run
    39927746471 (baseline 17.9 s, kills at 8/11/14/16 s) all 4 kills still found flight3's streams open but empty
@@ -371,3 +375,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   green 39991483490). Build all versions run 39991724522 green; e2e int4 455 partial 1+3 servers run 39991081221 and int7 483
   partial 1 server run 39991939760 green. Push e2e 39990774578 cancelled (broken build). ~55 Actions minutes. Plugin code
   unchanged (dependencies only); invariants hold (failover checks incl. mid-stream kill green, token auth in every e2e run).
+- 2026-10-23 (cloud session 21): item 7, int7 coverage with the new dependency pins. e2e int7 Trino 477 complete 3 servers run
+  39998499713 and Trino 483 partial 3 servers with `iceberg-warehouse=s3` run 39998502629: both green (TPC-H 22/22, types,
+  Iceberg incl. `orders_del`, kill during a read, mid-stream kill hit after data = clean error, two nodes down). ~50 Actions
+  minutes. No code changed; invariants hold.
