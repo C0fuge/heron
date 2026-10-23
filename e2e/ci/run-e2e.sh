@@ -458,12 +458,14 @@ if [ "$SERVERS" -ge 3 ]; then
          > "$1/stream.tsv" 2> "$1/stream.err"; then rm -f "$1/stream.err"; else rm -f "$1/stream.tsv"; fi
   }
   kill_mid_stream() {
-    local dir="$OUT/killed-mid-stream" attempt=0 hit=no wrong=0 delay adir result evidence start
+    local dir="$OUT/killed-mid-stream" attempt=0 hit=no wrong=0 delay delays base_s adir result evidence start
     log "failover: flight3 killed in the middle of a stream"
     restart_lost
     mkdir -p "$dir/base"
     start=$(date +%s.%N); stream_query "$dir/base"
-    printf 'killed-mid-stream\tbase\t%.2f\n' "$(echo "$(date +%s.%N) - $start" | bc)" >> "$OUT/times.tsv"
+    base_s=$(echo "$(date +%s.%N) - $start" | bc)
+    printf 'killed-mid-stream\tbase\t%.2f\n' "$base_s" >> "$OUT/times.tsv"
+    log "mid-stream baseline took ${base_s} s"
     if [ ! -f "$dir/base/stream.tsv" ]; then
       cat "$dir/base/stream.err"
       printf 'query\tresult\tdetail\nstream\tFAIL\tbaseline failed on a healthy cluster\n' | tee "$OUT/killed-mid-stream-summary.tsv"
@@ -471,7 +473,16 @@ if [ "$SERVERS" -ge 3 ]; then
     fi
     cat "$dir/base/stream.tsv"
     printf 'attempt\tdelay_s\tresult\tflight3_hit\n' > "$OUT/killed-mid-stream-attempts.tsv"
-    for delay in ${KILL_STREAM_DELAYS:-9 8 10 11}; do
+    # Complete mode: a stream's first batch comes only after the server has the whole answer, so a kill
+    # at 8-11 s found flight3's streams open but still empty (run 39920606099, 4/4 "before any data").
+    # Kill there at 50/65/80/90 % of the healthy baseline instead.
+    if [ -z "${KILL_STREAM_DELAYS:-}" ] && [ "$RESULT_MODE" = complete ]; then
+      delays=$(awk -v b="$base_s" 'BEGIN { printf "%d %d %d %d", b*0.5, b*0.65, b*0.8, b*0.9 }')
+    else
+      delays=${KILL_STREAM_DELAYS:-9 8 10 11}
+    fi
+    log "mid-stream kill delays: $delays"
+    for delay in $delays; do
       attempt=$((attempt + 1))
       adir="$dir/$attempt"; mkdir -p "$adir"
       [ "$attempt" -gt 1 ] && restart_lost
