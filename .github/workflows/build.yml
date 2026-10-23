@@ -38,6 +38,8 @@ jobs:
           cache: maven
       - name: Build and unit-test (Trino ${{ matrix.trino }})
         run: mvn -B -ntp -P trino-${{ matrix.trino }} clean verify
+      - name: Check bundled jars (fail on dependency drift)
+        run: trino-arrow-flight/bundle/check-bundle.sh trino-arrow-flight/target/trino-arrow-flight-*.zip trino-arrow-flight/bundle/trino-${{ matrix.trino }}.txt
       - name: Upload plugin zip
         if: matrix.trino == '455'
         uses: actions/upload-artifact@v4

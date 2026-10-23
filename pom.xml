@@ -36,15 +36,23 @@
         <dep.trino.version>455</dep.trino.version>
         <dep.airlift.version>252</dep.airlift.version>
         <dep.arrow.version>18.1.0</dep.arrow.version>
-        <!-- Arrow 18.1.0 brings grpc 1.65.0 with part of Netty at 4.1.114 and part at 4.1.100.
-             grpc-netty 1.65.0 on Netty 4.1.111+ nests the receive buffers of a connection, and a
-             busy stream then dies with "Failed to read message" (StackOverflowError when the
-             nested buffers are released). 1.65.1 fixes that; Netty is kept on one version. -->
-        <dep.grpc.version>1.65.1</dep.grpc.version>
-        <dep.netty.version>4.1.114.Final</dep.netty.version>
+        <!-- Arrow 18.1.0 brings grpc 1.65.0 with part of Netty at 4.1.114 and part at 4.1.100, protobuf
+             3.25.4 (CVE-2024-7254) and Jackson 2.18.0. All four are pinned here through BOMs so the plugin
+             bundles one version of each; the CI build checks the bundled jars against
+             trino-arrow-flight/bundle/trino-<version>.txt and fails on drift.
+             grpc 1.82.x is the last line built on Netty 4.1 (1.83+ moved to 4.2); Netty stays on 4.1 because
+             arrow-memory-netty 18.1.0 patches classes inside io.netty.buffer. Keep Netty >= the version
+             grpc-netty was built with (4.1.133 for 1.82.4): grpc-netty 1.65.0 on a newer Netty broke busy
+             streams ("Failed to read message", fixed in 1.65.1), so never pair an old grpc with a new Netty. -->
+        <dep.grpc.version>1.82.4</dep.grpc.version>
+        <dep.netty.version>4.1.139.Final</dep.netty.version>
+        <dep.protobuf.version>3.25.9</dep.protobuf.version>
+        <!-- bundled jackson-core/databind/datatype; the 483 profile of trino-arrow-flight overrides with 2.22.1 -->
+        <dep.jackson.version>2.18.12</dep.jackson.version>
         <dep.guice.version>7.0.0</dep.guice.version>
         <dep.slf4j.version>2.0.16</dep.slf4j.version>
-        <dep.guava.version>33.4.0-jre</dep.guava.version>
+        <!-- grpc 1.82 needs Guava 33.5+ -->
+        <dep.guava.version>33.5.0-jre</dep.guava.version>
         <dep.junit.version>5.11.4</dep.junit.version>
     </properties>
 
@@ -63,6 +71,23 @@
                 <version>${dep.netty.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${dep.jackson.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.google.protobuf</groupId>
+                <artifactId>protobuf-java</artifactId>
+                <version>${dep.protobuf.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.protobuf</groupId>
+                <artifactId>protobuf-java-util</artifactId>
+                <version>${dep.protobuf.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.arrow</groupId>
