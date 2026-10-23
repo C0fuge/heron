@@ -223,8 +223,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   the server open a second store for it?
 - The release now holds int4, int5 and int6; the e2e job picks one with `server-build` (default int4, the current
   release candidate). Switch the default to int6 once you consider it the candidate?
-- `e2e-assets` is a draft release, so the e2e job runs with `contents: write`. Publishing it as a (private-repo)
-  pre-release would let the job use `contents: read`. Your call — no change made.
+- (resolved, session 16) `e2e-assets` is a published pre-release (since 2026-10-22), so the e2e job now runs with
+  `contents: read`; asset download verified in run 39964823185.
 
 ## Log
 
