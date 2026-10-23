@@ -35,9 +35,9 @@ concurrency:
   group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}
   cancel-in-progress: true
 
-# contents: write only because e2e-assets is a draft release (drafts are invisible to read tokens).
+# e2e-assets is a published pre-release, so a read token can list and download its assets.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   e2e:
