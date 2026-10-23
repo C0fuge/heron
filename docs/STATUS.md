@@ -55,6 +55,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Dependency audit 2026-10-23** (local coordinator): the built plugin tarball does not match the pom pins — it ships Netty 4.1.100 modules, gRPC 1.65.0 and protobuf 3.25.4 (CVE-2024-7254); Jackson 2.18.0. Align via BOMs (netty-bom 4.1.137+ or 4.2.17+ as Trino's classloader allows, grpc-bom current, protobuf 3.25.5+/4.x, jackson 2.18.11+), rebuild for 455/477/483, verify the tarball contents in CI (fail the build on drift), e2e green. Do this before other open follow-ups.
+
 > **Use server int7** (2026-10-23, local coordinator): `arrow-flight-server-1.0.0-int7.jar` sha256 2b9595ab…06fa + `int7-plugins.tar.zst` sha256 4d2416f4…1af4 (plugins s3/lakefs/iceberg/hive + START-NOTES.txt) = int6b + all stand fixes (lakeFS: JOIN commit mixing, complete-mode lag, tags; Iceberg: file:/s3a roots, LocalFileSystem, Gravitino errors; Hive: HDFS paths with space/%, out-of-root partitions hidden, metastore fail-fast, UNAVAILABLE on outage; Iceberg equality deletes read all columns — correct, slow). Replace int6/int6b in CI with int7; rerun the full suite once.
 
 > **Use server int6 instead of int5** (2026-10-22, local coordinator): int5 overflows its stack on the first table refresh ~30 s after start when any catalog is configured AND the data dir has a table (then every call fails "Application error processing RPC"). int6 = int5 + fix + catalog plugin `hive` (Hive Metastore; SPI 1.1): assets `arrow-flight-server-1.0.0-int6.jar` sha256 78f06212…8d09, `int6-plugins.tar.zst` sha256 fa870ddb…adaf (plugins s3/lakefs/iceberg/hive + START-NOTES.txt). With the iceberg plugin present, `catalog=hive` needs the iceberg+avro extensions or `hive.icebergTables=skip`.
