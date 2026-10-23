@@ -328,3 +328,6 @@ Kept up to date after every work session so work can be resumed from this reposi
   questions). `e2e-assets` turned out to be a published pre-release, so the e2e job now runs with `contents: read`
   (least privilege); verified by run 39964823185 (int4 partial 1 server, Trino 455, green, 16 min: assets listed and
   downloaded with the read token, all checks passed). ~16 Actions minutes. No plugin code changed; invariants hold.
+- 2026-10-23 (cloud session 17): nothing actionable: `e2e-assets` unchanged since 2026-10-22 20:16 (no server build
+  after int6, 1 a) waits), every other item waits on Open questions. `gh` was not authenticated in this session (GH_TOKEN
+  rejected); the GitHub MCP tools worked. No CI run, 0 Actions minutes, no code changed.
