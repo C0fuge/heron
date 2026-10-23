@@ -46,6 +46,7 @@ public abstract class AbstractArrowFlightPageSourceProvider
                 projected.build(),
                 ArrowFlightSessionProperties.isDynamicFilteringEnabled(session) ? dynamicFilter : DynamicFilter.EMPTY,
                 ArrowFlightSessionProperties.getDynamicFilteringWaitMillis(session),
-                ArrowFlightSessionProperties.getDynamicFilteringMaxValues(session));
+                ArrowFlightSessionProperties.getDynamicFilteringMaxValues(session),
+                ArrowFlightSessionProperties.getEndpointReadParallelism(session));
     }
 }

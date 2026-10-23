@@ -2,8 +2,9 @@
 # CI end-to-end run: S3 (rclone) + Flight SQL server(s) + Trino with this plugin, TPC-H SF1 22/22
 # compared with e2e/ci/reference/sf1, and every table of schema 'types' compared with DuckDB
 # (pip duckdb==1.4.1) reading the same Parquet files (e2e/ci/types_check.py).
-# Also: an unpushable projection, TopN pushdown on vs off, and dynamic filters on vs off (DF_QUERIES: answers
-# vs the reference, rows read and time per setting in dynfilter-rows.tsv).
+# Also: an unpushable projection, TopN pushdown on vs off, dynamic filters on vs off (DF_QUERIES: answers
+# vs the reference, rows read and time per setting in dynfilter-rows.tsv), and split count x endpoint read parallelism
+# (PAR_QUERIES: answers vs the reference, times in splits-times.tsv).
 #
 #   ASSETS=<dir with the e2e-assets release files>  PLUGIN_ZIP=<plugin zip>  OUT=<results dir>
 #   TRINO_VERSION=455  RESULT_MODE=partial  SERVERS=1|3  SERVER_BUILD=int4|int5|int6  e2e/ci/run-e2e.sh
@@ -261,6 +262,59 @@ for q in $DF_QUERIES; do
 done
 "${COMPARE[@]}" "$OUT/dynfilter/on" "$QUERIES" "$OUT/dynfilter-summary.tsv" "$DF_QUERIES" || status=1
 "${COMPARE[@]}" "$OUT/dynfilter/big" "$QUERIES" "$OUT/dynfilter-big-summary.tsv" "$DF_QUERIES" || status=1
+
+# Splits and endpoint reads (STATUS item 5): range splits per scan (flight.split_count 1 or 4) x endpoints of a split
+# read one after another or PAR_PARALLELISM at a time (flight.endpoint_read_parallelism; with one server a split has one
+# endpoint, so only split_count changes anything). Every answer must equal the reference (the full-scan checksum: equal in
+# every setting); elapsed times (best of PAR_REPEAT) go to splits-times.tsv (INFO: the measurement).
+PAR_QUERIES="${PAR_QUERIES:-q03 q12 q14 q18 q19}"
+PAR_PARALLELISM="${PAR_PARALLELISM:-3}"
+PAR_REPEAT="${PAR_REPEAT:-2}"
+PAR_SETTINGS="s1p1 s1p$PAR_PARALLELISM s4p1 s4p$PAR_PARALLELISM"
+SCAN_SQL='SELECT count(*), checksum(ROW(l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment)) FROM lineitem'
+log "splits: $PAR_SETTINGS on $PAR_QUERIES + full lineitem scan"
+par_run() {  # setting name out-file (-f file | --execute sql)
+  local setting=$1 name=$2 outf=$3; shift 3
+  local splits=${setting#s}; splits=${splits%p*}
+  local par=${setting#*p} best="" i t0 t
+  for i in $(seq 1 "$PAR_REPEAT"); do
+    t0=$(date +%s.%N)
+    docker exec trino trino --catalog flight --schema tpch --session "flight.split_count=$splits" \
+      --session "flight.endpoint_read_parallelism=$par" --output-format TSV "$@" > "$outf" 2> "${outf%.tsv}.err" \
+      || { rm -f "$outf"; break; }
+    t=$(echo "$(date +%s.%N) - $t0" | bc)
+    best=$(awk -v a="$best" -v b="$t" 'BEGIN { if (a == "" || b + 0 < a + 0) printf "%.2f", b; else print a }')
+  done
+  printf 'splits-%s\t%s\t%s\n' "$setting" "$name" "${best:-?}" >> "$OUT/times.tsv"
+  echo "${best:-error}"
+}
+printf 'query\t%s\n' "$(echo "$PAR_SETTINGS" | tr ' ' '\t')" > "$OUT/splits-times.tsv"
+for setting in $PAR_SETTINGS; do mkdir -p "$OUT/splits/$setting"; done
+for q in $PAR_QUERIES scan; do
+  row="$q"
+  for setting in $PAR_SETTINGS; do
+    if [ "$q" = scan ]; then
+      row+="\t$(par_run "$setting" scan "$OUT/splits/$setting/scan.tsv" --execute "$SCAN_SQL")"
+    else
+      row+="\t$(par_run "$setting" "$q" "$OUT/splits/$setting/$q.tsv" -f "/queries/$q.sql")"
+    fi
+  done
+  printf "$row\n" | tee -a "$OUT/splits-times.tsv"
+done
+printf 'setting\tresult\tdetail\n' > "$OUT/splits-summary.tsv"
+base="$OUT/splits/s1p1/scan.tsv"
+for setting in $PAR_SETTINGS; do
+  "${COMPARE[@]}" "$OUT/splits/$setting" "$QUERIES" "$OUT/splits/$setting/compare.tsv" "$PAR_QUERIES" || status=1
+  if [ -f "$base" ] && [ -f "$OUT/splits/$setting/scan.tsv" ] && cmp -s "$base" "$OUT/splits/$setting/scan.tsv" \
+     && [ "$(cut -f1 "$base")" = 6001215 ]; then
+    result=OK; detail="scan $(tr '\t' ' ' < "$base")"
+  else
+    result=FAIL; status=1; detail="scan differs or failed: $(cat "$OUT/splits/$setting/scan.tsv" "$OUT/splits/$setting/scan.err" 2>/dev/null | head -c 300)"
+  fi
+  printf '%s\t%s\t%s; %s\n' "$setting" "$result" "$detail" \
+    "$(awk -F'\t' 'NR > 1 { n++; if ($2 == "OK") ok++ } END { printf "%d/%d queries = reference", ok, n }' "$OUT/splits/$setting/compare.tsv")" \
+    | tee -a "$OUT/splits-summary.tsv"
+done
 
 if [ -n "$TYPES" ]; then
   log "types: SELECT * per table vs DuckDB on the same Parquet"

@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 import static io.trino.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
 import static io.trino.spi.type.TypeUtils.readNativeValue;
@@ -34,6 +35,9 @@ import static java.util.Objects.requireNonNull;
  * before the first read: by then the join dynamic filters (e.g. the keys of the small side of
  * a join) are usually known and are added to the WHERE clause, so the server sends only rows
  * that can match. Up to {@code dynamic_filtering_wait_timeout_ms} is spent waiting for them.
+ * <p>
+ * The endpoints (one per Flight node) of a plain scan are read one after another, or up to
+ * {@code endpoint_read_parallelism} at a time (see {@link ParallelStreamReader}).
  * <p>
  * The engine-facing "next page" method differs between Trino SPI lines
  * ({@code getNextPage()} up to 455-ish, {@code getNextSourcePage()} from 477 on), so the
@@ -53,6 +57,7 @@ public abstract class AbstractArrowFlightPageSource
     private final DynamicFilter dynamicFilter;
     private final long dynamicFilterDeadlineNanos;
     private final int dynamicFilterMaxValues;
+    private final int endpointParallelism;
 
     /** Plain scans: table columns fetched from the server (expressions are computed here). */
     private final List<ArrowFlightColumnHandle> serverColumns;
@@ -61,6 +66,7 @@ public abstract class AbstractArrowFlightPageSource
     private List<FlightEndpoint> endpoints;
     private int nextEndpoint;
     private FlightDataStream stream;
+    private ParallelStreamReader parallelReader;
     private boolean finished;
     private long remainingRows;
     private long completedBytes;
@@ -75,7 +81,8 @@ public abstract class AbstractArrowFlightPageSource
             List<ArrowFlightColumnHandle> columns,
             DynamicFilter dynamicFilter,
             int dynamicFilterWaitMillis,
-            int dynamicFilterMaxValues)
+            int dynamicFilterMaxValues,
+            int endpointParallelism)
     {
         this.client = requireNonNull(client, "client is null");
         this.converter = requireNonNull(converter, "converter is null");
@@ -85,6 +92,7 @@ public abstract class AbstractArrowFlightPageSource
         this.dynamicFilter = requireNonNull(dynamicFilter, "dynamicFilter is null");
         this.dynamicFilterDeadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(dynamicFilterWaitMillis);
         this.dynamicFilterMaxValues = dynamicFilterMaxValues;
+        this.endpointParallelism = endpointParallelism;
         this.remainingRows = table.getLimit().orElse(Long.MAX_VALUE);
         this.aggregationReader = table.getAggregation().map(a -> new AggregationReader(a, converter)).orElse(null);
         this.serverColumns = aggregationReader == null ? SqlQueryBuilder.baseColumns(table, columns) : List.of();
@@ -123,6 +131,9 @@ public abstract class AbstractArrowFlightPageSource
                     .completeOnTimeout(null, Math.max(remaining, 0), TimeUnit.NANOSECONDS);
             return CompletableFuture.anyOf(dynamicFilter.isBlocked(), timeout);
         }
+        if (parallelReader != null) {
+            return parallelReader.isBlocked();
+        }
         return NOT_BLOCKED;
     }
 
@@ -147,6 +158,9 @@ public abstract class AbstractArrowFlightPageSource
             }
             Page page = aggregationReader != null ? nextAggregationPage() : nextScanPage();
             if (page == null) {
+                if (parallelReader != null && !parallelReader.isFinished()) {
+                    return null;   // no stream has a batch ready yet: see isBlocked()
+                }
                 finished = true;
                 closeStream();
                 return null;
@@ -211,6 +225,13 @@ public abstract class AbstractArrowFlightPageSource
         log.debug("Flight query: %s", sql);
         FlightInfo info = client.getFlightInfo(sql);
         endpoints = info.getEndpoints();
+        if (aggregationReader == null && endpointParallelism > 1 && endpoints.size() > 1) {
+            List<Supplier<ParallelStreamReader.BatchStream>> streams = new ArrayList<>();
+            for (FlightEndpoint endpoint : endpoints) {
+                streams.add(() -> batchStream(openStream(endpoint)));
+            }
+            parallelReader = new ParallelStreamReader(streams, endpointParallelism);
+        }
         return true;
     }
 
@@ -222,9 +243,7 @@ public abstract class AbstractArrowFlightPageSource
                 if (nextEndpoint >= endpoints.size()) {
                     return null;
                 }
-                FlightEndpoint endpoint = endpoints.get(nextEndpoint++);
-                List<String> uris = endpoint.getLocations().stream().map(l -> l.getUri().toString()).toList();
-                stream = client.openStream(endpoint.getTicket().getBytes(), uris);
+                stream = openStream(endpoints.get(nextEndpoint++));
             }
             if (stream.next()) {
                 VectorSchemaRoot root = stream.getRoot();
@@ -238,9 +257,45 @@ public abstract class AbstractArrowFlightPageSource
         }
     }
 
+    private FlightDataStream openStream(FlightEndpoint endpoint)
+    {
+        List<String> uris = endpoint.getLocations().stream().map(l -> l.getUri().toString()).toList();
+        return client.openStream(endpoint.getTicket().getBytes(), uris);
+    }
+
+    private static ParallelStreamReader.BatchStream batchStream(FlightDataStream stream)
+    {
+        return new ParallelStreamReader.BatchStream()
+        {
+            @Override
+            public boolean next()
+            {
+                return stream.next();
+            }
+
+            @Override
+            public VectorSchemaRoot getRoot()
+            {
+                return stream.getRoot();
+            }
+
+            @Override
+            public void cancel(String message)
+            {
+                stream.cancel(message);
+            }
+
+            @Override
+            public void close()
+            {
+                stream.close();
+            }
+        };
+    }
+
     private Page nextScanPage()
     {
-        VectorSchemaRoot root = nextBatch();
+        VectorSchemaRoot root = parallelReader != null ? parallelReader.poll() : nextBatch();
         if (root == null) {
             return null;
         }
@@ -311,6 +366,9 @@ public abstract class AbstractArrowFlightPageSource
 
     private void closeStream()
     {
+        if (parallelReader != null) {
+            parallelReader.close();
+        }
         if (stream != null) {
             stream.close();
             stream = null;

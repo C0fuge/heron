@@ -56,6 +56,7 @@ public class ArrowFlightConfig
     private String splitColumns = "";
     private int dynamicFilteringWaitMillis = 10_000;
     private int dynamicFilteringMaxValues = 1000;
+    private int endpointReadParallelism = 1;
     // Off by default: every query's filter values differ, and the server keeps a prepared
     // statement per distinct SQL text forever (DuckDbAdapter.stmtCache), i.e. leaks memory.
     private boolean dynamicFilteringEnabled;
@@ -451,6 +452,20 @@ public class ArrowFlightConfig
     public ArrowFlightConfig setDynamicFilteringMaxValues(int maxValues)
     {
         this.dynamicFilteringMaxValues = maxValues;
+        return this;
+    }
+
+    @Min(1)
+    public int getEndpointReadParallelism()
+    {
+        return endpointReadParallelism;
+    }
+
+    @Config("arrow-flight.endpoint-read-parallelism")
+    @ConfigDescription("Endpoints (one per Flight node) of one split read at the same time (1 = one after another)")
+    public ArrowFlightConfig setEndpointReadParallelism(int endpointReadParallelism)
+    {
+        this.endpointReadParallelism = endpointReadParallelism;
         return this;
     }
 

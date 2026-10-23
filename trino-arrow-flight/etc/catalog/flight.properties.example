@@ -31,3 +31,5 @@ arrow-flight.bearer-token=test-token
 # arrow-flight.dynamic-filtering.enabled=false
 # arrow-flight.dynamic-filtering.wait-timeout-ms=10000
 # arrow-flight.dynamic-filtering.max-values=1000
+# Endpoints (one per Flight node) of one split read at the same time; 1 = one after another.
+# arrow-flight.endpoint-read-parallelism=1
