@@ -238,6 +238,13 @@ df_stats() {  # source -> "<physicalInputPositions> <elapsed>"
     | jq -r '"\(.queryStats.physicalInputPositions) \(.queryStats.elapsedTime)"' 2>/dev/null || echo "? ?"
 }
 df_ratio() { awk -v a="$1" -v b="$2" 'BEGIN { if (b + 0 > 0) printf "%.3f", a / b; else print "?" }'; }
+# enable_large_dynamic_filters is gone in later Trino releases (large filters are the default there);
+# an unknown session property would fail every 'big' query.
+LARGE_DF=()
+large_df_row=$(docker exec trino trino --output-format TSV \
+  --execute "SHOW SESSION LIKE 'enable_large_dynamic_filters'" 2>/dev/null || true)
+[ -n "$large_df_row" ] && LARGE_DF=(--session enable_large_dynamic_filters=true)
+log "dynfilter: large dynamic filters session flag: ${LARGE_DF[*]:-not available}"
 printf 'query\trows_off\trows_on\trows_big\tratio_on\tratio_big\telapsed_off\telapsed_on\telapsed_big\n' > "$OUT/dynfilter-rows.tsv"
 for q in $DF_QUERIES; do
   for mode in off on big; do
@@ -245,7 +252,7 @@ for q in $DF_QUERIES; do
       off) sess=(--session flight.dynamic_filtering_enabled=false) ;;
       on) sess=(--session flight.dynamic_filtering_enabled=true) ;;
       big) sess=(--session flight.dynamic_filtering_enabled=true --session "flight.dynamic_filtering_max_values=$DF_BIG_VALUES"
-                 --session enable_large_dynamic_filters=true) ;;
+                 "${LARGE_DF[@]}") ;;
     esac
     t0=$(date +%s.%N)
     docker exec trino trino --catalog flight --schema tpch --source "e2e-df-$q-$mode" "${sess[@]}" \
