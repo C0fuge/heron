@@ -89,7 +89,7 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Open questions
 - **Cloud sessions may be unable to dispatch workflows**: in session 5 (2026-10-23) the session's permission check
-  refused `gh workflow run` ("interfere with workloads"), although CLAUDE.md allows it. Item 1b (int6 complete mode,
+  refused `gh workflow run` ("interfere with workloads"), although CLAUDE.md allows it. Item 1 b) (int6 complete mode,
   3 servers) needs one dispatch: `gh workflow run e2e.yml -f result-mode=complete -f servers=3 -f server-build=int6`.
   Please run it yourself, or allow workflow dispatch for the scheduled session.
 - **Server int6, Iceberg tables with delete files are unusable (local warehouse)**: the complete-answer view
@@ -148,5 +148,5 @@ Kept up to date after every work session so work can be resumed from this reposi
   39876649252 failed on it) → flight2+flight3 restarted together; run 39878210446 green (Iceberg kill hit on attempt 3,
   streams re-read from flight2). All commits `[skip ci]`, runs dispatched by hand (~47 Actions minutes). No plugin code
   changed; no invariant affected.
-- 2026-10-23 (cloud session 5): item 1b (int6 complete mode, 3 servers) not run: the session's permission check
+- 2026-10-23 (cloud session 5): item 1 b) (int6 complete mode, 3 servers) not run: the session's permission check
   refused the workflow dispatch (see Open questions). No code changes, no CI run, ~0 Actions minutes.
