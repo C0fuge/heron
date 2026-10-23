@@ -331,3 +331,6 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-10-23 (cloud session 17): nothing actionable: `e2e-assets` unchanged since 2026-10-22 20:16 (no server build
   after int6, 1 a) waits), every other item waits on Open questions. `gh` was not authenticated in this session (GH_TOKEN
   rejected); the GitHub MCP tools worked. No CI run, 0 Actions minutes, no code changed.
+- 2026-10-23 (cloud session 18): nothing actionable, same as session 17: `e2e-assets` unchanged (newest asset int6,
+  2026-10-22 20:16), no maintainer answers in Open questions. `gh release view` fails (GraphQL blocked);
+  `gh api repos/C0fuge/heron/releases/tags/e2e-assets` works. No CI run, 0 Actions minutes, no code changed.
