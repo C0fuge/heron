@@ -183,8 +183,20 @@ printf 'projection\trow\t%.2f\n' "$(echo "$(date +%s.%N) - $start" | bc)" >> "$O
 { printf 'query\tresult\tdetail\n'
   printf 'checksum_row\t%s\t%s\n' "$result" "$(tr '\t' ' ' < "$OUT/projection/row.tsv" 2>/dev/null)"; } | tee "$OUT/projection-summary.tsv"
 
+# Query statistics from Trino by client source (rows the plugin got from the server = physicalInputPositions).
+df_stats() {  # source -> "<physicalInputPositions> <elapsed>"
+  local id
+  id=$(curl -fsS -H 'X-Trino-User: e2e' http://127.0.0.1:8080/v1/query \
+    | jq -r --arg s "$1" '[.[] | select(.session.source == $s)] | sort_by(.queryStats.createTime) | last | .queryId // empty')
+  [ -n "$id" ] || { echo "? ?"; return; }
+  curl -fsS -H 'X-Trino-User: e2e' "http://127.0.0.1:8080/v1/query/$id" \
+    | jq -r '"\(.queryStats.physicalInputPositions) \(.queryStats.elapsedTime)"' 2>/dev/null || echo "? ?"
+}
+df_ratio() { awk -v a="$1" -v b="$2" 'BEGIN { if (b + 0 > 0) printf "%.3f", a / b; else print "?" }'; }
+
 # TopN pushdown (off by default): with flight.topn_pushdown_enabled every answer must equal the one without
-# it (sort keys are unique, so the order is exact), and EXPLAIN must show the TopN in the table scan.
+# it (sort keys are unique, so the order is exact), and EXPLAIN must show the TopN in the table scan. Rows read
+# from the server with it off and on go to topn-rows.tsv (INFO: the measurement for STATUS item 3).
 log "TopN pushdown: on vs off"
 mkdir -p "$OUT/topn"
 TOPN_QUERIES=(
@@ -195,11 +207,12 @@ TOPN_QUERIES=(
 )
 topn_run() {  # on|off index sql
   local t0; t0=$(date +%s.%N)
-  docker exec trino trino --catalog flight --schema tpch --session "flight.topn_pushdown_enabled=$([ "$1" = on ] && echo true || echo false)" \
+  docker exec trino trino --catalog flight --schema tpch --source "e2e-topn-$2-$1" --session "flight.topn_pushdown_enabled=$([ "$1" = on ] && echo true || echo false)" \
     --output-format TSV --execute "$3" > "$OUT/topn/$2-$1.tsv" 2> "$OUT/topn/$2-$1.err" || rm -f "$OUT/topn/$2-$1.tsv"
   printf 'topn-%s\tq%s\t%.2f\n' "$1" "$2" "$(echo "$(date +%s.%N) - $t0" | bc)" >> "$OUT/times.tsv"
 }
 printf 'query\tresult\tdetail\n' > "$OUT/topn-summary.tsv"
+printf 'query\trows_off\trows_on\tratio_on\telapsed_off\telapsed_on\n' > "$OUT/topn-rows.tsv"
 for i in "${!TOPN_QUERIES[@]}"; do
   sql=${TOPN_QUERIES[$i]}
   topn_run off "$i" "$sql"
@@ -218,6 +231,10 @@ for i in "${!TOPN_QUERIES[@]}"; do
   fi
   [ "$result" = OK ] || status=1
   printf 'q%s\t%s\t%s\n' "$i" "$result" "$detail" | tee -a "$OUT/topn-summary.tsv"
+  read -r off_rows off_t <<< "$(df_stats "e2e-topn-$i-off")"
+  read -r on_rows on_t <<< "$(df_stats "e2e-topn-$i-on")"
+  printf 'q%s\t%s\t%s\t%s\t%s\t%s\n' "$i" "$off_rows" "$on_rows" "$(df_ratio "$on_rows" "$off_rows")" "$off_t" "$on_t" \
+    | tee -a "$OUT/topn-rows.tsv"
 done
 grep -m1 'topN=' "$OUT/topn/0-explain.txt" | cut -c1-300 || true
 
@@ -229,15 +246,6 @@ DF_QUERIES="${DF_QUERIES:-q02 q03 q05 q08 q09 q10 q17 q18 q20 q21}"
 DF_BIG_VALUES="${DF_BIG_VALUES:-100000}"
 log "dynamic filters: $DF_QUERIES off / on / big ($DF_BIG_VALUES values)"
 mkdir -p "$OUT/dynfilter/on" "$OUT/dynfilter/off" "$OUT/dynfilter/big"
-df_stats() {  # source -> "<physicalInputPositions> <elapsed>"
-  local id
-  id=$(curl -fsS -H 'X-Trino-User: e2e' http://127.0.0.1:8080/v1/query \
-    | jq -r --arg s "$1" '[.[] | select(.session.source == $s)] | sort_by(.queryStats.createTime) | last | .queryId // empty')
-  [ -n "$id" ] || { echo "? ?"; return; }
-  curl -fsS -H 'X-Trino-User: e2e' "http://127.0.0.1:8080/v1/query/$id" \
-    | jq -r '"\(.queryStats.physicalInputPositions) \(.queryStats.elapsedTime)"' 2>/dev/null || echo "? ?"
-}
-df_ratio() { awk -v a="$1" -v b="$2" 'BEGIN { if (b + 0 > 0) printf "%.3f", a / b; else print "?" }'; }
 # enable_large_dynamic_filters is gone in later Trino releases (large filters are the default there);
 # an unknown session property would fail every 'big' query.
 LARGE_DF=()
