@@ -141,14 +141,22 @@ Kept up to date after every work session so work can be resumed from this reposi
    version: `trino-arrow-flight/README.md` "Trino versions". Session 11: 483 + int6 complete mode 3 servers green
    (run 39920606099: TPC-H, Iceberg incl. failover on `ice`, two nodes down); the dynfilter guard on 455 passes the
    flag (`--session enable_large_dynamic_filters=true` logged, rows-read ratios = session 8; run 39920601013).
-   Not run: 477 in complete mode or with int6, 483 int6 on 1 server.
-7. Open follow-ups (pick by value): 1 a) when a fixed server build arrives; Trino 477 e2e in complete mode / int6
-   (one dispatch, ~25 min; 483 done in session 11); mid-stream kill in complete mode: a longer delay list for
-   `RESULT_MODE=complete` (e.g. `KILL_STREAM_DELAYS="14 12 16 18"`, measure when flight3's streams open) so it can be
-   a FAIL there too; maintainer answers in Open questions (defaults for TopN, dynamic filters, split count /
-   parallelism).
+   Session 12: 477 + int6 complete mode 3 servers: every check passed (TPC-H 22/22, projection, TopN, dynfilter,
+   splits, types 2/2, Iceberg incl. failover on `ice`, two nodes down), but the job hit its 30-min limit 4 s before
+   the end (run 39927746471, cancelled) → `timeout-minutes: 40`. Not run: 483 int6 on 1 server, 477 int6 1 server.
+7. Open follow-ups (pick by value): 1 a) when a fixed server build arrives; maintainer answers in Open questions
+   (defaults for TopN, dynamic filters, split count / parallelism). Mid-stream kill in complete mode — investigated
+   (session 12), stays INFO: delays now default to 50/65/80/90 % of the healthy baseline in complete mode; in run
+   39927746471 (baseline 17.9 s, kills at 8/11/14/16 s) all 4 kills still found flight3's streams open but empty
+   ("failed before any data", answers exact). In complete mode a node sends nothing until the server has the whole
+   answer, then the batches go out in a short burst, so a timed kill practically never lands inside it. A real
+   after-data check there would need a slowed stream (e.g. `tc` throttling on flight3, or a much larger table) —
+   only worth it if the maintainer wants it (see Open questions). Optional: 477/483 int6 on 1 server.
 
 ## Open questions
+- **Mid-stream kill in complete mode** (session 12): kills at up to 90 % of the query time never hit a stream after
+  its first batch (the server streams a node's part only once complete, in a burst). The partial-mode check covers
+  the plugin's "no retry after data" rule. Add a throttled-network variant for complete mode, or leave it as INFO?
 - **Split count / endpoint read parallelism** (session 9): on the CI runner (everything on 4 vCPUs) neither more range splits
   nor parallel endpoint reads give a clear gain; parallel reads helped the 3-server full scan (16.0 → 12.8 s) and q03. On
   the stand, try `SET SESSION flight.endpoint_read_parallelism = 3` (3 nodes) and `flight.split_count` 1/4/8 on SF10
@@ -262,3 +270,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   attempt 1, dynfilter guard passes Trino's large-filters flag on 455. Dispatch run 39920606099 (Trino 483 int6 complete 3
   servers) green; mid-stream kill missed 4/4 there (flight3 streams not yet open, all re-read from backups, exact) →
   follow-up for complete-mode delays. ~45 Actions minutes. No plugin code changed; invariants hold.
+- 2026-10-23 (cloud session 12): item 7 follow-ups. e2e: complete-mode mid-stream kill delays derived from the healthy
+  baseline (50/65/80/90 %). Dispatch run 39927746471 (Trino 477 int6 complete 3 servers): all checks passed, 0 FAIL, but
+  cancelled by the 30-min job limit just before exit → e2e timeout 40 min; mid-stream kill 4/4 "before any data" (exact
+  answers, INFO) → cause documented, Open question added. ~31 Actions minutes. No plugin code changed; invariants hold.

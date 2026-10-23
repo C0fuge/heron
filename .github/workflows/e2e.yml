@@ -39,7 +39,7 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40  # int6 complete 3 servers incl. Iceberg needs ~31 min (run 39927746471)
     strategy:
       fail-fast: false
       matrix:
