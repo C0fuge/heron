@@ -114,11 +114,28 @@ Kept up to date after every work session so work can be resumed from this reposi
    runner: no clear gain (q18 −30 %, q09 big +45 %: large IN lists cost DuckDB time; data is local, so transfer savings do
    not show). Open: q03/q10 get nothing even with big (orders/customer keys > 100k → span); measure on the stand where
    rows cross the network; server statement cache (see Open questions).
-5. **Split count**: review the number of splits per endpoint / per query against server nodes and Trino workers.
+5. **Split count** — reviewed, new option (session 9), defaults unchanged. How it works today: a scan is one split, or up to
+   `split-count` (4) key-range splits when ≥ 2×`split-min-rows` (1M) rows are expected after filters (integer/date column);
+   aggregation and LIMIT scans are never range-split. Each split builds its SQL on the worker and calls `GetFlightInfo`;
+   the server returns one endpoint per Flight node, and these were read **one after another** inside the split, so a split
+   kept one node busy at a time (3 nodes x 4 splits = 12 streams, only 4 open at once). Splits carry no host address
+   (any worker reads any node). New: `arrow-flight.endpoint-read-parallelism` / session `endpoint_read_parallelism`
+   (default 1 = old sequential path): `ParallelStreamReader` reads up to N endpoints of a plain-scan split at once
+   (`next()` on daemon threads, driver takes the batch that is ready, `isBlocked()` waits on them; per-stream failover
+   unchanged; close cancels open streams). Unit tests `ParallelStreamReaderTest` (5). e2e `splits` block: split_count 1/4
+   x parallelism 1/3 on q03 q12 q14 q18 q19 + full lineitem scan checksum, all answers = reference in every setting,
+   1 and 3 servers (run 39908551054). Times (best of 2, s; s=split_count, p=parallelism) on one 4-vCPU runner:
+   3 servers — scan s1p1 15.98 / s1p3 12.80 / s4p1 14.06 / s4p3 15.73; q03 5.81 / 4.58 / 6.23 / 4.58; others within noise.
+   1 server — scan 8.98 / 8.61 / 11.08 / 11.06 (4 range splits slower than 1 there: server and Trino share 4 cores).
+   Open: measure on the stand (real nodes, network); see Open questions.
 6. **Trino 477 and 483 builds**: make the plugin compile and pass e2e on both (SPI changes); document per-version
    build commands; keep 455 the default.
 
 ## Open questions
+- **Split count / endpoint read parallelism** (session 9): on the CI runner (everything on 4 vCPUs) neither more range splits
+  nor parallel endpoint reads give a clear gain; parallel reads helped the 3-server full scan (16.0 → 12.8 s) and q03. On
+  the stand, try `SET SESSION flight.endpoint_read_parallelism = 3` (3 nodes) and `flight.split_count` 1/4/8 on SF10
+  (e.g. the full-scan checksum and q03/q18) and tell whether to change the defaults (1 and 4).
 - **Dynamic filters** (session 8): with them on, every query's SQL text differs. The config comment says the server
   keeps a prepared statement per distinct text forever (`DuckDbAdapter.stmtCache`). Is that cache bounded in int4/int6?
   If yes, dynamic filtering could be tried on the stand (`arrow-flight.dynamic-filtering.enabled=true`; with Trino's
@@ -210,3 +227,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   servers int4 partial; new property `arrow-flight.dynamic-filtering.max-values` (default 1000 = old behaviour), build/unit
   run 39903809864. Defaults unchanged (dynamic filtering stays off). ~45 Actions minutes. Invariants hold (no
   failover/auth change; dynamic filters only narrow by supersets; all answers exact).
+- 2026-10-23 (cloud session 9): item 5 (split count) reviewed: endpoints of a split were read sequentially. Added
+  `arrow-flight.endpoint-read-parallelism` (default 1, old behaviour) with `ParallelStreamReader` + 5 unit tests (build run
+  39908551065, 26/26 tests) and the e2e `splits` measurement (run 39908551054 int4 partial 1+3 servers green: TPC-H 22/22,
+  splits 4 settings x 6 queries exact, failover checks incl. kill during a read green). README: corrected the stale
+  "one split per endpoint" description, documented split properties. ~25 Actions minutes. Invariants hold (default path
+  unchanged; with parallelism > 1 each stream keeps its failover-before-first-batch rule; no wrong rows in any setting).
