@@ -40,18 +40,20 @@
              3.25.4 (CVE-2024-7254) and Jackson 2.18.0. All four are pinned here through BOMs so the plugin
              bundles one version of each; the CI build checks the bundled jars against
              trino-arrow-flight/bundle/trino-<version>.txt and fails on drift.
-             grpc 1.82.x is the last line built on Netty 4.1 (1.83+ moved to 4.2); Netty stays on 4.1 because
-             arrow-memory-netty 18.1.0 patches classes inside io.netty.buffer. Keep Netty >= the version
-             grpc-netty was built with (4.1.133 for 1.82.4): grpc-netty 1.65.0 on a newer Netty broke busy
-             streams ("Failed to read message", fixed in 1.65.1), so never pair an old grpc with a new Netty. -->
-        <dep.grpc.version>1.82.4</dep.grpc.version>
+             grpc 1.78.x is the newest line Arrow 18.1 flight-core runs on: grpc 1.79 removed the internal
+             ReadableBuffer.readBytes(ByteBuffer) that Arrow's GetReadableBuffer calls (NoSuchMethodError,
+             "Failed to read message" on every stream; build run 39990774489). Moving past 1.78 needs a newer
+             Arrow. Netty stays on 4.1 because arrow-memory-netty 18.1.0 patches classes inside io.netty.buffer.
+             Keep Netty >= the version grpc-netty was built with (4.1.127 for 1.78.0): grpc-netty 1.65.0 on a
+             newer Netty broke busy streams ("Failed to read message", fixed in 1.65.1). -->
+        <dep.grpc.version>1.78.0</dep.grpc.version>
         <dep.netty.version>4.1.139.Final</dep.netty.version>
         <dep.protobuf.version>3.25.9</dep.protobuf.version>
         <!-- bundled jackson-core/databind/datatype; the 483 profile of trino-arrow-flight overrides with 2.22.1 -->
         <dep.jackson.version>2.18.12</dep.jackson.version>
         <dep.guice.version>7.0.0</dep.guice.version>
         <dep.slf4j.version>2.0.16</dep.slf4j.version>
-        <!-- grpc 1.82 needs Guava 33.5+ -->
+        <!-- grpc 1.78 needs Guava 33.5+ -->
         <dep.guava.version>33.5.0-jre</dep.guava.version>
         <dep.junit.version>5.11.4</dep.junit.version>
     </properties>
