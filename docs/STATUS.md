@@ -81,15 +81,13 @@ Kept up to date after every work session so work can be resumed from this reposi
    matching). Clean error, no wrong rows, but any query projecting ROW(...) (or similar) over this connector fails.
    Fix: return `Optional.empty()` whenever nothing changes; unit test calling applyProjection twice (second call must
    be empty) with a ROW-constructor projection; e2e query with `checksum(ROW(...))`.
-1b. **e2e: a kill in the middle of a stream** — in progress (session 6). Plugin now logs `Flight stream at … failed
-   after delivering data (…); not retried` (behaviour unchanged). `run-e2e.sh` `kill_mid_stream` (3 servers): baseline
-   of a lineitem checksum query, then flight3 killed after `KILL_STREAM_DELAYS`; answer must equal the baseline or be a
-   clean error. First real mid-stream hit: run 39886487789, killed-during q18 → clean error "Network closed for unknown
-   reason" + that WARN (invariant holds). The dedicated check has not hit yet (runs 39886487789, 39888037652: streams
-   open ~7–8 s after submission and 1–3 columns stream in <1 s, all kills landed before data or after the end; INFO).
-   Latest attempt with 16 per-column checksums: see Log. If it still misses, slow the read deterministically (e.g.
-   server-side batch size, or kill on the first "failed after delivering"-free WARN) rather than tuning delays; then
-   make a miss FAIL in partial mode.
+1b. **e2e: a kill in the middle of a stream** — done (session 6). Plugin logs `Flight stream at … failed after
+   delivering data (…); not retried` (behaviour unchanged). `run-e2e.sh` `kill_mid_stream` (3 servers): baseline of
+   `SELECT count(*), checksum(<col>) x16 FROM lineitem` on the healthy cluster, then flight3 killed after
+   `KILL_STREAM_DELAYS` (9 8 10 11 s); answer must equal the baseline or be a clean error (wrong answer = FAIL).
+   Green: run 39891124604 (attempt 1, 9 s: one flight3 stream failed after data → query failed cleanly "Network
+   closed for unknown reason", two others re-read from flight1). A miss is still INFO; turn it into FAIL in partial
+   mode once a few more runs show the 9 s delay hits reliably (streams open ~7–8 s after submission).
 2. **Connection reset after one failed stream**: today one failed stream makes the plugin drop all its pooled
    connections (small inefficiency). Keep healthy connections; unit test.
 3. **`ORDER BY … LIMIT` (TopN) pushdown** to the server (`applyTopN`): render `ORDER BY … LIMIT n` in
@@ -164,3 +162,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   changed; no invariant affected.
 - 2026-10-23 (cloud session 5): item 1 b) (int6 complete mode, 3 servers) not run: the session's permission check
   refused the workflow dispatch (see Open questions). No code changes, no CI run, ~0 Actions minutes.
+- 2026-10-23 (cloud session 6): item 1 b) int6 complete mode 3 servers green (run 39886319914). Item 1b (mid-stream
+  kill): plugin WARN "failed after delivering data; not retried" (log only; build/unit tests green run 39886485366),
+  e2e `kill_mid_stream`; runs 39886487789 (green; q18 kill already hit mid-stream: clean error), 39888037652 (green,
+  dedicated check missed: INFO), 39889582040 (FAILED: `checksum(ROW(...))` made Trino's optimizer loop in the plugin's
+  applyProjection → new Next steps item 0), 39891124604 (green, mid-stream hit on attempt 1, clean error). Workflow
+  dispatch works through the REST API (`gh api …/dispatches`). ~75 Actions minutes. Invariants hold (no wrong rows).

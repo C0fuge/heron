@@ -29,6 +29,7 @@ in the detail ("N cells equal at Trino DECIMAL scale").
 | 2026-10-23 | 39878210446 | 455 (int6) | partial | 3 | 22/22, types 2/2, Iceberg (deletes KNOWN) | lost before 5+5 exact; killed during q18 exact on tpch (attempt 1) and on ice (attempt 3, streams re-read from flight2); two killed 5/5 tpch + 3/3 ice exact | 11 min |
 | 2026-10-23 | 39886319914 | 455 (int6) | complete | 3 | 22/22, types 2/2, Iceberg (deletes KNOWN) | lost before 5+5 exact; killed during q18 exact (tpch; ice attempt 3, streams re-read from flight1); two killed 5/5 + 3/3 exact | 14 min |
 | 2026-10-23 | 39886487789 | 455 (int6) | partial | 3 | 22/22, types 2/2, Iceberg (deletes KNOWN) | killed during q18 (tpch): clean error, one flight3 stream "failed after delivering data; not retried" (first mid-stream hit); ice exact; mid-stream lineitem check 4 misses (INFO, delays too short), all exact; two killed exact | 15.5 min |
+| 2026-10-23 | 39891124604 | 455 (int6) | partial | 3 | 22/22, types 2/2, Iceberg (deletes KNOWN) | lost before 5+5 exact; killed during q18 exact (tpch, ice); killed mid-stream: attempt 1 (9 s) hit a flight3 stream after data → clean error; two killed exact | 17 min |
 
 Types (`e2e/ci/types_check.py`, every run): each table of schema `types` read with `SELECT` of all
 exposed columns through Trino (Python client, raw protocol values) vs DuckDB 1.4.1 (pip, in the job) on the
@@ -57,7 +58,7 @@ Failover checks (3 servers, `--hosts flight1,flight2,flight3`, catalog points to
   with `docker kill flight3` after 9, 8, 10, 11 s (`KILL_STREAM_DELAYS`; restart of flight2+flight3 between
   attempts) → the answer must equal the baseline or the query fails cleanly; evidence of a hit is the plugin's
   WARN `Flight stream at …flight3… failed after delivering data (…); not retried` (added 2026-10-23; behaviour
-  unchanged, such failures were always final). A miss on every delay is INFO. A wrong answer fails the job.
+  unchanged, such failures were always final). A miss on every delay is INFO. A wrong answer fails the job. (Observed: run 39891124604, hit at 9 s, clean error.)
   The *killed during* q18 check can also hit mid-stream (run 39886487789: clean error "Network closed for
   unknown reason" plus that WARN).
 
