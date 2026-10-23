@@ -75,7 +75,7 @@ iceberg_generate() {
   fi
   local p='parquet.`file:///data/tpch'
   cat > "$WORK/spark/generate.sql" <<SQL
-CREATE NAMESPACE IF NOT EXISTS wh.ice;
+$( [ "$ICEBERG_WAREHOUSE" = s3 ] || echo 'CREATE NAMESPACE IF NOT EXISTS wh.ice;' )
 CREATE TABLE wh.ice.lineitem USING iceberg AS SELECT * FROM $p/lineitem\`;
 CREATE TABLE wh.ice.orders USING iceberg AS SELECT * FROM $p/orders\`;
 CREATE TABLE wh.ice.customer USING iceberg AS SELECT * FROM $p/customer\`;
@@ -96,6 +96,7 @@ SQL
     # rclone serve s3 (local backend) answers 500 "file already exists" when parallel PUTs create the
     # same new directory, and refuses S3A's "dir/" marker objects over existing directories: the table
     # directories exist before Spark writes, each holding a hidden object so S3A sees them as directories
+    # (CREATE NAMESPACE is skipped: S3A would PUT a marker for wh/ice/ and rclone refuses it)
     local t d
     for t in lineitem orders customer orders_del customer_ren commits; do
       for d in data metadata; do
