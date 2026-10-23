@@ -73,23 +73,25 @@ Kept up to date after every work session so work can be resumed from this reposi
       int6 complete mode 3 servers green (session 6, run 39886319914, 14 min).
    c) maybe an S3 warehouse (`s3://lake/parquet/...` under the dataDir) instead of the local one, if Spark+s3a is cheap
       enough; equality deletes (need Flink/pyiceberg) are not covered.
-0. **Plugin bug: optimizer loop on `checksum(ROW(...))`** (found session 6, run 39889582040): `SELECT count(*),
-   checksum(ROW(l_orderkey, …, l_comment)) FROM lineitem` failed after 180 s with "The optimizer exhausted the time
-   limit … PushProjectionIntoTableScan: 1237642 invocations, 1237642 applications" — `ArrowFlightMetadata.applyProjection`
-   keeps returning a result for a projection it cannot push (likely a non-variable projection such as a ROW constructor,
-   either via `ExpressionTranslator.toExpr` accepting it or the `newProjection.equals(effectiveColumns())` check never
-   matching). Clean error, no wrong rows, but any query projecting ROW(...) (or similar) over this connector fails.
-   Fix: return `Optional.empty()` whenever nothing changes; unit test calling applyProjection twice (second call must
-   be empty) with a ROW-constructor projection; e2e query with `checksum(ROW(...))`.
+0. **Plugin bug: optimizer loop on `checksum(ROW(...))`** — done (session 7). Cause: Trino 455's `PartialTranslator`
+   collects the projections in a HashMap keyed by node identity, so their order changes on every
+   `PushProjectionIntoTableScan` invocation; `applyProjection` compared the projected column *list* with the handle's
+   and never saw "no change". Now compared as sets (column order in the handle does not matter: the page source reads
+   Trino's column list). Unit test `ArrowFlightMetadataProjectionTest`; e2e `projection` check
+   (`checksum(ROW(all 16 lineitem columns))`, 60 s planning cap, count 6001215): run 39897404708, 25 s.
 1b. **e2e: a kill in the middle of a stream** — done (session 6). Plugin logs `Flight stream at … failed after
    delivering data (…); not retried` (behaviour unchanged). `run-e2e.sh` `kill_mid_stream` (3 servers): baseline of
    `SELECT count(*), checksum(<col>) x16 FROM lineitem` on the healthy cluster, then flight3 killed after
    `KILL_STREAM_DELAYS` (9 8 10 11 s); answer must equal the baseline or be a clean error (wrong answer = FAIL).
    Green: run 39891124604 (attempt 1, 9 s: one flight3 stream failed after data → query failed cleanly "Network
-   closed for unknown reason", two others re-read from flight1). A miss is still INFO; turn it into FAIL in partial
-   mode once a few more runs show the 9 s delay hits reliably (streams open ~7–8 s after submission).
-2. **Connection reset after one failed stream**: today one failed stream makes the plugin drop all its pooled
-   connections (small inefficiency). Keep healthy connections; unit test.
+   closed for unknown reason", two others re-read from flight1). Hit on attempt 1 again in run 39897404708 (int4).
+   A miss is still INFO; turn it into FAIL in partial mode once a few more runs show the 9 s delay hits reliably
+   (streams open ~7–8 s after submission).
+2. **Connection reset after one failed stream** — done (session 7, `FlightSqlSession`): a stream failure that means
+   a node was lost drops only that location's pooled stream connections (per-location generations); the coordinator
+   connection is renewed only when the coordinator itself was lost or on UNAUTHENTICATED (re-handshake). A failed
+   coordinator *call* still drops every pool (the whole cluster may have restarted; gRPC fails stale channels for
+   up to ~2 min). Unit tests `lostNodeDropsOnlyItsOwnPooledConnections`, `lostCoordinatorKeepsOtherNodesPooledConnections`.
 3. **`ORDER BY … LIMIT` (TopN) pushdown** to the server (`applyTopN`): render `ORDER BY … LIMIT n` in
    `SqlQueryBuilder` when all sort keys are pushable columns; in partial mode each endpoint returns its own top n
    and Trino keeps its final TopN (do not report the TopN as fully guaranteed then); complete mode can guarantee
@@ -168,3 +170,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   dedicated check missed: INFO), 39889582040 (FAILED: `checksum(ROW(...))` made Trino's optimizer loop in the plugin's
   applyProjection → new Next steps item 0), 39891124604 (green, mid-stream hit on attempt 1, clean error). Workflow
   dispatch works through the REST API (`gh api …/dispatches`). ~75 Actions minutes. Invariants hold (no wrong rows).
+- 2026-10-23 (cloud session 7): item 0 done: `applyProjection` compared projected columns as an ordered list while
+  Trino 455 passes projections in random order (HashMap in `PartialTranslator`) → optimizer loop on
+  `checksum(ROW(...))`; now a set comparison (build/unit run 39897405278; e2e run 39897404708 int4 partial 1+3 servers
+  green incl. new `projection` check, 25 s; mid-stream kill hit on attempt 1). Item 2 done: a lost node drops only its
+  own pooled stream connections (build run 39898217668, 12/12 failover unit tests; e2e run 39898217754 green 1+3
+  servers). Invariants hold (failover rules unchanged; no wrong rows).
