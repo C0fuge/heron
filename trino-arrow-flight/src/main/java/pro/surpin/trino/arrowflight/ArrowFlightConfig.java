@@ -47,6 +47,7 @@ public class ArrowFlightConfig
     // property of the same name (see ArrowFlightSessionProperties).
     private boolean aggregationPushdownEnabled = true;
     private boolean limitPushdownEnabled = true;
+    private boolean topNPushdownEnabled;
     private boolean expressionPushdownEnabled = true;
     private boolean statisticsEnabled = true;
     private long statisticsCacheTtlSeconds = 600;
@@ -314,6 +315,19 @@ public class ArrowFlightConfig
     public ArrowFlightConfig setLimitPushdownEnabled(boolean enabled)
     {
         this.limitPushdownEnabled = enabled;
+        return this;
+    }
+
+    public boolean isTopNPushdownEnabled()
+    {
+        return topNPushdownEnabled;
+    }
+
+    @Config("arrow-flight.topn-pushdown.enabled")
+    @ConfigDescription("Send ORDER BY ... LIMIT n to the server so each query returns only its own top n rows")
+    public ArrowFlightConfig setTopNPushdownEnabled(boolean enabled)
+    {
+        this.topNPushdownEnabled = enabled;
         return this;
     }
 

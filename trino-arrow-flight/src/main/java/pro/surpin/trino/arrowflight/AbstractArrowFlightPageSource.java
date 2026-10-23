@@ -185,7 +185,9 @@ public abstract class AbstractArrowFlightPageSource
         List<String> extra = new ArrayList<>();
         split.getRangePredicate().ifPresent(extra::add);
 
-        TupleDomain<ColumnHandle> dynamic = dynamicFilter.getCurrentPredicate();
+        // A dynamic filter must never narrow the rows a pushed TopN chooses from (Trino does not push one below
+        // a TopN; this keeps it that way).
+        TupleDomain<ColumnHandle> dynamic = table.getTopN().isPresent() ? TupleDomain.all() : dynamicFilter.getCurrentPredicate();
         if (dynamic.isNone()) {
             if (aggregationReader == null) {
                 return false;

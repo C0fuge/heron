@@ -18,6 +18,7 @@ public final class ArrowFlightSessionProperties
 {
     public static final String AGGREGATION_PUSHDOWN_ENABLED = "aggregation_pushdown_enabled";
     public static final String LIMIT_PUSHDOWN_ENABLED = "limit_pushdown_enabled";
+    public static final String TOPN_PUSHDOWN_ENABLED = "topn_pushdown_enabled";
     public static final String EXPRESSION_PUSHDOWN_ENABLED = "expression_pushdown_enabled";
     public static final String STATISTICS_ENABLED = "statistics_enabled";
     public static final String SPLIT_COUNT = "split_count";
@@ -34,6 +35,8 @@ public final class ArrowFlightSessionProperties
                         "Run aggregations on the Flight server", config.isAggregationPushdownEnabled(), false),
                 booleanProperty(LIMIT_PUSHDOWN_ENABLED,
                         "Stop reading once a LIMIT is satisfied", config.isLimitPushdownEnabled(), false),
+                booleanProperty(TOPN_PUSHDOWN_ENABLED,
+                        "Send ORDER BY ... LIMIT n to the Flight server", config.isTopNPushdownEnabled(), false),
                 booleanProperty(EXPRESSION_PUSHDOWN_ENABLED,
                         "Push LIKE / NOT LIKE to the Flight server", config.isExpressionPushdownEnabled(), false),
                 booleanProperty(STATISTICS_ENABLED,
@@ -59,6 +62,11 @@ public final class ArrowFlightSessionProperties
     public static boolean isLimitPushdownEnabled(ConnectorSession session)
     {
         return session.getProperty(LIMIT_PUSHDOWN_ENABLED, Boolean.class);
+    }
+
+    public static boolean isTopNPushdownEnabled(ConnectorSession session)
+    {
+        return session.getProperty(TOPN_PUSHDOWN_ENABLED, Boolean.class);
     }
 
     public static boolean isExpressionPushdownEnabled(ConnectorSession session)

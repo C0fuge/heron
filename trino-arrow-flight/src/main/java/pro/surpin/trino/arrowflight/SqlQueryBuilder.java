@@ -73,6 +73,7 @@ public final class SqlQueryBuilder
 
         StringBuilder sql = new StringBuilder("SELECT ").append(projection).append(" FROM ").append(tableName(table));
         appendWhere(sql, table, extraConjuncts);
+        table.getTopN().ifPresent(topN -> sql.append(topN.toSql()));
         return sql.toString();
     }
 
@@ -217,6 +218,16 @@ public final class SqlQueryBuilder
                 || type.equals(DOUBLE) || type.equals(BOOLEAN) || type.equals(DATE)
                 || type.equals(TIMESTAMP_MICROS) || type instanceof DecimalType
                 || type instanceof VarcharType;
+    }
+
+    /**
+     * Types DuckDB orders exactly like Trino, so a server-side ORDER BY picks the same top rows. Not DOUBLE/REAL
+     * (NaN placement) nor VARCHAR (the server's collation is not known to be binary).
+     */
+    static boolean isTopNSortable(Type type)
+    {
+        return isIntegral(type) || type.equals(BOOLEAN) || type.equals(DATE) || type.equals(TIMESTAMP_MICROS)
+                || type instanceof DecimalType;
     }
 
     public static String toWhereClause(TupleDomain<ColumnHandle> constraint, String quote)

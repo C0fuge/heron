@@ -180,6 +180,44 @@ printf 'projection\trow\t%.2f\n' "$(echo "$(date +%s.%N) - $start" | bc)" >> "$O
 { printf 'query\tresult\tdetail\n'
   printf 'checksum_row\t%s\t%s\n' "$result" "$(tr '\t' ' ' < "$OUT/projection/row.tsv" 2>/dev/null)"; } | tee "$OUT/projection-summary.tsv"
 
+# TopN pushdown (off by default): with flight.topn_pushdown_enabled every answer must equal the one without
+# it (sort keys are unique, so the order is exact), and EXPLAIN must show the TopN in the table scan.
+log "TopN pushdown: on vs off"
+mkdir -p "$OUT/topn"
+TOPN_QUERIES=(
+  'SELECT l_orderkey, l_linenumber, l_extendedprice FROM lineitem ORDER BY l_extendedprice DESC, l_orderkey, l_linenumber LIMIT 10'
+  "SELECT o_orderkey, o_orderdate, o_totalprice FROM orders WHERE o_orderstatus = 'F' ORDER BY o_orderdate, o_orderkey LIMIT 20"
+  'SELECT c_custkey, c_acctbal FROM customer ORDER BY c_acctbal DESC NULLS FIRST, c_custkey LIMIT 5'
+  'SELECT l_shipdate, l_orderkey, l_linenumber FROM lineitem ORDER BY l_shipdate DESC, l_orderkey DESC, l_linenumber LIMIT 1000'
+)
+topn_run() {  # on|off index sql
+  local t0; t0=$(date +%s.%N)
+  docker exec trino trino --catalog flight --schema tpch --session "flight.topn_pushdown_enabled=$([ "$1" = on ] && echo true || echo false)" \
+    --output-format TSV --execute "$3" > "$OUT/topn/$2-$1.tsv" 2> "$OUT/topn/$2-$1.err" || rm -f "$OUT/topn/$2-$1.tsv"
+  printf 'topn-%s\tq%s\t%.2f\n' "$1" "$2" "$(echo "$(date +%s.%N) - $t0" | bc)" >> "$OUT/times.tsv"
+}
+printf 'query\tresult\tdetail\n' > "$OUT/topn-summary.tsv"
+for i in "${!TOPN_QUERIES[@]}"; do
+  sql=${TOPN_QUERIES[$i]}
+  topn_run off "$i" "$sql"
+  topn_run on "$i" "$sql"
+  docker exec trino trino --catalog flight --schema tpch --session flight.topn_pushdown_enabled=true \
+    --execute "EXPLAIN $sql" > "$OUT/topn/$i-explain.txt" 2>&1 || true
+  pushed=$(grep -c 'topN=' "$OUT/topn/$i-explain.txt" || true)
+  if [ ! -f "$OUT/topn/$i-off.tsv" ] || [ ! -f "$OUT/topn/$i-on.tsv" ]; then
+    result=FAIL; detail="error: $(cat "$OUT/topn/$i-on.err" "$OUT/topn/$i-off.err" 2>/dev/null | grep -m1 -E 'failed|ERROR' | cut -c1-300 || true)"
+  elif ! cmp -s "$OUT/topn/$i-off.tsv" "$OUT/topn/$i-on.tsv"; then
+    result=FAIL; detail="answers differ ($(wc -l < "$OUT/topn/$i-off.tsv") vs $(wc -l < "$OUT/topn/$i-on.tsv") rows)"
+  elif [ "$pushed" = 0 ]; then
+    result=FAIL; detail="equal, but EXPLAIN shows no pushed TopN"
+  else
+    result=OK; detail="$(wc -l < "$OUT/topn/$i-on.tsv") rows equal, TopN in the scan"
+  fi
+  [ "$result" = OK ] || status=1
+  printf 'q%s\t%s\t%s\n' "$i" "$result" "$detail" | tee -a "$OUT/topn-summary.tsv"
+done
+grep -m1 'topN=' "$OUT/topn/0-explain.txt" | cut -c1-300 || true
+
 if [ -n "$TYPES" ]; then
   log "types: SELECT * per table vs DuckDB on the same Parquet"
   python3 -m venv "$WORK/venv"

@@ -16,6 +16,9 @@ import io.trino.spi.connector.Constraint;
 import io.trino.spi.connector.ConstraintApplicationResult;
 import io.trino.spi.connector.ProjectionApplicationResult;
 import io.trino.spi.connector.SchemaTableName;
+import io.trino.spi.connector.SortItem;
+import io.trino.spi.connector.SortOrder;
+import io.trino.spi.connector.TopNApplicationResult;
 import io.trino.spi.expression.ConnectorExpression;
 import io.trino.spi.expression.Variable;
 import io.trino.spi.predicate.Domain;
@@ -175,6 +178,10 @@ public class ArrowFlightMetadata
             ConnectorSession session, ConnectorTableHandle table, Constraint constraint)
     {
         ArrowFlightTableHandle handle = (ArrowFlightTableHandle) table;
+        if (handle.getTopN().isPresent()) {
+            // a filter above the TopN is not one the server may apply before choosing the top rows
+            return Optional.empty();
+        }
         Set<ArrowFlightColumnHandle> groupingColumns = handle.getAggregation()
                 .map(a -> Set.copyOf(a.getGroupingColumns()))
                 .orElse(null);
@@ -314,7 +321,8 @@ public class ArrowFlightMetadata
     {
         ArrowFlightTableHandle handle = (ArrowFlightTableHandle) table;
         if (!ArrowFlightSessionProperties.isAggregationPushdownEnabled(session)
-                || handle.getAggregation().isPresent() || handle.getLimit().isPresent() || groupingSets.size() != 1) {
+                || handle.getAggregation().isPresent() || handle.getLimit().isPresent() || handle.getTopN().isPresent()
+                || groupingSets.size() != 1) {
             return Optional.empty();
         }
 
@@ -411,12 +419,61 @@ public class ArrowFlightMetadata
     public Optional<LimitApplicationResult<ConnectorTableHandle>> applyLimit(ConnectorSession session, ConnectorTableHandle table, long limit)
     {
         ArrowFlightTableHandle handle = (ArrowFlightTableHandle) table;
-        if (!ArrowFlightSessionProperties.isLimitPushdownEnabled(session)
+        if (!ArrowFlightSessionProperties.isLimitPushdownEnabled(session) || handle.getTopN().isPresent()
                 || (handle.getLimit().isPresent() && handle.getLimit().getAsLong() <= limit)) {
             return Optional.empty();
         }
         // Not guaranteed: every split stops after `limit` rows, Trino still applies the final LIMIT.
         return Optional.of(new LimitApplicationResult<>(handle.withLimit(limit), false, false));
+    }
+
+    @Override
+    public Optional<TopNApplicationResult<ConnectorTableHandle>> applyTopN(
+            ConnectorSession session,
+            ConnectorTableHandle table,
+            long topNCount,
+            List<SortItem> sortItems,
+            Map<String, ColumnHandle> assignments)
+    {
+        if (!ArrowFlightSessionProperties.isTopNPushdownEnabled(session)) {
+            return Optional.empty();
+        }
+        return applyTopN((ArrowFlightTableHandle) table, topNCount, sortItems, assignments)
+                .map(handle -> new TopNApplicationResult<ConnectorTableHandle>(handle, false, false));
+    }
+
+    /**
+     * The handle with {@code ORDER BY ... LIMIT topNCount} for the server, if every sort key is a plain column
+     * whose order the server sorts exactly like Trino. Never guaranteed: in partial mode every endpoint (and
+     * every range split) returns its own top rows, so Trino keeps its TopN over their union.
+     */
+    static Optional<ArrowFlightTableHandle> applyTopN(
+            ArrowFlightTableHandle handle,
+            long topNCount,
+            List<SortItem> sortItems,
+            Map<String, ColumnHandle> assignments)
+    {
+        // Already sorted and cut (a second TopN above the first may sort differently); a LIMIT below or an
+        // aggregation would change which rows the top is chosen from.
+        if (handle.getTopN().isPresent() || handle.getLimit().isPresent() || handle.getAggregation().isPresent()
+                || sortItems.isEmpty() || topNCount <= 0) {
+            return Optional.empty();
+        }
+        String q = handle.getIdentifierQuote();
+        List<String> keys = new ArrayList<>();
+        for (SortItem item : sortItems) {
+            if (!(assignments.get(item.getName()) instanceof ArrowFlightColumnHandle column)
+                    || column.getExpression().isPresent()
+                    || !handle.getColumns().contains(column)
+                    || !SqlQueryBuilder.isTopNSortable(column.getColumnType())) {
+                return Optional.empty();
+            }
+            SortOrder order = item.getSortOrder();
+            keys.add(SqlQueryBuilder.quoteIdentifier(column.getColumnName(), q)
+                    + (order.isAscending() ? " ASC" : " DESC")
+                    + (order.isNullsFirst() ? " NULLS FIRST" : " NULLS LAST"));
+        }
+        return Optional.of(handle.withTopN(new TopN(String.join(", ", keys), topNCount)));
     }
 
     @Override
