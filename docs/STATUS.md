@@ -71,8 +71,18 @@ Kept up to date after every work session so work can be resumed from this reposi
       answeredCompletely fallbacks — the iceberg_scan refusal only hits `orders_del`'s view, the others are read
       from their data files); int6 partial 3 servers green incl. failover on Iceberg tables (run 39878210446).
       int6 complete mode 3 servers green (session 6, run 39886319914, 14 min).
-   c) maybe an S3 warehouse (`s3://lake/parquet/...` under the dataDir) instead of the local one, if Spark+s3a is cheap
-      enough; equality deletes (need Flink/pyiceberg) are not covered.
+   c) S3 warehouse — done (session 13), opt-in: workflow input `iceberg-warehouse=s3` (`ICEBERG_WAREHOUSE`, default
+      `local`). Spark writes through S3A (hadoop-aws 3.3.4 + aws-java-sdk-bundle 1.12.262 from Maven Central, `fs.s3.impl`
+      = S3A so metadata carries `s3://` URIs) into `s3://lake/parquet/wh`. The server requires an s3 catalog root below the
+      dataDir ("needs a second s3 store; this server opens one store per storage plugin"). rclone workarounds: table
+      directories pre-created, each with a hidden `.keep` object; no `CREATE NAMESPACE`; S3A markers kept (rclone answers
+      500 on parallel PUTs into a new directory and refuses `dir/` marker objects). Green on int6 partial 1 server: run
+      39941848259 (TPC-H 22/22, types 2/2, all Iceberg checks OK **including `orders_del` position deletes**, 1,285,715
+      rows = Parquet: the deletes problem in a) is specific to the local `file:` warehouse). Run 39939466381 had one clean
+      error right after the mid-run commit ("Column 'c_custkey' not found. Available: []"): HadoopCatalog commits on S3 are
+      not atomic (S3A rename = copy + delete). In S3 mode such errors are now retried within the commit wait and reported
+      as INFO `commit-window`. Not run with S3: 3 servers, complete mode. Equality deletes (need Flink/pyiceberg) are not
+      covered.
 0. **Plugin bug: optimizer loop on `checksum(ROW(...))`** — done (session 7). Cause: Trino 455's `PartialTranslator`
    collects the projections in a HashMap keyed by node identity, so their order changes on every
    `PushProjectionIntoTableScan` invocation; `applyProjection` compared the projected column *list* with the handle's
@@ -173,7 +183,9 @@ Kept up to date after every work session so work can be resumed from this reposi
 - (resolved) Workflow dispatch from cloud sessions: `gh workflow run` fails (GraphQL blocked by the session proxy);
   the REST call works: `gh api -X POST repos/C0fuge/heron/actions/workflows/e2e.yml/dispatches -f ref=main
   -f 'inputs[servers]=3' …` (session 6).
-- **Server int6, Iceberg tables with delete files are unusable (local warehouse)**: the complete-answer view
+- **Server int6, Iceberg tables with delete files are unusable (local warehouse only)**: with an S3 warehouse
+  (`iceberg-warehouse=s3`, session 13, run 39941848259) `orders_del` reads correctly, so this affects `file:` roots only.
+  Old description: the complete-answer view
   `iceberg_scan('/wh/ice/orders_del/metadata/v2.metadata.json')` is skipped at refresh — DuckDB: `Permission Error: Cannot
   access file "file:/wh/ice/orders_del/metadata/snap-….avro" - file system operations are disabled by configuration` —
   so the table is listed but `SELECT` fails "Table with name orders_del does not exist" (clean error, no wrong rows).
@@ -186,6 +198,10 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 - e2e S3 is `rclone serve s3` instead of MinIO (MinIO images/binaries are no longer downloadable). OK, or is
   there a MinIO build you want to put into `e2e-assets`?
+- **S3 Iceberg warehouse in CI** (session 13): should `iceberg-warehouse=s3` become the default for int6 runs? It covers
+  deletes (local `file:` cannot), but costs ~1 min more (S3A jars) and its commit check can hit a clean error in the
+  non-atomic HadoopCatalog commit window. Also: is an s3 catalog root outside the dataDir meant to be refused, or should
+  the server open a second store for it?
 - The release now holds int4, int5 and int6; the e2e job picks one with `server-build` (default int4, the current
   release candidate). Switch the default to int6 once you consider it the candidate?
 - `e2e-assets` is a draft release, so the e2e job runs with `contents: write`. Publishing it as a (private-repo)
@@ -274,3 +290,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   baseline (50/65/80/90 %). Dispatch run 39927746471 (Trino 477 int6 complete 3 servers): all checks passed, 0 FAIL, but
   cancelled by the 30-min job limit just before exit → e2e timeout 40 min; mid-stream kill 4/4 "before any data" (exact
   answers, INFO) → cause documented, Open question added. ~31 Actions minutes. No plugin code changed; invariants hold.
+- 2026-10-23 (cloud session 13): item 1 c) S3 Iceberg warehouse, opt-in (`iceberg-warehouse=s3`). Intermediate failing runs
+  (all int6 partial 1 server): 39935266435 and 39937732484 (rclone 500 on parallel PUTs / S3A directory markers; errors now
+  printed), 39938202657 and 39938584442 (rclone refuses S3A's `wh/ice/` marker), 39939037384 (server: catalog root must be
+  below the dataDir), 39939466381 (all checks OK incl. deletes, one clean error in the commit window → retried as INFO).
+  Green: run 39941848259. Commits `[skip ci]`, runs dispatched by hand, ~60 Actions minutes. No plugin code changed;
+  invariants hold (default `local` path unchanged; no wrong rows in any run).

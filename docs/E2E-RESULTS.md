@@ -30,6 +30,7 @@ in the detail ("N cells equal at Trino DECIMAL scale").
 | 2026-10-23 | 39886319914 | 455 (int6) | complete | 3 | 22/22, types 2/2, Iceberg (deletes KNOWN) | lost before 5+5 exact; killed during q18 exact (tpch; ice attempt 3, streams re-read from flight1); two killed 5/5 + 3/3 exact | 14 min |
 | 2026-10-23 | 39886487789 | 455 (int6) | partial | 3 | 22/22, types 2/2, Iceberg (deletes KNOWN) | killed during q18 (tpch): clean error, one flight3 stream "failed after delivering data; not retried" (first mid-stream hit); ice exact; mid-stream lineitem check 4 misses (INFO, delays too short), all exact; two killed exact | 15.5 min |
 | 2026-10-23 | 39891124604 | 455 (int6) | partial | 3 | 22/22, types 2/2, Iceberg (deletes KNOWN) | lost before 5+5 exact; killed during q18 exact (tpch, ice); killed mid-stream: attempt 1 (9 s) hit a flight3 stream after data → clean error; two killed exact | 17 min |
+| 2026-10-23 | 39941848259 | 455 (int6, S3 warehouse) | partial | 1 | 22/22, types 2/2, Iceberg all OK incl. deletes (1,285,715 rows) | – | 19 min |
 
 Types (`e2e/ci/types_check.py`, every run): each table of schema `types` read with `SELECT` of all
 exposed columns through Trino (Python client, raw protocol values) vs DuckDB 1.4.1 (pip, in the job) on the
@@ -64,3 +65,5 @@ Failover checks (3 servers, `--hosts flight1,flight2,flight3`, catalog points to
 
 Server build: `SERVER_BUILD` / workflow input `server-build` (`int4` default, `int5`) picks
 `arrow-flight-server-1.0.0-<build>.jar` + `<build>-plugins.tar.zst` from the release.
+Iceberg warehouse: `ICEBERG_WAREHOUSE` / workflow input `iceberg-warehouse` = `local` (default, `/wh` mounted on every
+node) or `s3` (Spark writes `s3://lake/parquet/wh` through S3A; first green run 39941848259, deletes OK).
