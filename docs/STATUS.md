@@ -120,7 +120,8 @@ Kept up to date after every work session so work can be resumed from this reposi
    1 server, Trino 483, run 39956762839; off → on): lineitem top 10 6,001,215 → 40 (4 range splits x 10), orders top 20
    729,413 → 20, customer top 5 150,000 → 5, lineitem top 1000 6,001,215 → 4,000. Wall time on the runner (off/on):
    2.73/3.65 s, 0.54/0.37 s, 0.21/0.17 s, 2.07/2.87 s — the two lineitem queries were *slower* with pushdown (the
-   server sorts 6M rows per split; locally the transfer it saves costs little). Enable by default? (see Open questions).
+   server sorts 6M rows per split; locally the transfer it saves costs little). Trino 477 (run 39959398904): same rows,
+   1.90/2.09, 0.58/0.43, 0.15/0.16, 1.54/1.90 s. Enable by default? (see Open questions).
 4. **Dynamic filters** — measured (session 8); defaults unchanged (off, 1000 values). Review: the server SQL of a scan is
    built on the worker right before the first read, waiting up to `wait-timeout-ms` (10 s) for the build side; domains go
    only onto plain columns of pushable types, never under a pushed TopN; correct by construction (a span is a superset).
@@ -172,8 +173,8 @@ Kept up to date after every work session so work can be resumed from this reposi
    39949173080 (3 servers, baseline 18.1 s, delays 9/11/14/16 s) the first kill (9 s) **did** hit two flight3 streams
    after data → clean error "Network closed for unknown reason", 0 wrong answers. So a hit in complete mode is possible
    (with the S3 warehouse); still INFO there. Session 15: 483 int6 partial 1 server green (run 39956762839: TPC-H 22/22,
-   TopN 4/4, dynfilter, splits, types 2/2, Iceberg checks OK, `orders_del` KNOWN as in a)); 477 int6 partial 1 server:
-   run 39959398904 (see Log).
+   TopN 4/4, dynfilter, splits, types 2/2, Iceberg checks OK, `orders_del` KNOWN as in a)); 477 int6 partial 1 server
+   green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
 - **Mid-stream kill in complete mode** (session 12): kills at up to 90 % of the query time never hit a stream after
@@ -318,3 +319,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   39949170568 and complete run 39949173080, both green (all checks OK incl. `orders_del` deletes and failover on `ice`;
   commit-window INFO 1/2 clean errors; complete-mode mid-stream kill hit after data once, clean error). No new server
   build in `e2e-assets`, so 1 a) stays open. ~47 Actions minutes. No code changed; invariants hold.
+- 2026-10-23 (cloud session 15): no new server build in `e2e-assets` (1 a) still waits). Item 3 follow-up: the e2e TopN
+  check now records rows read off/on (`topn-rows.tsv`; `df_stats` moved up, unchanged): rows drop to n per split, but the
+  lineitem TopN queries run 10–35 % slower with pushdown on the runner (Open question updated). Item 7 optional done:
+  int6 partial 1 server green on Trino 483 (run 39956762839) and 477 (run 39959398904). Commits `[skip ci]`, runs
+  dispatched by hand, ~34 Actions minutes. No plugin code changed; invariants hold.
