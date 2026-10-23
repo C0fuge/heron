@@ -116,8 +116,11 @@ Kept up to date after every work session so work can be resumed from this reposi
    Not combined with a LIMIT below, an aggregation, a later filter or dynamic filters. Unit tests
    `ArrowFlightMetadataTopNTest`; e2e `topn` check: 4 queries directly over scans (lineitem/orders/customer, n = 5…1000)
    equal with the property on and off, EXPLAIN shows `topN=` in the scan. TPC-H q03/q10/q18 are unaffected (their
-   TopN sits above joins/aggregations, never on a scan). Open: rows-read reduction not measured; enable by default?
-   (see Open questions).
+   TopN sits above joins/aggregations, never on a scan). Rows read measured (session 15, `topn-rows.tsv`, int6 partial
+   1 server, Trino 483, run 39956762839; off → on): lineitem top 10 6,001,215 → 40 (4 range splits x 10), orders top 20
+   729,413 → 20, customer top 5 150,000 → 5, lineitem top 1000 6,001,215 → 4,000. Wall time on the runner (off/on):
+   2.73/3.65 s, 0.54/0.37 s, 0.21/0.17 s, 2.07/2.87 s — the two lineitem queries were *slower* with pushdown (the
+   server sorts 6M rows per split; locally the transfer it saves costs little). Enable by default? (see Open questions).
 4. **Dynamic filters** — measured (session 8); defaults unchanged (off, 1000 values). Review: the server SQL of a scan is
    built on the worker right before the first read, waiting up to `wait-timeout-ms` (10 s) for the build side; domains go
    only onto plain columns of pushable types, never under a pushed TopN; correct by construction (a span is a superset).
@@ -168,7 +171,9 @@ Kept up to date after every work session so work can be resumed from this reposi
    only worth it if the maintainer wants it (see Open questions). Session 14: in the complete-mode S3-warehouse run
    39949173080 (3 servers, baseline 18.1 s, delays 9/11/14/16 s) the first kill (9 s) **did** hit two flight3 streams
    after data → clean error "Network closed for unknown reason", 0 wrong answers. So a hit in complete mode is possible
-   (with the S3 warehouse); still INFO there. Optional: 477/483 int6 on 1 server.
+   (with the S3 warehouse); still INFO there. Session 15: 483 int6 partial 1 server green (run 39956762839: TPC-H 22/22,
+   TopN 4/4, dynfilter, splits, types 2/2, Iceberg checks OK, `orders_del` KNOWN as in a)); 477 int6 partial 1 server:
+   run 39959398904 (see Log).
 
 ## Open questions
 - **Mid-stream kill in complete mode** (session 12): kills at up to 90 % of the query time never hit a stream after
@@ -187,7 +192,11 @@ Kept up to date after every work session so work can be resumed from this reposi
   q02/q05/q08/q09 at SF1, answers exact). Measurements: Next steps item 4.
 - **TopN pushdown default** (session 7): implemented and green on int4 (partial 1+3 servers, complete 3 servers — see
   Log) but **off by default** because the README said the server had no `ORDER BY`/`LIMIT`. The int4 server does
-  accept them. Enable by default on the stand (`arrow-flight.topn-pushdown.enabled=true`) once you have tried it? VARCHAR
+  accept them. Enable by default on the stand (`arrow-flight.topn-pushdown.enabled=true`) once you have tried it?
+  Session 15 measurement (Next steps item 3): rows read drop to n per split (6M → 40), but on the CI runner the two
+  lineitem queries took ~35 % longer with it on (server-side sort of every split vs. cheap local transfer); on the stand,
+  where rows cross the network, compare e.g. `SELECT … FROM lineitem ORDER BY l_extendedprice DESC LIMIT 10` with the
+  session property `flight.topn_pushdown_enabled` on and off. VARCHAR
   sort keys are not pushed: is the server's DuckDB collation always binary (then they could be)?
 - (resolved) Workflow dispatch from cloud sessions: `gh workflow run` fails (GraphQL blocked by the session proxy);
   the REST call works: `gh api -X POST repos/C0fuge/heron/actions/workflows/e2e.yml/dispatches -f ref=main
