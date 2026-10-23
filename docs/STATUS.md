@@ -185,7 +185,9 @@ Kept up to date after every work session so work can be resumed from this reposi
    run only if a plugin change touches them. Session 22: int7 does **not** need the CI `core-site.xml` (`fs.file.impl`)
    workaround: new workflow input `iceberg-core-site` (`ICEBERG_CORE_SITE`, empty = 1 for int5/int6, 0 otherwise); int7
    Trino 455 partial 1 server without it, run 40006799225, green (server starts, TPC-H 22/22, every Iceberg check OK incl.
-   `orders_del`). Not yet run without it: int7 with `iceberg-warehouse=s3` or 3 servers (same server code path; low risk).
+   `orders_del`). Session 23: int7 Trino 455 partial **3 servers** with `iceberg-warehouse=s3`, without it, run 40014711279
+   (28.5 min): green (TPC-H, Iceberg incl. failover on `ice`, kill during a read, mid-stream kill hit after data on attempt 1
+   = clean error, two nodes down). The workaround is not needed for int7 in any tested setup.
    Maintainer answers in Open questions
    (defaults for TopN, dynamic filters, split count / parallelism). Mid-stream kill in complete mode — investigated
    (session 12), stays INFO: delays now default to 50/65/80/90 % of the healthy baseline in complete mode; in run
@@ -387,3 +389,6 @@ Kept up to date after every work session so work can be resumed from this reposi
   (default: workaround only for int5/int6); int7 Trino 455 partial 1 server without it, run 40006799225: green (TPC-H 22/22,
   TopN, dynfilter, types, Iceberg incl. `orders_del` deletes). e2e harness only, pushed with `[skip ci]` (int4 push matrix
   would not exercise it). ~19 Actions minutes. No plugin code changed; invariants hold.
+- 2026-10-23 (cloud session 23): item 7, last open int7 combination without the `core-site.xml` workaround: e2e int7 Trino 455
+  partial 3 servers, `iceberg-warehouse=s3`, `iceberg-core-site` empty (= 0), run 40014711279: green. ~29 Actions minutes. No
+  code changed; invariants hold. Remaining item-7 work waits on the maintainer's Open questions.
