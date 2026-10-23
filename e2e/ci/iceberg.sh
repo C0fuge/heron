@@ -212,15 +212,23 @@ iceberg_check() {
     "$ICEBERG_QUERIES on schema ice vs reference: $(tail -n +2 "$dir/summary.tsv" | cut -f1,2 | tr '\t\n' ': ')"
 
   # a commit between two queries: the first sees 5000 rows, a later one 6000
-  local before after waited=0
+  # S3 warehouse: HadoopCatalog commits on S3 are not atomic (S3A rename = copy + delete), so a query
+  # in the commit window may fail cleanly (seen: "Column 'c_custkey' not found. Available: []"); such
+  # errors are retried within the wait and reported as INFO. Any other answer fails.
+  local before after waited=0 errors=0 first_error=
   before=$(tq "SELECT count(*), max(c_custkey) FROM ice.commits")
   spark_sql commit.sql > "$OUT/iceberg-commit.log"
   while :; do
     after=$(tq "SELECT count(*), max(c_custkey) FROM ice.commits")
     [ "$after" = $'6000\t6000' ] && break
-    [ "$after" = $'5000\t5000' ] && [ $waited -lt "$ICEBERG_COMMIT_WAIT" ] || break
+    if [ "$ICEBERG_WAREHOUSE" = s3 ] && [[ "$after" =~ ^Query\ .*failed ]] && [ $waited -lt "$ICEBERG_COMMIT_WAIT" ]; then
+      errors=$((errors + 1)); [ -n "$first_error" ] || first_error=$(echo "$after" | head -1 | cut -c1-300)
+    else
+      [ "$after" = $'5000\t5000' ] && [ $waited -lt "$ICEBERG_COMMIT_WAIT" ] || break
+    fi
     sleep 5; waited=$((waited + 5))
   done
+  [ $errors = 0 ] || ice_out commit-window INFO "$errors clean error(s) while the commit landed; first: $first_error"
   if [ "$before" = $'5000\t5000' ] && [ "$after" = $'6000\t6000' ]; then
     ice_out commit OK "before the commit 5000 rows; after it 6000 rows, seen ${waited}s after the commit"
   else
