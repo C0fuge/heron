@@ -81,8 +81,12 @@ Kept up to date after every work session so work can be resumed from this reposi
       rows = Parquet: the deletes problem in a) is specific to the local `file:` warehouse). Run 39939466381 had one clean
       error right after the mid-run commit ("Column 'c_custkey' not found. Available: []"): HadoopCatalog commits on S3 are
       not atomic (S3A rename = copy + delete). In S3 mode such errors are now retried within the commit wait and reported
-      as INFO `commit-window`. Not run with S3: 3 servers, complete mode. Equality deletes (need Flink/pyiceberg) are not
-      covered.
+      as INFO `commit-window`. Session 14, int6 S3 warehouse, 3 servers: partial run 39949170568 (18.5 min) and complete
+      run 39949173080 (28.3 min) both green: TPC-H 22/22, types 2/2, every Iceberg check OK incl. `orders_del` 1,285,715
+      rows and TPC-H 8/8 on `ice`, failover on `ice` (flight3 killed during a read, re-read from a backup), two nodes down;
+      `commit-window` INFO 1 resp. 2 clean errors ("Table ice.commits names version 2 in its version hint, but has no
+      metadata file for it" = the non-atomic HadoopCatalog commit). Equality deletes (need Flink/pyiceberg) are not
+      covered. Item 1 now waits only for a), i.e. a fixed server build.
 0. **Plugin bug: optimizer loop on `checksum(ROW(...))`** — done (session 7). Cause: Trino 455's `PartialTranslator`
    collects the projections in a HashMap keyed by node identity, so their order changes on every
    `PushProjectionIntoTableScan` invocation; `applyProjection` compared the projected column *list* with the handle's
@@ -161,12 +165,17 @@ Kept up to date after every work session so work can be resumed from this reposi
    ("failed before any data", answers exact). In complete mode a node sends nothing until the server has the whole
    answer, then the batches go out in a short burst, so a timed kill practically never lands inside it. A real
    after-data check there would need a slowed stream (e.g. `tc` throttling on flight3, or a much larger table) —
-   only worth it if the maintainer wants it (see Open questions). Optional: 477/483 int6 on 1 server.
+   only worth it if the maintainer wants it (see Open questions). Session 14: in the complete-mode S3-warehouse run
+   39949173080 (3 servers, baseline 18.1 s, delays 9/11/14/16 s) the first kill (9 s) **did** hit two flight3 streams
+   after data → clean error "Network closed for unknown reason", 0 wrong answers. So a hit in complete mode is possible
+   (with the S3 warehouse); still INFO there. Optional: 477/483 int6 on 1 server.
 
 ## Open questions
 - **Mid-stream kill in complete mode** (session 12): kills at up to 90 % of the query time never hit a stream after
   its first batch (the server streams a node's part only once complete, in a burst). The partial-mode check covers
   the plugin's "no retry after data" rule. Add a throttled-network variant for complete mode, or leave it as INFO?
+  (Session 14: with `iceberg-warehouse=s3`, complete mode, the 9 s kill did hit after data — run 39949173080; a hit is
+  possible but not reliable.)
 - **Split count / endpoint read parallelism** (session 9): on the CI runner (everything on 4 vCPUs) neither more range splits
   nor parallel endpoint reads give a clear gain; parallel reads helped the 3-server full scan (16.0 → 12.8 s) and q03. On
   the stand, try `SET SESSION flight.endpoint_read_parallelism = 3` (3 nodes) and `flight.split_count` 1/4/8 on SF10
@@ -296,3 +305,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   below the dataDir), 39939466381 (all checks OK incl. deletes, one clean error in the commit window → retried as INFO).
   Green: run 39941848259. Commits `[skip ci]`, runs dispatched by hand, ~60 Actions minutes. No plugin code changed;
   invariants hold (default `local` path unchanged; no wrong rows in any run).
+- 2026-10-23 (cloud session 14): item 1 c) completed: S3 Iceberg warehouse on int6 with 3 servers, partial run
+  39949170568 and complete run 39949173080, both green (all checks OK incl. `orders_del` deletes and failover on `ice`;
+  commit-window INFO 1/2 clean errors; complete-mode mid-stream kill hit after data once, clean error). No new server
+  build in `e2e-assets`, so 1 a) stays open. ~47 Actions minutes. No code changed; invariants hold.
