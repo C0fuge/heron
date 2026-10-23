@@ -57,6 +57,12 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Queue empty (session 24, 2026-10-23):** items 1–6 are done and every remaining item-7 follow-up waits on an
+> answer in Open questions (TopN / dynamic-filter / split defaults, Arrow upgrade vs. 18.1 pins, bundle cleanup,
+> complete-mode throttled kill, int7 as push default, S3 warehouse default). Actions use since 2026-10-01 is already
+> ≥ 850 min of run time (92 runs). Until the maintainer answers one of them or adds a new item, a session should take
+> the lock, find nothing new here, release it and stop — no CI runs for coverage alone.
+
 > **Dependency audit 2026-10-23** (local coordinator): the built plugin tarball does not match the pom pins — it ships Netty 4.1.100 modules, gRPC 1.65.0 and protobuf 3.25.4 (CVE-2024-7254); Jackson 2.18.0. Align via BOMs (netty-bom 4.1.137+ or 4.2.17+ as Trino's classloader allows, grpc-bom current, protobuf 3.25.5+/4.x, jackson 2.18.11+), rebuild for 455/477/483, verify the tarball contents in CI (fail the build on drift), e2e green. Do this before other open follow-ups. **Done (session 20)**: root `pom.xml` pins Netty 4.1.139 (netty-bom; tcnative 2.0.84),
 > gRPC **1.78.0** (grpc-bom; newest line Arrow 18.1 runs on — gRPC 1.79 removed `ReadableBuffer.readBytes(ByteBuffer)`, which
 > Arrow's `GetReadableBuffer` calls: NoSuchMethodError on every stream, build run 39990774489), protobuf 3.25.9, Jackson 2.18.12
@@ -392,3 +398,6 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-10-23 (cloud session 23): item 7, last open int7 combination without the `core-site.xml` workaround: e2e int7 Trino 455
   partial 3 servers, `iceberg-warehouse=s3`, `iceberg-core-site` empty (= 0), run 40014711279: green. ~29 Actions minutes. No
   code changed; invariants hold. Remaining item-7 work waits on the maintainer's Open questions.
+- 2026-10-23 (cloud session 24): nothing actionable — Next steps hold only items that wait on Open questions; last runs all
+  green (latest 40014711279). No CI run, no code change. Added the "Queue empty" note to Next steps so later sessions stop early
+  (≥ 850 Actions minutes used this month). Invariants untouched.
