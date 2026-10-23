@@ -67,8 +67,10 @@ Kept up to date after every work session so work can be resumed from this reposi
    seen by the second only. Green on int6, partial, 1 server: run 39852719842 (TPC-H 22/22 + types 2/2 + Iceberg, deletes KNOWN). Open:
    a) `ice.orders_del` (merge-on-read position deletes): server bug, KNOWN in CI (see Open questions); recheck when a
       fixed server build arrives and turn KNOWN back into FAIL.
-   b) run int6 with `result-mode=complete` (expected: every Iceberg table hits the same iceberg_scan refusal) and with
-      `servers=3` (partial: files spread over nodes, snapshot pinning, failover with catalog tickets).
+   b) done (session 4): int6 complete mode 1 server green (run 39874470743: Iceberg reads the same as partial, 0
+      answeredCompletely fallbacks — the iceberg_scan refusal only hits `orders_del`'s view, the others are read
+      from their data files); int6 partial 3 servers green incl. failover on Iceberg tables (run 39878210446).
+      Not yet run: int6 complete mode with 3 servers (~11 min; run once before switching the default build).
    c) maybe an S3 warehouse (`s3://lake/parquet/...` under the dataDir) instead of the local one, if Spark+s3a is cheap
       enough; equality deletes (need Flink/pyiceberg) are not covered.
 1b. **e2e: a kill in the middle of a stream** that already delivered data (must be a clean error, never fewer rows);
@@ -90,8 +92,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   `iceberg_scan('/wh/ice/orders_del/metadata/v2.metadata.json')` is skipped at refresh — DuckDB: `Permission Error: Cannot
   access file "file:/wh/ice/orders_del/metadata/snap-….avro" - file system operations are disabled by configuration` —
   so the table is listed but `SELECT` fails "Table with name orders_del does not exist" (clean error, no wrong rows).
-  The same skip is logged for every Iceberg table's view (e.g. ice.commits), so complete mode probably cannot read
-  any Iceberg table from a local warehouse; partial mode works because it reads the data files. Metadata written by
+  The same skip is logged for other Iceberg tables' views (e.g. ice.commits), yet complete mode on 1 server still
+  read every table without deletes correctly (run 39874470743), so only tables with delete files are affected. Metadata written by
   Spark/Hadoop uses `file:/…` URIs. Server fix needed (allow the catalog roots / `file:` scheme in DuckDB).
 - **Server int6 with a local (`file`) warehouse fails at startup** with `No FileSystem for scheme "file"`
   (HadoopDataStoreProvider; the Hadoop jars in `libs/` do not register LocalFileSystem). CI works around it with a
@@ -134,3 +136,11 @@ Kept up to date after every work session so work can be resumed from this reposi
   (Spark hostname), 39844696722 (`No FileSystem for scheme "file"`), 39849017993 (CLI warning in output), 39850026875 and
   39851301285 (orders_del, diagnosis). All commits `[skip ci]`; runs dispatched by hand. No plugin code changed; no
   invariant affected (int4 path unchanged: `ICEBERG=0` by default for int4).
+- 2026-10-23 (cloud session 4): item 1b (Iceberg in CI, other modes). int6 complete 1 server green (run 39874470743;
+  expected Iceberg failures did not happen, only `orders_del` KNOWN). int6 partial 3 servers: run 39874473171 failed in
+  the Iceberg diagnostics (`grep` with no match under pipefail ended the job) → fixed; run 39875413990 green. Added
+  failover checks on schema `ice` (kill of flight3 during q18, two nodes down q01 q03 q18) and fixed a latent bug in the
+  kill retry (flight3 restarted alone never starts while flight2 is down: the server waits for all `--hosts`; run
+  39876649252 failed on it) → flight2+flight3 restarted together; run 39878210446 green (Iceberg kill hit on attempt 3,
+  streams re-read from flight2). All commits `[skip ci]`, runs dispatched by hand (~47 Actions minutes). No plugin code
+  changed; no invariant affected.
