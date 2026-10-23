@@ -2,6 +2,7 @@ package pro.surpin.trino.arrowflight;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.inject.Inject;
 import io.trino.spi.connector.Assignment;
 import io.trino.spi.connector.ColumnHandle;
@@ -238,7 +239,16 @@ public class ArrowFlightMetadata
             List<ConnectorExpression> projections,
             Map<String, ColumnHandle> assignments)
     {
-        ArrowFlightTableHandle handle = (ArrowFlightTableHandle) table;
+        return applyProjection((ArrowFlightTableHandle) table, projections, assignments,
+                ArrowFlightSessionProperties.isAggregationPushdownEnabled(session));
+    }
+
+    static Optional<ProjectionApplicationResult<ConnectorTableHandle>> applyProjection(
+            ArrowFlightTableHandle handle,
+            List<ConnectorExpression> projections,
+            Map<String, ColumnHandle> assignments,
+            boolean expressionPushdown)
+    {
         if (handle.getAggregation().isPresent()) {
             return Optional.empty();
         }
@@ -247,7 +257,7 @@ public class ArrowFlightMetadata
         Map<String, ArrowFlightColumnHandle> newAssignments = new LinkedHashMap<>();
         boolean pushedExpression = false;
         for (ConnectorExpression projection : projections) {
-            if (projection instanceof Variable || !ArrowFlightSessionProperties.isAggregationPushdownEnabled(session)) {
+            if (projection instanceof Variable || !expressionPushdown) {
                 newProjections.add(projection);
                 continue;
             }
@@ -271,7 +281,9 @@ public class ArrowFlightMetadata
         }
 
         List<ArrowFlightColumnHandle> newProjection = ImmutableList.copyOf(new LinkedHashSet<>(newAssignments.values()));
-        if (!pushedExpression && newProjection.equals(handle.effectiveColumns())) {
+        // Trino passes the projections in no stable order (PartialTranslator collects them in a HashMap keyed by
+        // node identity), so compare as sets: an order-only difference is not progress and would loop the optimizer.
+        if (!pushedExpression && ImmutableSet.copyOf(newProjection).equals(ImmutableSet.copyOf(handle.effectiveColumns()))) {
             return Optional.empty();
         }
 

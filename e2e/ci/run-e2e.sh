@@ -162,6 +162,24 @@ save_logs
 status=0
 "${COMPARE[@]}" "$OUT/sf1" "$QUERIES" "$OUT/sf1-summary.tsv" || status=1
 
+# A projection the plugin cannot push (ROW constructor over every column) must plan and run: Trino hands
+# applyProjection the columns in no stable order, which looped the optimizer until it hit its time limit
+# (run 39889582040). The planning cap turns a regression into a quick failure.
+log "projection: checksum(ROW(all lineitem columns))"
+mkdir -p "$OUT/projection"
+ROW_SQL='SELECT count(*), checksum(ROW(l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment)) FROM lineitem'
+start=$(date +%s.%N)
+if docker exec trino trino --catalog flight --schema tpch --session iterative_optimizer_timeout=60s --output-format TSV \
+     --execute "$ROW_SQL" > "$OUT/projection/row.tsv" 2> "$OUT/projection/row.err" \
+   && [ "$(cut -f1 "$OUT/projection/row.tsv")" = 6001215 ]; then
+  result=OK
+else
+  result=FAIL; status=1; head -c 2000 "$OUT/projection/row.err"
+fi
+printf 'projection\trow\t%.2f\n' "$(echo "$(date +%s.%N) - $start" | bc)" >> "$OUT/times.tsv"
+{ printf 'query\tresult\tdetail\n'
+  printf 'checksum_row\t%s\t%s\n' "$result" "$(tr '\t' ' ' < "$OUT/projection/row.tsv" 2>/dev/null)"; } | tee "$OUT/projection-summary.tsv"
+
 if [ -n "$TYPES" ]; then
   log "types: SELECT * per table vs DuckDB on the same Parquet"
   python3 -m venv "$WORK/venv"
@@ -288,8 +306,8 @@ if [ "$SERVERS" -ge 3 ]; then
   # of a hit is the plugin's "failed after delivering data" WARN for flight3; a miss on every delay
   # is INFO (timing-dependent). The query streams all of lineitem (checksum is not pushed down); its
   # streams open ~7-8 s after submission and one column took <1 s (runs 39886487789, 39888037652).
-  # One checksum per column: checksum(ROW(...)) makes Trino's optimizer loop on the plugin's
-  # applyProjection (run 39889582040, see docs/STATUS.md).
+  # One checksum per column (written while checksum(ROW(...)) still looped the optimizer, run 39889582040;
+  # the ROW form is now checked on its own above).
   STREAM_SQL='SELECT count(*), checksum(l_orderkey), checksum(l_partkey), checksum(l_suppkey), checksum(l_linenumber), checksum(l_quantity), checksum(l_extendedprice), checksum(l_discount), checksum(l_tax), checksum(l_returnflag), checksum(l_linestatus), checksum(l_shipdate), checksum(l_commitdate), checksum(l_receiptdate), checksum(l_shipinstruct), checksum(l_shipmode), checksum(l_comment) FROM lineitem'
   stream_query() {  # out-dir
     if docker exec trino trino --catalog flight --schema tpch --output-format TSV --execute "$STREAM_SQL" \
