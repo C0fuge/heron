@@ -83,6 +83,9 @@ public final class FlightDataStream
                 failed = true;
                 String location = locations.get(index);
                 onFailure.accept(location, e);
+                if (delivered && !cancelled && !closed) {
+                    LOG.warn("Flight stream at {} failed after delivering data ({}); not retried", location, e.getMessage());
+                }
                 if (delivered || cancelled || closed || index + 1 >= locations.size() || !isUnreachable(e)) {
                     throw e;
                 }

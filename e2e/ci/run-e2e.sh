@@ -9,6 +9,7 @@
 # SERVERS=3 forms a cluster (backup locations) and then checks endpoint failover: a node lost
 # before the queries (partitioned, then killed: answers must still be exact), a node killed during a read (clean error or exact
 # answer, never wrong rows; retried with other delays until the kill hits a read of that node),
+# a node killed after its stream delivered data (clean error or the exact answer, never fewer rows),
 # and two of three nodes down (exact or clean error).
 #
 # ICEBERG=1 (default for server builds after int4: int5, int6, which carry the 'iceberg' catalog plugin): Spark writes
@@ -281,6 +282,58 @@ if [ "$SERVERS" -ge 3 ]; then
     restart_lost
     kill_during ice killed-during-ice
   fi
+
+  # Node lost after its stream delivered data: the plugin must not retry (rows could be read twice),
+  # so the query fails cleanly; an answer must equal the healthy baseline, never fewer rows. Evidence
+  # of a hit is the plugin's "failed after delivering data" WARN for flight3; a miss on every delay
+  # is INFO (timing-dependent). The query streams most of lineitem (checksum is not pushed down).
+  STREAM_SQL='SELECT count(*), checksum(l_comment), checksum(l_orderkey), checksum(l_extendedprice) FROM lineitem'
+  stream_query() {  # out-dir
+    if docker exec trino trino --catalog flight --schema tpch --output-format TSV --execute "$STREAM_SQL" \
+         > "$1/stream.tsv" 2> "$1/stream.err"; then rm -f "$1/stream.err"; else rm -f "$1/stream.tsv"; fi
+  }
+  kill_mid_stream() {
+    local dir="$OUT/killed-mid-stream" attempt=0 hit=no wrong=0 delay adir result evidence start
+    log "failover: flight3 killed in the middle of a stream"
+    restart_lost
+    mkdir -p "$dir/base"
+    start=$(date +%s.%N); stream_query "$dir/base"
+    printf 'killed-mid-stream\tbase\t%.2f\n' "$(echo "$(date +%s.%N) - $start" | bc)" >> "$OUT/times.tsv"
+    if [ ! -f "$dir/base/stream.tsv" ]; then
+      cat "$dir/base/stream.err"
+      printf 'query\tresult\tdetail\nstream\tFAIL\tbaseline failed on a healthy cluster\n' | tee "$OUT/killed-mid-stream-summary.tsv"
+      status=1; return
+    fi
+    cat "$dir/base/stream.tsv"
+    printf 'attempt\tdelay_s\tresult\tflight3_hit\n' > "$OUT/killed-mid-stream-attempts.tsv"
+    for delay in ${KILL_STREAM_DELAYS:-2 3 1 5}; do
+      attempt=$((attempt + 1))
+      adir="$dir/$attempt"; mkdir -p "$adir"
+      [ "$attempt" -gt 1 ] && restart_lost
+      mark_log
+      stream_query "$adir" &
+      sleep "$delay"
+      docker kill flight3 >/dev/null
+      wait
+      if [ -f "$adir/stream.tsv" ]; then
+        if cmp -s "$dir/base/stream.tsv" "$adir/stream.tsv"; then result=exact; else result=WRONG; wrong=1; cat "$adir/stream.tsv"; fi
+      else
+        result="error: $(grep -m1 -E 'Query .* failed|ERROR' "$adir/stream.err" | cut -c1-200)"
+      fi
+      log_since_mark | grep -E 'flight3' > "$adir/flight3-lines.txt" || true
+      grep -q 'failed after delivering data' "$adir/flight3-lines.txt" && hit=yes
+      head -5 "$adir/flight3-lines.txt" | cut -c1-400
+      printf '%s\t%s\t%s\t%s\n' "$attempt" "$delay" "$result" "$hit" | tee -a "$OUT/killed-mid-stream-attempts.tsv"
+      [ "$wrong" = 1 ] && break
+      [ "$hit" = yes ] && break
+    done
+    evidence=$([ "$wrong" = 1 ] && echo FAIL || { [ "$hit" = yes ] && echo OK || echo INFO; })
+    { printf 'query\tresult\tdetail\n'
+      printf 'stream\t%s\t%s attempt(s), wrong answers: %s; kill hit a stream of flight3 after data: %s\n' \
+        "$evidence" "$attempt" "$wrong" "$hit"; } | tee "$OUT/killed-mid-stream-summary.tsv"
+    [ "$evidence" != FAIL ] || status=1
+  }
+  kill_mid_stream
 
   # Two of three nodes lost (flight2 and flight3): every answer exact, or a clean error.
   log "failover: flight2 and flight3 down"
