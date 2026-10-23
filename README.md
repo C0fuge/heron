@@ -29,8 +29,9 @@ mvn clean package
 # result: trino-arrow-flight/target/trino-arrow-flight-0.1.0-SNAPSHOT.zip  (plugin + all runtime jars)
 ```
 
-Uses the JDK your target Trino uses — Trino `455` → JDK 23 (`--release 23` also compiles on
-newer JDKs). Change `dep.trino.version` in the root `pom.xml` for other Trino releases.
+Needs JDK 25 to build (the `trino-maven-plugin` is compiled for Java 25); the default profile targets
+Trino `455` (`--release 22`). Trino 477 and 483: `mvn -P trino-477 clean package` / `mvn -P trino-483 clean package`
+(see `trino-arrow-flight/README.md`, "Trino versions").
 
 ## Install into Trino
 

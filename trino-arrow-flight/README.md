@@ -88,14 +88,23 @@ Produces `target/trino-arrow-flight-0.1.0-SNAPSHOT.zip` — the plugin jar plus 
 runtime jar it needs (`trino-maven-plugin` builds it and generates the
 `META-INF/services/io.trino.spi.Plugin` descriptor).
 
-### Version coupling
+### Trino versions
 
-`dep.trino.version` in the root `pom.xml` is **455**. For a different Trino, set it to your
-version and re-check two signatures that have drifted across releases:
+One source tree builds for three Trino releases; a Maven profile picks the SPI version, the
+Java release and a small per-SPI source root (`src/trino-<version>/java`: page source, page
+source provider, split manager, block builders). **455 is the default.**
 
-* `ArrowFlightMetadata.getTableHandle(...)` – the version-argument overload.
-* `ArrowFlightPageSourceProvider.createPageSource(...)` – newer Trino adds a
-  `Constraint` parameter.
+| Trino | Command | Target JDK | SPI differences handled in `src/trino-<v>/java` |
+|---|---|---|---|
+| 455 | `mvn clean verify` (= `-P trino-455`) | 22 | `getNextPage()` |
+| 477 | `mvn -P trino-477 clean verify` | 24 | `getNextSourcePage()` / `SourcePage` |
+| 483 | `mvn -P trino-483 clean verify` | 25 | as 477, plus `getSplits(..., Set<ColumnHandle>, ...)`, `createPageSource(..., Optional<ConnectorTableCredentials>, ...)`, null masks as validity bitmaps; bundles Jackson Blackbird 2.22.1 (Trino 483 needs it in the plugin classloader) |
+
+Every build needs JDK 25. Install the zip of the matching profile only: a 455 build does not
+load in 477/483 and vice versa. CI builds all three on request (`build` workflow,
+`all-versions`) and runs the end-to-end suite with input `trino` = 455 / 477 / 483. Trino 483 no
+longer has the `enable_large_dynamic_filters` session property (the e2e script passes it only
+where `SHOW SESSION` lists it).
 
 ## Install
 

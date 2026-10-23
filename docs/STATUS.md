@@ -128,8 +128,19 @@ Kept up to date after every work session so work can be resumed from this reposi
    3 servers — scan s1p1 15.98 / s1p3 12.80 / s4p1 14.06 / s4p3 15.73; q03 5.81 / 4.58 / 6.23 / 4.58; others within noise.
    1 server — scan 8.98 / 8.61 / 11.08 / 11.06 (4 range splits slower than 1 there: server and Trino share 4 cores).
    Open: measure on the stand (real nodes, network); see Open questions.
-6. **Trino 477 and 483 builds**: make the plugin compile and pass e2e on both (SPI changes); document per-version
-   build commands; keep 455 the default.
+6. **Trino 477 and 483 builds** — done (session 10). The per-SPI source roots (`src/trino-455|477|483/java`) and
+   profiles already existed; first CI build of all three (run 39914179868): 455 and 477 green, 483 unit tests failed
+   (`NoClassDefFoundError: JsonSerializeAs` — the profile's Jackson 2.22.1 BOM lifted jackson-databind while
+   jackson-annotations stayed pinned at 2.18.2) → property `dep.jackson-annotations.version`, 2.22 in the 483 profile
+   (build run 39914348258: 455/477/483 green, 26/26 tests each). e2e int4 partial, 1 + 3 servers, all green:
+   477 run 39914595927, 483 run 39914598648 (TPC-H 22/22, projection, TopN 4/4, dynfilter 10/10 x 3 modes, splits
+   4 settings, types 2/2, failover incl. kill during a read and mid-stream kill = clean error). e2e script: Trino's
+   `enable_large_dynamic_filters` (gone in 483) is passed only where `SHOW SESSION` lists it. Build commands per
+   version: `trino-arrow-flight/README.md` "Trino versions". Not run: 477/483 in complete mode or with int6/Iceberg.
+7. Open follow-ups (pick by value): 1 a) when a fixed server build arrives; Trino 477/483 e2e in complete mode / int6
+   (one dispatch each, ~30 min); turn the mid-stream-kill INFO into FAIL (item 1b: hit on attempt 1 in every recent
+   3-server run, incl. 483 this session); maintainer answers in Open questions (defaults for TopN, dynamic filters,
+   split count / parallelism).
 
 ## Open questions
 - **Split count / endpoint read parallelism** (session 9): on the CI runner (everything on 4 vCPUs) neither more range splits
@@ -233,3 +244,10 @@ Kept up to date after every work session so work can be resumed from this reposi
   splits 4 settings x 6 queries exact, failover checks incl. kill during a read green). README: corrected the stale
   "one split per endpoint" description, documented split properties. ~25 Actions minutes. Invariants hold (default path
   unchanged; with parallelism > 1 each stream keeps its failover-before-first-batch rule; no wrong rows in any setting).
+- 2026-10-23 (cloud session 10): item 6 (Trino 477/483) done: 483 profile fix (jackson-annotations 2.22), build run
+  39914348258 all three versions green; e2e int4 partial 1+3 servers green on 477 (run 39914595927) and 483 (run
+  39914598648); e2e script tolerates Trino versions without `enable_large_dynamic_filters` (verified on 483; the 455
+  path with the guard runs on the next plugin push). README per-version build table; root README build note corrected
+  (release 22, JDK 25). Earlier build run 39914179868 (483 red, the bug above); a push-triggered 455 e2e (39914340347)
+  was cancelled (change was 483-only). ~70 Actions minutes. Invariants hold (455 artifact unchanged; no plugin code
+  changed).
