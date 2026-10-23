@@ -9,8 +9,9 @@
 #   ice.customer_ren  customer with c_comment renamed to c_note (rename after the data was written)
 #   ice.commits       customer c_custkey <= 5000; iceberg_check commits 1000 more rows mid-run
 # ICEBERG_WAREHOUSE=s3 instead: Spark writes the same warehouse through s3a into the rclone S3 bucket
-# (s3://lake/wh, outside the dataDir s3://lake/parquet; metadata carries s3:// URIs, fs.s3.impl = S3A)
-# and the servers read it with their s3 store (no /wh mount needed).
+# (s3://lake/parquet/wh: the server opens one store per storage plugin, so an s3 catalog root must lie
+# below the dataDir s3://lake/parquet; metadata carries s3:// URIs, fs.s3.impl = S3A) and the servers
+# read it with their s3 store (no /wh mount needed).
 # iceberg_check (after the parquet checks): each table equals its Parquet counterpart read through
 # the same plugin (row count + order-insensitive checksum per column, column names and types),
 # TPC-H queries on schema ice equal the DuckDB reference, and a commit made between two queries
@@ -30,8 +31,8 @@ case "$ICEBERG_WAREHOUSE" in
   local) ICEBERG_WH_URI=file:///wh; ICEBERG_WH_DIR="$WORK/wh"
          ICEBERG_SERVER_ARGS=(-Dcatalog=iceberg-hadoop -Darrowflight.iceberg-hadoop.warehouse=/wh
                               -Darrowflight.catalog.localRootsShared=true) ;;
-  s3)    ICEBERG_WH_URI=s3://lake/wh; ICEBERG_WH_DIR="$WORK/s3/lake/wh"
-         ICEBERG_SERVER_ARGS=(-Dcatalog=iceberg-hadoop -Darrowflight.iceberg-hadoop.warehouse=s3://lake/wh) ;;
+  s3)    ICEBERG_WH_URI=s3://lake/parquet/wh; ICEBERG_WH_DIR="$WORK/s3/lake/parquet/wh"
+         ICEBERG_SERVER_ARGS=(-Dcatalog=iceberg-hadoop -Darrowflight.iceberg-hadoop.warehouse=s3://lake/parquet/wh) ;;
   *)     echo "ICEBERG_WAREHOUSE must be local or s3, not '$ICEBERG_WAREHOUSE'" >&2; exit 1 ;;
 esac
 
