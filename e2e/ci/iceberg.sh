@@ -45,7 +45,7 @@ spark_sql() {  # sql-file
              fs.s3a.path.style.access=true fs.s3a.connection.ssl.enabled=false fs.s3a.endpoint.region=us-east-1 \
              fs.s3a.aws.credentials.provider=com.amazonaws.auth.EnvironmentVariableCredentialsProvider \
              fs.s3a.multipart.threshold=1G fs.s3a.multipart.size=512M \
-             fs.s3a.attempts.maximum=2 fs.s3a.retry.limit=2; do
+             fs.s3a.attempts.maximum=2 fs.s3a.retry.limit=2 fs.s3a.directory.marker.retention=keep; do
       s3conf+=(--conf "spark.hadoop.$k")
     done
   fi
@@ -92,6 +92,14 @@ SQL
   cat > "$WORK/spark/commit.sql" <<SQL
 INSERT INTO wh.ice.commits SELECT * FROM $p/customer\` WHERE c_custkey BETWEEN 5001 AND 6000;
 SQL
+  if [ "$ICEBERG_WAREHOUSE" = s3 ]; then
+    # rclone serve s3 (local backend) answers 500 "file already exists" when parallel PUTs create the
+    # same new directory: the table directories exist before Spark writes into them
+    local t
+    for t in lineitem orders customer orders_del customer_ren commits; do
+      mkdir -p "$ICEBERG_WH_DIR/ice/$t/data" "$ICEBERG_WH_DIR/ice/$t/metadata"
+    done
+  fi
   docker pull -q "$SPARK_IMAGE" >/dev/null
   spark_sql generate.sql | tee "$OUT/iceberg-generate.log" | tail -20
   find "$ICEBERG_WH_DIR" -name 'version-hint.text' | sort
