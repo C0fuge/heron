@@ -2,6 +2,8 @@
 # CI end-to-end run: S3 (rclone) + Flight SQL server(s) + Trino with this plugin, TPC-H SF1 22/22
 # compared with e2e/ci/reference/sf1, and every table of schema 'types' compared with DuckDB
 # (pip duckdb==1.4.1) reading the same Parquet files (e2e/ci/types_check.py).
+# Also: an unpushable projection, TopN pushdown on vs off, and dynamic filters on vs off (DF_QUERIES: answers
+# vs the reference, rows read and time per setting in dynfilter-rows.tsv).
 #
 #   ASSETS=<dir with the e2e-assets release files>  PLUGIN_ZIP=<plugin zip>  OUT=<results dir>
 #   TRINO_VERSION=455  RESULT_MODE=partial  SERVERS=1|3  SERVER_BUILD=int4|int5|int6  e2e/ci/run-e2e.sh
@@ -217,6 +219,37 @@ for i in "${!TOPN_QUERIES[@]}"; do
   printf 'q%s\t%s\t%s\n' "$i" "$result" "$detail" | tee -a "$OUT/topn-summary.tsv"
 done
 grep -m1 'topN=' "$OUT/topn/0-explain.txt" | cut -c1-300 || true
+
+# Dynamic filters (off by default): TPC-H joins with flight.dynamic_filtering_enabled must still equal the DuckDB
+# reference; rows the scans read (Trino physicalInputPositions = rows the plugin got from the server) and wall time
+# are recorded for both settings (INFO: the measurement for STATUS item 4).
+DF_QUERIES="${DF_QUERIES:-q02 q03 q05 q08 q09 q10 q17 q18 q20 q21}"
+log "dynamic filters: $DF_QUERIES on vs off"
+mkdir -p "$OUT/dynfilter/on" "$OUT/dynfilter/off"
+df_stats() {  # source -> "<physicalInputPositions> <elapsed>"
+  local id
+  id=$(curl -fsS -H 'X-Trino-User: e2e' http://127.0.0.1:8080/v1/query \
+    | jq -r --arg s "$1" '[.[] | select(.session.source == $s)] | sort_by(.queryStats.createTime) | last | .queryId // empty')
+  [ -n "$id" ] || { echo "? ?"; return; }
+  curl -fsS -H 'X-Trino-User: e2e' "http://127.0.0.1:8080/v1/query/$id" \
+    | jq -r '"\(.queryStats.physicalInputPositions) \(.queryStats.elapsedTime)"' 2>/dev/null || echo "? ?"
+}
+printf 'query\tphysical_rows_off\tphysical_rows_on\tratio\telapsed_off\telapsed_on\n' > "$OUT/dynfilter-rows.tsv"
+for q in $DF_QUERIES; do
+  for mode in off on; do
+    t0=$(date +%s.%N)
+    docker exec trino trino --catalog flight --schema tpch --source "e2e-df-$q-$mode" \
+      --session "flight.dynamic_filtering_enabled=$([ $mode = on ] && echo true || echo false)" \
+      --output-format TSV -f "/queries/$q.sql" > "$OUT/dynfilter/$mode/$q.tsv" 2> "$OUT/dynfilter/$mode/$q.err" \
+      || rm -f "$OUT/dynfilter/$mode/$q.tsv"
+    printf 'dynfilter-%s\t%s\t%.2f\n' "$mode" "$q" "$(echo "$(date +%s.%N) - $t0" | bc)" >> "$OUT/times.tsv"
+  done
+  read -r off_rows off_t <<< "$(df_stats "e2e-df-$q-off")"
+  read -r on_rows on_t <<< "$(df_stats "e2e-df-$q-on")"
+  ratio=$(awk -v a="$on_rows" -v b="$off_rows" 'BEGIN { if (b + 0 > 0) printf "%.3f", a / b; else print "?" }')
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$q" "$off_rows" "$on_rows" "$ratio" "$off_t" "$on_t" | tee -a "$OUT/dynfilter-rows.tsv"
+done
+"${COMPARE[@]}" "$OUT/dynfilter/on" "$QUERIES" "$OUT/dynfilter-summary.tsv" "$DF_QUERIES" || status=1
 
 if [ -n "$TYPES" ]; then
   log "types: SELECT * per table vs DuckDB on the same Parquet"
