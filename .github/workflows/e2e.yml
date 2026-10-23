@@ -21,6 +21,9 @@ on:
       iceberg-warehouse:
         description: 'Iceberg warehouse for int5+ (local directory or s3 = the rclone bucket, written through s3a)'
         default: 'local'
+      iceberg-core-site:
+        description: 'Put core-site.xml (fs.file.impl=LocalFileSystem) on the server classpath: 1 or 0'
+        default: '1'
   push:
     branches: [main, 'claude/**']
     paths:
@@ -32,7 +35,7 @@ on:
       - '.github/workflows/e2e.yml'
 
 concurrency:
-  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}
+  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}-${{ inputs.iceberg-core-site }}
   cancel-in-progress: true
 
 # e2e-assets is a published pre-release, so a read token can list and download its assets.
@@ -53,6 +56,7 @@ jobs:
       RESULT_MODE: ${{ inputs.result-mode || 'partial' }}
       SERVER_BUILD: ${{ inputs.server-build || 'int4' }}
       ICEBERG_WAREHOUSE: ${{ inputs.iceberg-warehouse || 'local' }}
+      ICEBERG_CORE_SITE: ${{ inputs.iceberg-core-site || '1' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4

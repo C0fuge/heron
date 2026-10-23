@@ -26,6 +26,9 @@ ICEBERG_WAREHOUSE="${ICEBERG_WAREHOUSE:-local}"  # local | s3
 HADOOP_AWS_JAR="${HADOOP_AWS_JAR:-https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar}"
 AWS_SDK_BUNDLE_JAR="${AWS_SDK_BUNDLE_JAR:-https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar}"
 ICEBERG_SERVER_CP=/app/conf:
+# 1 = put core-site.xml (fs.file.impl=LocalFileSystem) on the server classpath (needed by int5/int6);
+# 0 = leave it out (checks whether a build registers the local FileSystem itself)
+ICEBERG_CORE_SITE="${ICEBERG_CORE_SITE:-1}"
 # server flags (start_server); local: a directory shared by all nodes; s3: a prefix of the bucket
 case "$ICEBERG_WAREHOUSE" in
   local) ICEBERG_WH_URI=file:///wh; ICEBERG_WH_DIR="$WORK/wh"
@@ -123,6 +126,10 @@ SQL
   # int5 server: the Hadoop jars in libs/ do not register the local FileSystem ("No FileSystem for
   # scheme file" when the iceberg-hadoop warehouse is a local path); core-site.xml on the classpath
   mkdir -p "$WORK/server/conf"
+  if [ "$ICEBERG_CORE_SITE" != 1 ]; then
+    log "iceberg: no core-site.xml on the server classpath (ICEBERG_CORE_SITE=$ICEBERG_CORE_SITE)"
+    return 0
+  fi
   cat > "$WORK/server/conf/core-site.xml" <<XML
 <?xml version="1.0"?>
 <configuration>
