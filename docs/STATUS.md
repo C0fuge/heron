@@ -102,13 +102,28 @@ Kept up to date after every work session so work can be resumed from this reposi
    equal with the property on and off, EXPLAIN shows `topN=` in the scan. TPC-H q03/q10/q18 are unaffected (their
    TopN sits above joins/aggregations, never on a scan). Open: rows-read reduction not measured; enable by default?
    (see Open questions).
-4. **Dynamic filters**: review how dynamic filters are used (wait time, pushing IN-lists / ranges into the
-   remote SQL, size limits). Measure on e2e SF1 joins (q05, q09); keep correct results.
+4. **Dynamic filters** — measured (session 8); defaults unchanged (off, 1000 values). Review: the server SQL of a scan is
+   built on the worker right before the first read, waiting up to `wait-timeout-ms` (10 s) for the build side; domains go
+   only onto plain columns of pushable types, never under a pushed TopN; correct by construction (a span is a superset).
+   New: `arrow-flight.dynamic-filtering.max-values` / session `dynamic_filtering_max_values` (was a constant 1000; more
+   values become `[min, max]`), unit tests in `SqlQueryBuilderTest`, README/properties docs. e2e `dynfilter` check
+   (`DF_QUERIES` = q02 q03 q05 q08 q09 q10 q17 q18 q20 q21, modes off / on / big = 100000 values +
+   Trino `enable_large_dynamic_filters`): all answers = reference in every mode, 1 and 3 servers. Rows read from the server
+   (on/off, big/off; int4 partial 1 server, run 39905241338): q02 0.50/0.10, q03 1.00/1.00, q05 0.98/0.23, q08 0.98/0.08,
+   q09 1.00/0.32, q10 1.00/1.00, q17 0.50/0.50, q18 0.18/0.18, q20 0.99/0.99, q21 0.75/0.75. Wall time at SF1 on one
+   runner: no clear gain (q18 −30 %, q09 big +45 %: large IN lists cost DuckDB time; data is local, so transfer savings do
+   not show). Open: q03/q10 get nothing even with big (orders/customer keys > 100k → span); measure on the stand where
+   rows cross the network; server statement cache (see Open questions).
 5. **Split count**: review the number of splits per endpoint / per query against server nodes and Trino workers.
 6. **Trino 477 and 483 builds**: make the plugin compile and pass e2e on both (SPI changes); document per-version
    build commands; keep 455 the default.
 
 ## Open questions
+- **Dynamic filters** (session 8): with them on, every query's SQL text differs. The config comment says the server
+  keeps a prepared statement per distinct text forever (`DuckDbAdapter.stmtCache`). Is that cache bounded in int4/int6?
+  If yes, dynamic filtering could be tried on the stand (`arrow-flight.dynamic-filtering.enabled=true`; with Trino's
+  `enable_large_dynamic_filters=true` and `arrow-flight.dynamic-filtering.max-values=100000` it cut rows read 3–12× on
+  q02/q05/q08/q09 at SF1, answers exact). Measurements: Next steps item 4.
 - **TopN pushdown default** (session 7): implemented and green on int4 (partial 1+3 servers, complete 3 servers — see
   Log) but **off by default** because the README said the server had no `ORDER BY`/`LIMIT`. The int4 server does
   accept them. Enable by default on the stand (`arrow-flight.topn-pushdown.enabled=true`) once you have tried it? VARCHAR
@@ -189,3 +204,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   servers and run 39900292543 int4 complete 3 servers green, TopN 4/4 on = off). READMEs updated (they still said the
   server had no ORDER BY/LIMIT and no aggregation pushdown). ~60 Actions minutes. Invariants hold (failover rules
   unchanged, TopN off by default and never guaranteed; no wrong rows).
+- 2026-10-23 (cloud session 8): item 1 left as is (a) waits on a server fix, c) optional). Item 4 (dynamic filters):
+  e2e `dynfilter` check (TPC-H joins off / on / big, answers vs reference, Trino physicalInputPositions per mode) — runs
+  39902691979 (off/on), 39903809735 (+ 100000-value cap), 39905241338 (+ Trino large dynamic filters), all green 1+3
+  servers int4 partial; new property `arrow-flight.dynamic-filtering.max-values` (default 1000 = old behaviour), build/unit
+  run 39903809864. Defaults unchanged (dynamic filtering stays off). ~45 Actions minutes. Invariants hold (no
+  failover/auth change; dynamic filters only narrow by supersets; all answers exact).
