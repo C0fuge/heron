@@ -36,7 +36,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int4|int5|int6 (int5+ also run `e2e/ci/iceberg.sh`).
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int4|int5|int6|int7 (int5+ also run `e2e/ci/iceberg.sh`). int7 is not in `SHA256SUMS`;
+  the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
+  plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
   `rclone/rclone:1.68.2 serve s3`. The server needs a writable working directory (DuckDB `.tmp`). The release
   is a draft, so the e2e job needs `contents: write` to download assets. Job logs: `gh api .../logs` is blocked
@@ -57,11 +59,12 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 > **Dependency audit 2026-10-23** (local coordinator): the built plugin tarball does not match the pom pins — it ships Netty 4.1.100 modules, gRPC 1.65.0 and protobuf 3.25.4 (CVE-2024-7254); Jackson 2.18.0. Align via BOMs (netty-bom 4.1.137+ or 4.2.17+ as Trino's classloader allows, grpc-bom current, protobuf 3.25.5+/4.x, jackson 2.18.11+), rebuild for 455/477/483, verify the tarball contents in CI (fail the build on drift), e2e green. Do this before other open follow-ups.
 
-> **Use server int7** (2026-10-23, local coordinator): `arrow-flight-server-1.0.0-int7.jar` sha256 2b9595ab…06fa + `int7-plugins.tar.zst` sha256 4d2416f4…1af4 (plugins s3/lakefs/iceberg/hive + START-NOTES.txt) = int6b + all stand fixes (lakeFS: JOIN commit mixing, complete-mode lag, tags; Iceberg: file:/s3a roots, LocalFileSystem, Gravitino errors; Hive: HDFS paths with space/%, out-of-root partitions hidden, metastore fail-fast, UNAVAILABLE on outage; Iceberg equality deletes read all columns — correct, slow). Replace int6/int6b in CI with int7; rerun the full suite once.
+> **Use server int7** (2026-10-23, local coordinator): `arrow-flight-server-1.0.0-int7.jar` sha256 2b9595ab…06fa + `int7-plugins.tar.zst` sha256 4d2416f4…1af4 (plugins s3/lakefs/iceberg/hive + START-NOTES.txt) = int6b + all stand fixes (lakeFS: JOIN commit mixing, complete-mode lag, tags; Iceberg: file:/s3a roots, LocalFileSystem, Gravitino errors; Hive: HDFS paths with space/%, out-of-root partitions hidden, metastore fail-fast, UNAVAILABLE on outage; Iceberg equality deletes read all columns — correct, slow). Replace int6/int6b in CI with int7; rerun the full suite once. **Done (session 19)**: Trino 455, local warehouse —
+> partial 1+3 servers run 39982788809, complete 3 servers run 39982792807, all green, `orders_del` deletes OK.
 
 > **Use server int6 instead of int5** (2026-10-22, local coordinator): int5 overflows its stack on the first table refresh ~30 s after start when any catalog is configured AND the data dir has a table (then every call fails "Application error processing RPC"). int6 = int5 + fix + catalog plugin `hive` (Hive Metastore; SPI 1.1): assets `arrow-flight-server-1.0.0-int6.jar` sha256 78f06212…8d09, `int6-plugins.tar.zst` sha256 fa870ddb…adaf (plugins s3/lakefs/iceberg/hive + START-NOTES.txt). With the iceberg plugin present, `catalog=hive` needs the iceberg+avro extensions or `hive.icebergTables=skip`.
 
-1. **Iceberg in CI (server int6)** — in progress. Done (session 3): `e2e/ci/iceberg.sh`, on by default for
+1. **Iceberg in CI (server int6/int7)** — done (session 19). Done (session 3): `e2e/ci/iceberg.sh`, on by default for
    `server-build` int5/int6 (`ICEBERG=0|1`): Spark 3.5.3 + Iceberg 1.6.1 (`apache/spark:3.5.3`, runtime jar from Maven
    Central) writes a HadoopCatalog warehouse `$WORK/wh` (namespace `ice`) from the SF1 Parquet; every server mounts it
    at `/wh` (`-Dcatalog=iceberg-hadoop -Darrowflight.iceberg-hadoop.warehouse=/wh -Darrowflight.catalog.localRootsShared=true`,
@@ -69,8 +72,9 @@ Kept up to date after every work session so work can be resumed from this reposi
    listed; full copies lineitem/orders/customer = Parquet (row count + per-column `checksum`); rename (`c_comment` →
    `c_note`) OK; TPC-H q01 q03 q04 q06 q12 q13 q18 q22 on schema `ice` = DuckDB reference; a commit between two queries is
    seen by the second only. Green on int6, partial, 1 server: run 39852719842 (TPC-H 22/22 + types 2/2 + Iceberg, deletes KNOWN). Open:
-   a) `ice.orders_del` (merge-on-read position deletes): server bug, KNOWN in CI (see Open questions); recheck when a
-      fixed server build arrives and turn KNOWN back into FAIL.
+   a) `ice.orders_del` (merge-on-read position deletes): server bug in int5/int6 (local `file:` warehouse), **fixed in
+      int7**: deletes OK, 1,285,715 rows = Parquet, in partial 1+3 servers (run 39982788809) and complete 3 servers
+      (run 39982792807). `iceberg.sh` reports KNOWN only for int5/int6 now; any later build FAILs.
    b) done (session 4): int6 complete mode 1 server green (run 39874470743: Iceberg reads the same as partial, 0
       answeredCompletely fallbacks — the iceberg_scan refusal only hits `orders_del`'s view, the others are read
       from their data files); int6 partial 3 servers green incl. failover on Iceberg tables (run 39878210446).
@@ -90,7 +94,7 @@ Kept up to date after every work session so work can be resumed from this reposi
       rows and TPC-H 8/8 on `ice`, failover on `ice` (flight3 killed during a read, re-read from a backup), two nodes down;
       `commit-window` INFO 1 resp. 2 clean errors ("Table ice.commits names version 2 in its version hint, but has no
       metadata file for it" = the non-atomic HadoopCatalog commit). Equality deletes (need Flink/pyiceberg) are not
-      covered. Item 1 now waits only for a), i.e. a fixed server build.
+      covered. Item 1 complete with int7 (session 19).
 0. **Plugin bug: optimizer loop on `checksum(ROW(...))`** — done (session 7). Cause: Trino 455's `PartialTranslator`
    collects the projections in a HashMap keyed by node identity, so their order changes on every
    `PushProjectionIntoTableScan` invocation; `applyProjection` compared the projected column *list* with the handle's
@@ -166,7 +170,7 @@ Kept up to date after every work session so work can be resumed from this reposi
    Session 12: 477 + int6 complete mode 3 servers: every check passed (TPC-H 22/22, projection, TopN, dynfilter,
    splits, types 2/2, Iceberg incl. failover on `ice`, two nodes down), but the job hit its 30-min limit 4 s before
    the end (run 39927746471, cancelled) → `timeout-minutes: 40`. Not run: 483 int6 on 1 server, 477 int6 1 server.
-7. Open follow-ups (pick by value): 1 a) when a fixed server build arrives; maintainer answers in Open questions
+7. Open follow-ups (pick by value): int7 on Trino 477/483 and with `iceberg-warehouse=s3` (not yet run); maintainer answers in Open questions
    (defaults for TopN, dynamic filters, split count / parallelism). Mid-stream kill in complete mode — investigated
    (session 12), stays INFO: delays now default to 50/65/80/90 % of the healthy baseline in complete mode; in run
    39927746471 (baseline 17.9 s, kills at 8/11/14/16 s) all 4 kills still found flight3's streams open but empty
@@ -206,7 +210,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 - (resolved) Workflow dispatch from cloud sessions: `gh workflow run` fails (GraphQL blocked by the session proxy);
   the REST call works: `gh api -X POST repos/C0fuge/heron/actions/workflows/e2e.yml/dispatches -f ref=main
   -f 'inputs[servers]=3' …` (session 6).
-- **Server int6, Iceberg tables with delete files are unusable (local warehouse only)**: with an S3 warehouse
+- **Resolved in int7 (session 19, runs 39982788809/39982792807: `orders_del` OK on the local warehouse).** Kept for history:
+  **Server int6, Iceberg tables with delete files are unusable (local warehouse only)**: with an S3 warehouse
   (`iceberg-warehouse=s3`, session 13, run 39941848259) `orders_del` reads correctly, so this affects `file:` roots only.
   Old description: the complete-answer view
   `iceberg_scan('/wh/ice/orders_del/metadata/v2.metadata.json')` is skipped at refresh — DuckDB: `Permission Error: Cannot
@@ -225,8 +230,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   deletes (local `file:` cannot), but costs ~1 min more (S3A jars) and its commit check can hit a clean error in the
   non-atomic HadoopCatalog commit window. Also: is an s3 catalog root outside the dataDir meant to be refused, or should
   the server open a second store for it?
-- The release now holds int4, int5 and int6; the e2e job picks one with `server-build` (default int4, the current
-  release candidate). Switch the default to int6 once you consider it the candidate?
+- The release now holds int4…int7; the e2e job picks one with `server-build` (default int4, the current
+  release candidate). Switch the push default to int7 once you consider it the candidate? (int7 not yet in `SHA256SUMS`.)
+  Does int7 still need the CI `core-site.xml` workaround (`fs.file.impl`), given its "LocalFileSystem" fix? Not tested.
 - (resolved, session 16) `e2e-assets` is a published pre-release (since 2026-10-22), so the e2e job now runs with
   `contents: read`; asset download verified in run 39964823185.
 
@@ -338,3 +344,11 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-10-23 (cloud session 18): nothing actionable, same as session 17: `e2e-assets` unchanged (newest asset int6,
   2026-10-22 20:16), no maintainer answers in Open questions. `gh release view` fails (GraphQL blocked);
   `gh api repos/C0fuge/heron/releases/tags/e2e-assets` works. No CI run, 0 Actions minutes, no code changed.
+- 2026-10-23 (cloud session 19): maintainer note "use server int7". CI: `server-build=int7` documented in the workflow
+  and scripts, the job prints the selected build's sha256 (int7 is not in `SHA256SUMS`; verified in the session: both
+  hashes match the note), the `orders_del` KNOWN exception limited to int5/int6. Trino 455 int7 local warehouse: partial
+  1+3 servers run 39982788809 (18 / 26 min) and complete 3 servers run 39982792807 (22 min), all green — TPC-H 22/22,
+  types, every Iceberg check OK **incl. `orders_del` position deletes** (1 a) fixed by int7), failover incl. kill during
+  a read and mid-stream kill (hit after data in complete mode too, clean error), two nodes down. ~66 Actions minutes.
+  No plugin code changed; invariants hold. The maintainer's "Dependency audit" note arrived during this session: it is
+  the next item (before other follow-ups); not started.
