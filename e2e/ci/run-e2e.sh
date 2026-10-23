@@ -221,11 +221,13 @@ done
 grep -m1 'topN=' "$OUT/topn/0-explain.txt" | cut -c1-300 || true
 
 # Dynamic filters (off by default): TPC-H joins with flight.dynamic_filtering_enabled must still equal the DuckDB
-# reference; rows the scans read (Trino physicalInputPositions = rows the plugin got from the server) and wall time
-# are recorded for both settings (INFO: the measurement for STATUS item 4).
+# reference, with the default IN-list cap (on: 1000 values, more become the [min, max] span) and a large one
+# (big: DF_BIG_VALUES). Rows the scans read (Trino physicalInputPositions = rows the plugin got from the server) and
+# the elapsed time per setting go to dynfilter-rows.tsv (INFO: the measurement for STATUS item 4).
 DF_QUERIES="${DF_QUERIES:-q02 q03 q05 q08 q09 q10 q17 q18 q20 q21}"
-log "dynamic filters: $DF_QUERIES on vs off"
-mkdir -p "$OUT/dynfilter/on" "$OUT/dynfilter/off"
+DF_BIG_VALUES="${DF_BIG_VALUES:-100000}"
+log "dynamic filters: $DF_QUERIES off / on / big ($DF_BIG_VALUES values)"
+mkdir -p "$OUT/dynfilter/on" "$OUT/dynfilter/off" "$OUT/dynfilter/big"
 df_stats() {  # source -> "<physicalInputPositions> <elapsed>"
   local id
   id=$(curl -fsS -H 'X-Trino-User: e2e' http://127.0.0.1:8080/v1/query \
@@ -234,22 +236,30 @@ df_stats() {  # source -> "<physicalInputPositions> <elapsed>"
   curl -fsS -H 'X-Trino-User: e2e' "http://127.0.0.1:8080/v1/query/$id" \
     | jq -r '"\(.queryStats.physicalInputPositions) \(.queryStats.elapsedTime)"' 2>/dev/null || echo "? ?"
 }
-printf 'query\tphysical_rows_off\tphysical_rows_on\tratio\telapsed_off\telapsed_on\n' > "$OUT/dynfilter-rows.tsv"
+df_ratio() { awk -v a="$1" -v b="$2" 'BEGIN { if (b + 0 > 0) printf "%.3f", a / b; else print "?" }'; }
+printf 'query\trows_off\trows_on\trows_big\tratio_on\tratio_big\telapsed_off\telapsed_on\telapsed_big\n' > "$OUT/dynfilter-rows.tsv"
 for q in $DF_QUERIES; do
-  for mode in off on; do
+  for mode in off on big; do
+    case $mode in
+      off) sess=(--session flight.dynamic_filtering_enabled=false) ;;
+      on) sess=(--session flight.dynamic_filtering_enabled=true) ;;
+      big) sess=(--session flight.dynamic_filtering_enabled=true --session "flight.dynamic_filtering_max_values=$DF_BIG_VALUES") ;;
+    esac
     t0=$(date +%s.%N)
-    docker exec trino trino --catalog flight --schema tpch --source "e2e-df-$q-$mode" \
-      --session "flight.dynamic_filtering_enabled=$([ $mode = on ] && echo true || echo false)" \
+    docker exec trino trino --catalog flight --schema tpch --source "e2e-df-$q-$mode" "${sess[@]}" \
       --output-format TSV -f "/queries/$q.sql" > "$OUT/dynfilter/$mode/$q.tsv" 2> "$OUT/dynfilter/$mode/$q.err" \
       || rm -f "$OUT/dynfilter/$mode/$q.tsv"
     printf 'dynfilter-%s\t%s\t%.2f\n' "$mode" "$q" "$(echo "$(date +%s.%N) - $t0" | bc)" >> "$OUT/times.tsv"
   done
   read -r off_rows off_t <<< "$(df_stats "e2e-df-$q-off")"
   read -r on_rows on_t <<< "$(df_stats "e2e-df-$q-on")"
-  ratio=$(awk -v a="$on_rows" -v b="$off_rows" 'BEGIN { if (b + 0 > 0) printf "%.3f", a / b; else print "?" }')
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$q" "$off_rows" "$on_rows" "$ratio" "$off_t" "$on_t" | tee -a "$OUT/dynfilter-rows.tsv"
+  read -r big_rows big_t <<< "$(df_stats "e2e-df-$q-big")"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$q" "$off_rows" "$on_rows" "$big_rows" \
+    "$(df_ratio "$on_rows" "$off_rows")" "$(df_ratio "$big_rows" "$off_rows")" "$off_t" "$on_t" "$big_t" \
+    | tee -a "$OUT/dynfilter-rows.tsv"
 done
 "${COMPARE[@]}" "$OUT/dynfilter/on" "$QUERIES" "$OUT/dynfilter-summary.tsv" "$DF_QUERIES" || status=1
+"${COMPARE[@]}" "$OUT/dynfilter/big" "$QUERIES" "$OUT/dynfilter-big-summary.tsv" "$DF_QUERIES" || status=1
 
 if [ -n "$TYPES" ]; then
   log "types: SELECT * per table vs DuckDB on the same Parquet"

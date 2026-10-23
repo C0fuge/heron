@@ -44,7 +44,6 @@ public abstract class AbstractArrowFlightPageSource
         implements ConnectorPageSource
 {
     private static final Logger log = Logger.get(AbstractArrowFlightPageSource.class);
-    private static final int MAX_DYNAMIC_FILTER_VALUES = 1000;
 
     private final ArrowFlightClient client;
     private final ArrowTypeConverter converter;
@@ -53,6 +52,7 @@ public abstract class AbstractArrowFlightPageSource
     private final List<ArrowFlightColumnHandle> columns;
     private final DynamicFilter dynamicFilter;
     private final long dynamicFilterDeadlineNanos;
+    private final int dynamicFilterMaxValues;
 
     /** Plain scans: table columns fetched from the server (expressions are computed here). */
     private final List<ArrowFlightColumnHandle> serverColumns;
@@ -74,7 +74,8 @@ public abstract class AbstractArrowFlightPageSource
             ArrowFlightSplit split,
             List<ArrowFlightColumnHandle> columns,
             DynamicFilter dynamicFilter,
-            int dynamicFilterWaitMillis)
+            int dynamicFilterWaitMillis,
+            int dynamicFilterMaxValues)
     {
         this.client = requireNonNull(client, "client is null");
         this.converter = requireNonNull(converter, "converter is null");
@@ -83,6 +84,7 @@ public abstract class AbstractArrowFlightPageSource
         this.columns = requireNonNull(columns, "columns is null");
         this.dynamicFilter = requireNonNull(dynamicFilter, "dynamicFilter is null");
         this.dynamicFilterDeadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(dynamicFilterWaitMillis);
+        this.dynamicFilterMaxValues = dynamicFilterMaxValues;
         this.remainingRows = table.getLimit().orElse(Long.MAX_VALUE);
         this.aggregationReader = table.getAggregation().map(a -> new AggregationReader(a, converter)).orElse(null);
         this.serverColumns = aggregationReader == null ? SqlQueryBuilder.baseColumns(table, columns) : List.of();
@@ -197,11 +199,7 @@ public abstract class AbstractArrowFlightPageSource
             Set<ArrowFlightColumnHandle> allowed = aggregationReader != null
                     ? Set.copyOf(table.getAggregation().get().getGroupingColumns())
                     : Set.copyOf(table.getColumns());
-            TupleDomain<ColumnHandle> pushable = dynamic
-                    .filter((column, domain) -> allowed.contains(column)
-                            && SqlQueryBuilder.isPushdownSupported(((ArrowFlightColumnHandle) column).getColumnType()))
-                    .simplify(MAX_DYNAMIC_FILTER_VALUES);
-            String where = SqlQueryBuilder.toWhereClause(pushable, table.getIdentifierQuote());
+            String where = SqlQueryBuilder.dynamicFilterClause(dynamic, allowed, dynamicFilterMaxValues, table.getIdentifierQuote());
             if (!where.isEmpty()) {
                 extra.add(where);
             }

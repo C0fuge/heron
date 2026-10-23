@@ -145,4 +145,39 @@ class SqlQueryBuilderTest
         assertEquals("SELECT id, min(day) AS afagg0 FROM test_schema.test_table GROUP BY id",
                 SqlQueryBuilder.buildScanSql(table("", ID, day).withAggregation(grouped)));
     }
+
+    private static TupleDomain<ColumnHandle> idIn(long count)
+    {
+        List<Object> values = new java.util.ArrayList<>();
+        for (long v = 1; v <= count; v++) {
+            values.add(v * 10);
+        }
+        return TupleDomain.withColumnDomains(Map.of(ID, Domain.multipleValues(BIGINT, values)));
+    }
+
+    @Test
+    void dynamicFilterUpToMaxValuesIsAnInList()
+    {
+        String where = SqlQueryBuilder.dynamicFilterClause(idIn(3), java.util.Set.of(ID), 3, "");
+        assertEquals("id IN (10, 20, 30)", where);
+    }
+
+    @Test
+    void dynamicFilterOverMaxValuesIsItsSpan()
+    {
+        String where = SqlQueryBuilder.dynamicFilterClause(idIn(1500), java.util.Set.of(ID), 1000, "");
+        assertEquals("id >= 10 AND id <= 15000", where.replace("(", "").replace(")", ""));
+        String list = SqlQueryBuilder.dynamicFilterClause(idIn(1500), java.util.Set.of(ID), 2000, "");
+        assertTrue(list.startsWith("id IN (10, 20, ") && list.endsWith(", 15000)"), list);
+    }
+
+    @Test
+    void dynamicFilterOnlyOnAllowedColumns()
+    {
+        TupleDomain<ColumnHandle> dynamic = TupleDomain.withColumnDomains(Map.of(
+                ID, Domain.singleValue(BIGINT, 7L),
+                NAME, Domain.singleValue(VARCHAR, Slices.utf8Slice("x"))));
+        assertEquals("id = 7", SqlQueryBuilder.dynamicFilterClause(dynamic, java.util.Set.of(ID), 1000, ""));
+        assertEquals("", SqlQueryBuilder.dynamicFilterClause(dynamic, java.util.Set.of(), 1000, ""));
+    }
 }

@@ -26,3 +26,8 @@ arrow-flight.bearer-token=test-token
 # arrow-flight.keepalive-millis=10000
 # Send ORDER BY ... LIMIT n to the server (each endpoint returns its own top n; Trino keeps its TopN)
 # arrow-flight.topn-pushdown.enabled=false
+# Add join dynamic filters (build-side keys) to the server SQL; each query text becomes unique
+# (the server keeps a prepared statement per distinct text). Wait up to the timeout for them.
+# arrow-flight.dynamic-filtering.enabled=false
+# arrow-flight.dynamic-filtering.wait-timeout-ms=10000
+# arrow-flight.dynamic-filtering.max-values=1000

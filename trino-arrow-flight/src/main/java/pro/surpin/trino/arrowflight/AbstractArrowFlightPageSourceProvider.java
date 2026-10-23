@@ -45,6 +45,7 @@ public abstract class AbstractArrowFlightPageSourceProvider
         return new ArrowFlightPageSource(client, typeConverter, (ArrowFlightTableHandle) table, (ArrowFlightSplit) split,
                 projected.build(),
                 ArrowFlightSessionProperties.isDynamicFilteringEnabled(session) ? dynamicFilter : DynamicFilter.EMPTY,
-                ArrowFlightSessionProperties.getDynamicFilteringWaitMillis(session));
+                ArrowFlightSessionProperties.getDynamicFilteringWaitMillis(session),
+                ArrowFlightSessionProperties.getDynamicFilteringMaxValues(session));
     }
 }

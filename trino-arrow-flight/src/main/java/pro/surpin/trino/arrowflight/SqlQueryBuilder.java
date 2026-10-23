@@ -230,6 +230,19 @@ public final class SqlQueryBuilder
                 || type instanceof DecimalType;
     }
 
+    /**
+     * WHERE text for a join dynamic filter, restricted to {@code allowed} columns of a pushable type. A value set
+     * larger than {@code maxValues} becomes its [min, max] span (still a superset of the matching rows).
+     */
+    static String dynamicFilterClause(TupleDomain<ColumnHandle> dynamic, java.util.Set<ArrowFlightColumnHandle> allowed, int maxValues, String quote)
+    {
+        TupleDomain<ColumnHandle> pushable = dynamic
+                .filter((column, domain) -> allowed.contains(column)
+                        && isPushdownSupported(((ArrowFlightColumnHandle) column).getColumnType()))
+                .simplify(Math.max(1, maxValues));
+        return toWhereClause(pushable, quote);
+    }
+
     public static String toWhereClause(TupleDomain<ColumnHandle> constraint, String quote)
     {
         if (constraint.isAll()) {

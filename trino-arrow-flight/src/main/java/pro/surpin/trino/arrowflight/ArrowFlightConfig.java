@@ -55,6 +55,7 @@ public class ArrowFlightConfig
     private long splitMinRows = 1_000_000;
     private String splitColumns = "";
     private int dynamicFilteringWaitMillis = 10_000;
+    private int dynamicFilteringMaxValues = 1000;
     // Off by default: every query's filter values differ, and the server keeps a prepared
     // statement per distinct SQL text forever (DuckDbAdapter.stmtCache), i.e. leaks memory.
     private boolean dynamicFilteringEnabled;
@@ -436,6 +437,20 @@ public class ArrowFlightConfig
     public ArrowFlightConfig setDynamicFilteringWaitMillis(int millis)
     {
         this.dynamicFilteringWaitMillis = millis;
+        return this;
+    }
+
+    @Min(1)
+    public int getDynamicFilteringMaxValues()
+    {
+        return dynamicFilteringMaxValues;
+    }
+
+    @Config("arrow-flight.dynamic-filtering.max-values")
+    @ConfigDescription("Largest IN list a join dynamic filter becomes in the server SQL; more values become their [min, max] range")
+    public ArrowFlightConfig setDynamicFilteringMaxValues(int maxValues)
+    {
+        this.dynamicFilteringMaxValues = maxValues;
         return this;
     }
 

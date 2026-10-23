@@ -19,9 +19,10 @@ public final class ArrowFlightPageSource
             ArrowFlightSplit split,
             List<ArrowFlightColumnHandle> columns,
             io.trino.spi.connector.DynamicFilter dynamicFilter,
-            int dynamicFilterWaitMillis)
+            int dynamicFilterWaitMillis,
+            int dynamicFilterMaxValues)
     {
-        super(client, typeConverter, table, split, columns, dynamicFilter, dynamicFilterWaitMillis);
+        super(client, typeConverter, table, split, columns, dynamicFilter, dynamicFilterWaitMillis, dynamicFilterMaxValues);
     }
 
     @Override

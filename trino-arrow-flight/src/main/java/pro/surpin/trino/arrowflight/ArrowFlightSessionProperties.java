@@ -24,6 +24,7 @@ public final class ArrowFlightSessionProperties
     public static final String SPLIT_COUNT = "split_count";
     public static final String DYNAMIC_FILTERING_ENABLED = "dynamic_filtering_enabled";
     public static final String DYNAMIC_FILTERING_WAIT_TIMEOUT_MS = "dynamic_filtering_wait_timeout_ms";
+    public static final String DYNAMIC_FILTERING_MAX_VALUES = "dynamic_filtering_max_values";
 
     private final List<PropertyMetadata<?>> properties;
 
@@ -46,7 +47,9 @@ public final class ArrowFlightSessionProperties
                 booleanProperty(DYNAMIC_FILTERING_ENABLED,
                         "Add join dynamic filters to the server SQL", config.isDynamicFilteringEnabled(), false),
                 integerProperty(DYNAMIC_FILTERING_WAIT_TIMEOUT_MS,
-                        "Milliseconds a scan waits for join dynamic filters", config.getDynamicFilteringWaitMillis(), false));
+                        "Milliseconds a scan waits for join dynamic filters", config.getDynamicFilteringWaitMillis(), false),
+                integerProperty(DYNAMIC_FILTERING_MAX_VALUES,
+                        "Largest IN list a join dynamic filter becomes in the server SQL", config.getDynamicFilteringMaxValues(), false));
     }
 
     public List<PropertyMetadata<?>> getSessionProperties()
@@ -86,6 +89,11 @@ public final class ArrowFlightSessionProperties
             return 0;
         }
         return Math.max(0, session.getProperty(DYNAMIC_FILTERING_WAIT_TIMEOUT_MS, Integer.class));
+    }
+
+    public static int getDynamicFilteringMaxValues(ConnectorSession session)
+    {
+        return Math.max(1, session.getProperty(DYNAMIC_FILTERING_MAX_VALUES, Integer.class));
     }
 
     public static boolean isDynamicFilteringEnabled(ConnectorSession session)

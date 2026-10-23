@@ -55,6 +55,14 @@ split addresses).
   not pushed.
 * **Aggregations** – count/sum/min/max/avg + `GROUP BY` (session property
   `aggregation_pushdown_enabled`).
+* **Join dynamic filters** – off by default (`arrow-flight.dynamic-filtering.enabled=true` or
+  session property `dynamic_filtering_enabled`). The server query of a scan is built on the
+  worker right before the first read; a scan on the probe side of a join waits up to
+  `arrow-flight.dynamic-filtering.wait-timeout-ms` (session `dynamic_filtering_wait_timeout_ms`)
+  for the build side's keys and adds them to its `WHERE` (an `IN` list of up to
+  `arrow-flight.dynamic-filtering.max-values` values, default 1000, otherwise their `[min, max]` range). Not applied under a pushed TopN. Off by default because
+  every query then has a different SQL text and the server keeps a prepared statement per
+  distinct text (memory grows with the number of queries).
 
 ## Build
 
@@ -143,14 +151,16 @@ return correct results against 50k rows.
 | `arrow-flight.request-timeout-millis` | `0` | `0` = no deadline |
 | `arrow-flight.connect-timeout-millis` | `5000` | connect timeout of a data stream, per endpoint location. When a location refuses, times out or drops the connection **before any data was read**, the endpoint's next location (a backup node the server lists, server fo1+) is read instead; after the first batch a failure is final (no duplicate rows). `0` = Netty default (30 s) |
 | `arrow-flight.keepalive-millis` | `10000` | keepalive pings on data streams of servers that list backup locations (they accept pings every 5 s); a node that does not answer within the connect timeout counts as gone, so a vanished node costs seconds, not TCP's ~15 min. `0` = no pings |
+| `arrow-flight.dynamic-filtering.enabled` | `false` | add join dynamic filters to the server SQL (see Pushdown) |
+| `arrow-flight.dynamic-filtering.wait-timeout-ms` | `10000` | how long a probe-side scan waits for them; `0` = do not wait |
+| `arrow-flight.dynamic-filtering.max-values` | `1000` | largest `IN` list a dynamic filter becomes (session `dynamic_filtering_max_values`); more values are sent as their `[min, max]` range |
 
 ## Limitations / TODO
 
 * Read-only. No `INSERT` / `CREATE TABLE` (the server's writer path is experimental).
 * `TIMESTAMP WITH TIME ZONE` is read as `TIMESTAMP(6)` (zone dropped).
-* `REAL` and `DECIMAL` predicates are not pushed (kept as Trino residual filters);
-  they still return correct results.
-* No aggregation / `LIMIT` pushdown yet.
+* `REAL` predicates are not pushed (kept as Trino residual filters); they still return
+  correct results.
 * Schema/table discovery relies on the server implementing Flight SQL
   `CommandGetDbSchemas` / `CommandGetTables`; otherwise set `arrow-flight.default-schema`
   and address tables directly.
