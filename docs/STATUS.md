@@ -85,8 +85,10 @@ Kept up to date after every work session so work can be resumed from this reposi
    `KILL_STREAM_DELAYS` (9 8 10 11 s); answer must equal the baseline or be a clean error (wrong answer = FAIL).
    Green: run 39891124604 (attempt 1, 9 s: one flight3 stream failed after data → query failed cleanly "Network
    closed for unknown reason", two others re-read from flight1). Hit on attempt 1 again in run 39897404708 (int4).
-   A miss is still INFO; turn it into FAIL in partial mode once a few more runs show the 9 s delay hits reliably
-   (streams open ~7–8 s after submission).
+   Session 11: a miss on every delay is now FAIL in partial mode (hit on attempt 1 in every 3-server partial run
+   since 39891124604; again in run 39920601013, Trino 455); stays INFO in complete mode, where int6 run 39920606099
+   (Trino 483) missed on all four delays (9/8/10/11 s): flight3's streams had not started yet ("failed before any
+   data … reading it from flight1", answers exact), so complete-mode streams open later than ~11 s there.
 2. **Connection reset after one failed stream** — done (session 7, `FlightSqlSession`): a stream failure that means
    a node was lost drops only that location's pooled stream connections (per-location generations); the coordinator
    connection is renewed only when the coordinator itself was lost or on UNAUTHENTICATED (re-handshake). A failed
@@ -136,11 +138,15 @@ Kept up to date after every work session so work can be resumed from this reposi
    477 run 39914595927, 483 run 39914598648 (TPC-H 22/22, projection, TopN 4/4, dynfilter 10/10 x 3 modes, splits
    4 settings, types 2/2, failover incl. kill during a read and mid-stream kill = clean error). e2e script: Trino's
    `enable_large_dynamic_filters` (gone in 483) is passed only where `SHOW SESSION` lists it. Build commands per
-   version: `trino-arrow-flight/README.md` "Trino versions". Not run: 477/483 in complete mode or with int6/Iceberg.
-7. Open follow-ups (pick by value): 1 a) when a fixed server build arrives; Trino 477/483 e2e in complete mode / int6
-   (one dispatch each, ~30 min); turn the mid-stream-kill INFO into FAIL (item 1b: hit on attempt 1 in every recent
-   3-server run, incl. 483 this session); maintainer answers in Open questions (defaults for TopN, dynamic filters,
-   split count / parallelism).
+   version: `trino-arrow-flight/README.md` "Trino versions". Session 11: 483 + int6 complete mode 3 servers green
+   (run 39920606099: TPC-H, Iceberg incl. failover on `ice`, two nodes down); the dynfilter guard on 455 passes the
+   flag (`--session enable_large_dynamic_filters=true` logged, rows-read ratios = session 8; run 39920601013).
+   Not run: 477 in complete mode or with int6, 483 int6 on 1 server.
+7. Open follow-ups (pick by value): 1 a) when a fixed server build arrives; Trino 477 e2e in complete mode / int6
+   (one dispatch, ~25 min; 483 done in session 11); mid-stream kill in complete mode: a longer delay list for
+   `RESULT_MODE=complete` (e.g. `KILL_STREAM_DELAYS="14 12 16 18"`, measure when flight3's streams open) so it can be
+   a FAIL there too; maintainer answers in Open questions (defaults for TopN, dynamic filters, split count /
+   parallelism).
 
 ## Open questions
 - **Split count / endpoint read parallelism** (session 9): on the CI runner (everything on 4 vCPUs) neither more range splits
@@ -251,3 +257,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   (release 22, JDK 25). Earlier build run 39914179868 (483 red, the bug above); a push-triggered 455 e2e (39914340347)
   was cancelled (change was 483-only). ~70 Actions minutes. Invariants hold (455 artifact unchanged; no plugin code
   changed).
+- 2026-10-23 (cloud session 11): item 7 follow-ups. e2e mid-stream kill: a miss on every delay now fails the job in partial
+  mode (INFO in complete mode). Push run 39920601013 (Trino 455 int4 partial 1+3 servers) green: mid-stream kill hit on
+  attempt 1, dynfilter guard passes Trino's large-filters flag on 455. Dispatch run 39920606099 (Trino 483 int6 complete 3
+  servers) green; mid-stream kill missed 4/4 there (flight3 streams not yet open, all re-read from backups, exact) →
+  follow-up for complete-mode delays. ~45 Actions minutes. No plugin code changed; invariants hold.
