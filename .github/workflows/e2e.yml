@@ -18,6 +18,9 @@ on:
       server-build:
         description: 'Flight server build from e2e-assets (int4, int5, int6; int5+ adds the Iceberg checks)'
         default: 'int4'
+      iceberg-warehouse:
+        description: 'Iceberg warehouse for int5+ (local directory or s3 = the rclone bucket, written through s3a)'
+        default: 'local'
   push:
     branches: [main, 'claude/**']
     paths:
@@ -29,7 +32,7 @@ on:
       - '.github/workflows/e2e.yml'
 
 concurrency:
-  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}
+  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}
   cancel-in-progress: true
 
 # contents: write only because e2e-assets is a draft release (drafts are invisible to read tokens).
@@ -49,6 +52,7 @@ jobs:
       TRINO_VERSION: ${{ inputs.trino || '455' }}
       RESULT_MODE: ${{ inputs.result-mode || 'partial' }}
       SERVER_BUILD: ${{ inputs.server-build || 'int4' }}
+      ICEBERG_WAREHOUSE: ${{ inputs.iceberg-warehouse || 'local' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4

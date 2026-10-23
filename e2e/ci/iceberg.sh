@@ -8,6 +8,9 @@
 #   ice.orders_del    orders minus o_orderkey % 7 = 0, as merge-on-read position delete files
 #   ice.customer_ren  customer with c_comment renamed to c_note (rename after the data was written)
 #   ice.commits       customer c_custkey <= 5000; iceberg_check commits 1000 more rows mid-run
+# ICEBERG_WAREHOUSE=s3 instead: Spark writes the same warehouse through s3a into the rclone S3 bucket
+# (s3://lake/wh, outside the dataDir s3://lake/parquet; metadata carries s3:// URIs, fs.s3.impl = S3A)
+# and the servers read it with their s3 store (no /wh mount needed).
 # iceberg_check (after the parquet checks): each table equals its Parquet counterpart read through
 # the same plugin (row count + order-insensitive checksum per column, column names and types),
 # TPC-H queries on schema ice equal the DuckDB reference, and a commit made between two queries
@@ -18,24 +21,46 @@ SPARK_IMAGE="${SPARK_IMAGE:-apache/spark:3.5.3}"
 ICEBERG_SPARK_JAR="${ICEBERG_SPARK_JAR:-https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar}"
 ICEBERG_QUERIES="${ICEBERG_QUERIES:-q01 q03 q04 q06 q12 q13 q18 q22}"
 ICEBERG_COMMIT_WAIT="${ICEBERG_COMMIT_WAIT:-100}"
+ICEBERG_WAREHOUSE="${ICEBERG_WAREHOUSE:-local}"  # local | s3
+HADOOP_AWS_JAR="${HADOOP_AWS_JAR:-https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar}"
+AWS_SDK_BUNDLE_JAR="${AWS_SDK_BUNDLE_JAR:-https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar}"
 ICEBERG_SERVER_CP=/app/conf:
-# server flags (start_server); the warehouse is a local directory shared by all nodes
-ICEBERG_SERVER_ARGS=(-Dcatalog=iceberg-hadoop -Darrowflight.iceberg-hadoop.warehouse=/wh
-                     -Darrowflight.catalog.localRootsShared=true)
+# server flags (start_server); local: a directory shared by all nodes; s3: a prefix of the bucket
+case "$ICEBERG_WAREHOUSE" in
+  local) ICEBERG_WH_URI=file:///wh; ICEBERG_WH_DIR="$WORK/wh"
+         ICEBERG_SERVER_ARGS=(-Dcatalog=iceberg-hadoop -Darrowflight.iceberg-hadoop.warehouse=/wh
+                              -Darrowflight.catalog.localRootsShared=true) ;;
+  s3)    ICEBERG_WH_URI=s3://lake/wh; ICEBERG_WH_DIR="$WORK/s3/lake/wh"
+         ICEBERG_SERVER_ARGS=(-Dcatalog=iceberg-hadoop -Darrowflight.iceberg-hadoop.warehouse=s3://lake/wh) ;;
+  *)     echo "ICEBERG_WAREHOUSE must be local or s3, not '$ICEBERG_WAREHOUSE'" >&2; exit 1 ;;
+esac
 
 spark_sql() {  # sql-file
+  local jars=/spark/iceberg-spark-runtime.jar s3conf=()
+  if [ "$ICEBERG_WAREHOUSE" = s3 ]; then
+    # S3A for both s3a:// and s3:// (the server and DuckDB read s3:// URIs); credentials from the env
+    jars+=,/spark/hadoop-aws.jar,/spark/aws-java-sdk-bundle.jar
+    local k
+    for k in fs.s3.impl=org.apache.hadoop.fs.s3a.S3AFileSystem fs.s3a.endpoint=http://s3:9000 \
+             fs.s3a.path.style.access=true fs.s3a.connection.ssl.enabled=false fs.s3a.endpoint.region=us-east-1 \
+             fs.s3a.aws.credentials.provider=com.amazonaws.auth.EnvironmentVariableCredentialsProvider \
+             fs.s3a.multipart.threshold=1G fs.s3a.multipart.size=512M; do
+      s3conf+=(--conf "spark.hadoop.$k")
+    done
+  fi
   docker run --rm --network "$NET" -u 0 -e HOME=/tmp -e SPARK_LOCAL_IP=127.0.0.1 \
+    -e AWS_ACCESS_KEY_ID="$S3_KEY" -e AWS_SECRET_ACCESS_KEY="$S3_SECRET" -e AWS_REGION=us-east-1 \
     -v "$WORK/wh":/wh -v "$WORK/s3/lake/parquet":/data:ro -v "$WORK/spark":/spark:ro \
     "$SPARK_IMAGE" /opt/spark/bin/spark-sql --master 'local[4]' --driver-memory 3g \
-      --jars /spark/iceberg-spark-runtime.jar \
+      --jars "$jars" "${s3conf[@]}" \
       --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions \
       --conf spark.sql.catalog.wh=org.apache.iceberg.spark.SparkCatalog \
-      --conf spark.sql.catalog.wh.type=hadoop --conf spark.sql.catalog.wh.warehouse=file:///wh \
+      --conf spark.sql.catalog.wh.type=hadoop --conf "spark.sql.catalog.wh.warehouse=$ICEBERG_WH_URI" \
       --conf spark.ui.enabled=false -f "/spark/$1" 2>&1 | grep -vE '^\s*$| INFO |^WARNING: ' || true
 }
 
 iceberg_generate() {
-  log "iceberg: DuckDB iceberg + avro extensions, Spark tables in $WORK/wh"
+  log "iceberg: DuckDB iceberg + avro extensions, Spark tables in $ICEBERG_WH_URI ($ICEBERG_WH_DIR)"
   local ext
   for ext in iceberg avro; do
     curl -fsSL "http://extensions.duckdb.org/$DUCKDB_EXT_VERSION/linux_amd64/$ext.duckdb_extension.gz" \
@@ -43,6 +68,10 @@ iceberg_generate() {
   done
   mkdir -p "$WORK/wh" "$WORK/spark"
   curl -fsSL -o "$WORK/spark/iceberg-spark-runtime.jar" "$ICEBERG_SPARK_JAR"
+  if [ "$ICEBERG_WAREHOUSE" = s3 ]; then
+    curl -fsSL -o "$WORK/spark/hadoop-aws.jar" "$HADOOP_AWS_JAR"
+    curl -fsSL -o "$WORK/spark/aws-java-sdk-bundle.jar" "$AWS_SDK_BUNDLE_JAR"
+  fi
   local p='parquet.`file:///data/tpch'
   cat > "$WORK/spark/generate.sql" <<SQL
 CREATE NAMESPACE IF NOT EXISTS wh.ice;
@@ -64,9 +93,12 @@ INSERT INTO wh.ice.commits SELECT * FROM $p/customer\` WHERE c_custkey BETWEEN 5
 SQL
   docker pull -q "$SPARK_IMAGE" >/dev/null
   spark_sql generate.sql | tee "$OUT/iceberg-generate.log" | tail -20
-  find "$WORK/wh" -name 'version-hint.text' | sort
-  find "$WORK/wh" -type f | sed 's#/[^/]*$##' | sort | uniq -c | head -40 > "$OUT/iceberg-layout.txt"
-  [ -f "$WORK/wh/ice/commits/metadata/version-hint.text" ] || { log "iceberg: Spark did not write the tables"; return 1; }
+  find "$ICEBERG_WH_DIR" -name 'version-hint.text' | sort
+  find "$ICEBERG_WH_DIR" -type f | sed 's#/[^/]*$##' | sort | uniq -c | head -40 > "$OUT/iceberg-layout.txt"
+  [ -f "$ICEBERG_WH_DIR/ice/commits/metadata/version-hint.text" ] || { log "iceberg: Spark did not write the tables"; return 1; }
+  # metadata location URIs as the server will see them
+  grep -o '"metadata-file" *: *"[^"]*"\|"location" *: *"[^"]*"' \
+    "$ICEBERG_WH_DIR/ice/commits/metadata/v1.metadata.json" | head -3 || true
   # int5 server: the Hadoop jars in libs/ do not register the local FileSystem ("No FileSystem for
   # scheme file" when the iceberg-hadoop warehouse is a local path); core-site.xml on the classpath
   mkdir -p "$WORK/server/conf"
