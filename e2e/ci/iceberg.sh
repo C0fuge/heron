@@ -44,7 +44,8 @@ spark_sql() {  # sql-file
     for k in fs.s3.impl=org.apache.hadoop.fs.s3a.S3AFileSystem fs.s3a.endpoint=http://s3:9000 \
              fs.s3a.path.style.access=true fs.s3a.connection.ssl.enabled=false fs.s3a.endpoint.region=us-east-1 \
              fs.s3a.aws.credentials.provider=com.amazonaws.auth.EnvironmentVariableCredentialsProvider \
-             fs.s3a.multipart.threshold=1G fs.s3a.multipart.size=512M; do
+             fs.s3a.multipart.threshold=1G fs.s3a.multipart.size=512M \
+             fs.s3a.attempts.maximum=2 fs.s3a.retry.limit=2; do
       s3conf+=(--conf "spark.hadoop.$k")
     done
   fi
@@ -95,7 +96,14 @@ SQL
   spark_sql generate.sql | tee "$OUT/iceberg-generate.log" | tail -20
   find "$ICEBERG_WH_DIR" -name 'version-hint.text' | sort
   find "$ICEBERG_WH_DIR" -type f | sed 's#/[^/]*$##' | sort | uniq -c | head -40 > "$OUT/iceberg-layout.txt"
-  [ -f "$ICEBERG_WH_DIR/ice/commits/metadata/version-hint.text" ] || { log "iceberg: Spark did not write the tables"; return 1; }
+  if [ ! -f "$ICEBERG_WH_DIR/ice/commits/metadata/version-hint.text" ]; then
+    log "iceberg: Spark did not write the tables; first distinct errors:"
+    grep -E 'ERROR|Exception|Caused by|Error:' "$OUT/iceberg-generate.log" | grep -vE '^\s+at ' |
+      awk '!seen[$0]++' | head -40 | cut -c1-400 || true
+    find "$ICEBERG_WH_DIR" -maxdepth 4 2>/dev/null | head -20 || true
+    docker logs s3 2>&1 | tail -20 || true
+    return 1
+  fi
   # metadata location URIs as the server will see them
   grep -o '"metadata-file" *: *"[^"]*"\|"location" *: *"[^"]*"' \
     "$ICEBERG_WH_DIR/ice/commits/metadata/v1.metadata.json" | head -3 || true
