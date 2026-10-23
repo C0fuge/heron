@@ -52,6 +52,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.util.Objects.requireNonNull;
 
@@ -100,8 +101,8 @@ public class FlightSqlSession
 
     private volatile boolean connected;
     private volatile boolean closed;
-    // Bumped by reconnect(): stream connections opened before it are not reused.
-    private volatile int generation;
+    // Bumped when a location is found unreachable: stream connections to it opened before are not reused.
+    private final ConcurrentMap<String, AtomicInteger> locationGenerations = new ConcurrentHashMap<>();
     private volatile FlightClient coordinatorClient;
     private volatile FlightSqlClient sqlClient;
     private volatile CredentialCallOption authOption;
@@ -140,7 +141,7 @@ public class FlightSqlSession
      * reconnect backoff (~2 min); a new channel connects immediately. The old coordinator client
      * stays open until {@link #close()} because other calls may still be running on it.
      */
-    private synchronized void reconnect()
+    private synchronized void reconnect(boolean allLocations)
     {
         if (!connected) {
             return;
@@ -149,8 +150,14 @@ public class FlightSqlSession
         if (coordinatorClient != null) {
             retiredClients.add(coordinatorClient);
         }
-        generation++;
-        closeIdleStreamClients();
+        if (allLocations) {
+            // The coordinator call failed: the whole cluster may have restarted, pooled channels anywhere may be stale.
+            locationGenerations.keySet().forEach(this::invalidateLocation);
+            closeIdleStreamClients();
+        }
+        else {
+            invalidateLocation(coordinatorUri());
+        }
         LOG.info("Reconnecting to Flight server {}:{}", config.getHost(), config.getPort());
     }
 
@@ -270,7 +277,12 @@ public class FlightSqlSession
                 uri -> openAt(flightTicket, uri, keepAlive),
                 (uri, e) -> {
                     if (isConnectionLost(e)) {
-                        reconnect();
+                        // A lost node costs only its own pooled connections. The coordinator connection is
+                        // renewed when the coordinator is the one lost, or to re-authenticate.
+                        invalidateLocation(uri);
+                        if (uri.equals(coordinatorUri()) || !FlightDataStream.isUnreachable(e)) {
+                            reconnect(false);
+                        }
                     }
                 });
     }
@@ -278,7 +290,7 @@ public class FlightSqlSession
     private FlightDataStream.Opened openAt(Ticket ticket, String uri, boolean keepAlive)
     {
         String poolKey = keepAlive ? "keepalive " + uri : uri;
-        int leasedGeneration = generation;
+        int leasedGeneration = generation(uri);
         FlightClient client = leaseStreamClient(poolKey, uri, keepAlive);
         FlightStream stream;
         try {
@@ -289,7 +301,7 @@ public class FlightSqlSession
             throw e;
         }
         return new FlightDataStream.Opened(stream,
-                reusable -> releaseStreamClient(poolKey, client, reusable && leasedGeneration == generation));
+                reusable -> releaseStreamClient(poolKey, client, reusable && leasedGeneration == generation(uri)));
     }
 
     /**
@@ -298,7 +310,7 @@ public class FlightSqlSession
      */
     List<String> streamLocations(List<String> locationUris)
     {
-        String coordinator = (config.isTlsEnabled() ? "grpc+tls://" : "grpc+tcp://") + config.getHost() + ":" + config.getPort();
+        String coordinator = coordinatorUri();
         LinkedHashSet<String> result = new LinkedHashSet<>();
         for (String uri : locationUris) {
             result.add(isCoordinator(uri) ? coordinator : uri);
@@ -307,6 +319,40 @@ public class FlightSqlSession
             result.add(coordinator);
         }
         return List.copyOf(result);
+    }
+
+    private String coordinatorUri()
+    {
+        return (config.isTlsEnabled() ? "grpc+tls://" : "grpc+tcp://") + config.getHost() + ":" + config.getPort();
+    }
+
+    private int generation(String uri)
+    {
+        return locationGenerations.computeIfAbsent(uri, key -> new AtomicInteger()).get();
+    }
+
+    /** Stops reusing the stream connections to {@code uri}: idle ones are closed, leased ones when released. */
+    private void invalidateLocation(String uri)
+    {
+        locationGenerations.computeIfAbsent(uri, key -> new AtomicInteger()).incrementAndGet();
+        for (String poolKey : List.of(uri, "keepalive " + uri)) {
+            Deque<IdleClient> idle = idleStreamClients.get(poolKey);
+            IdleClient candidate;
+            while (idle != null && (candidate = idle.pollFirst()) != null) {
+                closeQuietly(candidate.client());
+            }
+        }
+    }
+
+    /** Pooled idle stream connections to {@code uri}. */
+    int idleStreamClients(String uri)
+    {
+        int count = 0;
+        for (String poolKey : List.of(uri, "keepalive " + uri)) {
+            Deque<IdleClient> idle = idleStreamClients.get(poolKey);
+            count += idle == null ? 0 : idle.size();
+        }
+        return count;
     }
 
     private FlightClient leaseStreamClient(String poolKey, String uri, boolean keepAlive)
@@ -576,7 +622,7 @@ public class FlightSqlSession
                 last = e;
                 LOG.warn("Flight call '{}' failed (attempt {}/{}): {}", name, attempt + 1, maxRetries + 1, e.getMessage());
                 if (isConnectionLost(e)) {
-                    reconnect();
+                    reconnect(true);
                 }
                 else if (isFinal(e)) {
                     // The server rejected the request itself; asking again gives the same answer.

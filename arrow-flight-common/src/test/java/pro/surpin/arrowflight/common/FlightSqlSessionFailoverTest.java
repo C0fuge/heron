@@ -389,6 +389,67 @@ class FlightSqlSessionFailoverTest
         assertEquals(1, coordinator.calls.get());
     }
 
+    private void poolOneConnection(String uri)
+    {
+        try (FlightDataStream stream = session.openStream(new byte[] {1}, List.of(uri))) {
+            assertEquals(ROWS, readAll(stream).size());
+        }
+        assertEquals(1, session.idleStreamClients(uri));
+    }
+
+    @Test
+    void lostNodeDropsOnlyItsOwnPooledConnections()
+            throws Exception
+    {
+        Node lost = new Node(allocator).start();
+        try {
+            poolOneConnection(backup.uri());
+            poolOneConnection(lost.uri());
+            poolOneConnection(coordinator.uri());
+
+            lost.mode = Mode.FAIL_UNAVAILABLE;
+            try (FlightDataStream stream = session.openStream(new byte[] {1}, List.of(lost.uri(), backup.uri()))) {
+                assertEquals(ROWS, readAll(stream).size());
+                assertEquals(backup.uri(), stream.location());
+            }
+            assertEquals(0, session.idleStreamClients(lost.uri()));
+            // the coordinator's and backup's pooled connections survive; backup also pools the failover's one
+            assertEquals(1, session.idleStreamClients(coordinator.uri()));
+            assertEquals(2, session.idleStreamClients(backup.uri()));
+
+            // and they still work
+            try (FlightDataStream stream = session.openStream(new byte[] {1}, List.of(coordinator.uri()))) {
+                assertEquals(ROWS, readAll(stream).size());
+            }
+            assertEquals(1, session.idleStreamClients(coordinator.uri()));
+            assertEquals(2, coordinator.calls.get());
+        }
+        finally {
+            lost.close();
+        }
+    }
+
+    @Test
+    void lostCoordinatorKeepsOtherNodesPooledConnections()
+    {
+        poolOneConnection(backup.uri());
+        poolOneConnection(coordinator.uri());
+
+        coordinator.mode = Mode.FAIL_UNAVAILABLE;
+        try (FlightDataStream stream = session.openStream(new byte[] {1}, List.of(coordinator.uri(), backup.uri()))) {
+            assertEquals(ROWS, readAll(stream).size());
+        }
+        assertEquals(0, session.idleStreamClients(coordinator.uri()));
+        assertEquals(2, session.idleStreamClients(backup.uri()));
+
+        // the coordinator connection is renewed: a recovered coordinator is read again
+        coordinator.mode = Mode.SERVE;
+        try (FlightDataStream stream = session.openStream(new byte[] {1}, List.of(coordinator.uri()))) {
+            assertEquals(ROWS, readAll(stream).size());
+        }
+        assertEquals(3, coordinator.calls.get());
+    }
+
     @Test
     void locationsKeepTheirOrderAndNameTheCoordinatorAsConfigured()
     {
