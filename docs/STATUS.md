@@ -324,3 +324,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   lineitem TopN queries run 10–35 % slower with pushdown on the runner (Open question updated). Item 7 optional done:
   int6 partial 1 server green on Trino 483 (run 39956762839) and 477 (run 39959398904). Commits `[skip ci]`, runs
   dispatched by hand, ~34 Actions minutes. No plugin code changed; invariants hold.
+- 2026-10-23 (cloud session 16): no new server build in `e2e-assets` (1 a) still waits; other items wait on Open
+  questions). `e2e-assets` turned out to be a published pre-release, so the e2e job now runs with `contents: read`
+  (least privilege); verified by run 39964823185 (int4 partial 1 server, Trino 455, green, 16 min: assets listed and
+  downloaded with the read token, all checks passed). ~16 Actions minutes. No plugin code changed; invariants hold.
