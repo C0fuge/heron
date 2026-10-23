@@ -107,7 +107,8 @@ ice_compare() {
     { echo "--- DESCRIBE ice.$it"; tq "DESCRIBE ice.\"$it\""
       echo "--- SELECT count(*) FROM ice.$it"; tq "SELECT count(*) FROM ice.\"$it\""
       local h; for h in trino ${HOSTS//,/ }; do
-        echo "--- $h log lines naming $it"; docker logs "$h" 2>&1 | grep -A3 "$it" | tail -30; done
+        # '|| true': with pipefail a node that never logged the table would end the job (set -e)
+        echo "--- $h log lines naming $it"; docker logs "$h" 2>&1 | grep -A3 "$it" | tail -30 || true; done
     } 2>&1 | cut -c1-600 | tee "$OUT/iceberg-$it-diagnostics.txt"
     # Known server issue (int6, local warehouse): the complete-answer view (iceberg_scan) is refused by
     # DuckDB, "file system operations are disabled by configuration", so the table is missing (clean
