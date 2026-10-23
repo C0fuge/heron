@@ -222,7 +222,7 @@ grep -m1 'topN=' "$OUT/topn/0-explain.txt" | cut -c1-300 || true
 
 # Dynamic filters (off by default): TPC-H joins with flight.dynamic_filtering_enabled must still equal the DuckDB
 # reference, with the default IN-list cap (on: 1000 values, more become the [min, max] span) and a large one
-# (big: DF_BIG_VALUES). Rows the scans read (Trino physicalInputPositions = rows the plugin got from the server) and
+# (big: DF_BIG_VALUES, plus Trino's enable_large_dynamic_filters so Trino itself keeps up to ~100k distinct keys). Rows the scans read (Trino physicalInputPositions = rows the plugin got from the server) and
 # the elapsed time per setting go to dynfilter-rows.tsv (INFO: the measurement for STATUS item 4).
 DF_QUERIES="${DF_QUERIES:-q02 q03 q05 q08 q09 q10 q17 q18 q20 q21}"
 DF_BIG_VALUES="${DF_BIG_VALUES:-100000}"
@@ -243,7 +243,8 @@ for q in $DF_QUERIES; do
     case $mode in
       off) sess=(--session flight.dynamic_filtering_enabled=false) ;;
       on) sess=(--session flight.dynamic_filtering_enabled=true) ;;
-      big) sess=(--session flight.dynamic_filtering_enabled=true --session "flight.dynamic_filtering_max_values=$DF_BIG_VALUES") ;;
+      big) sess=(--session flight.dynamic_filtering_enabled=true --session "flight.dynamic_filtering_max_values=$DF_BIG_VALUES"
+                 --session enable_large_dynamic_filters=true) ;;
     esac
     t0=$(date +%s.%N)
     docker exec trino trino --catalog flight --schema tpch --source "e2e-df-$q-$mode" "${sess[@]}" \
