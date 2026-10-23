@@ -57,7 +57,15 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
-> **Dependency audit 2026-10-23** (local coordinator): the built plugin tarball does not match the pom pins — it ships Netty 4.1.100 modules, gRPC 1.65.0 and protobuf 3.25.4 (CVE-2024-7254); Jackson 2.18.0. Align via BOMs (netty-bom 4.1.137+ or 4.2.17+ as Trino's classloader allows, grpc-bom current, protobuf 3.25.5+/4.x, jackson 2.18.11+), rebuild for 455/477/483, verify the tarball contents in CI (fail the build on drift), e2e green. Do this before other open follow-ups.
+> **Dependency audit 2026-10-23** (local coordinator): the built plugin tarball does not match the pom pins — it ships Netty 4.1.100 modules, gRPC 1.65.0 and protobuf 3.25.4 (CVE-2024-7254); Jackson 2.18.0. Align via BOMs (netty-bom 4.1.137+ or 4.2.17+ as Trino's classloader allows, grpc-bom current, protobuf 3.25.5+/4.x, jackson 2.18.11+), rebuild for 455/477/483, verify the tarball contents in CI (fail the build on drift), e2e green. Do this before other open follow-ups. **Done (session 20)**: root `pom.xml` pins Netty 4.1.139 (netty-bom; tcnative 2.0.84),
+> gRPC **1.78.0** (grpc-bom; newest line Arrow 18.1 runs on — gRPC 1.79 removed `ReadableBuffer.readBytes(ByteBuffer)`, which
+> Arrow's `GetReadableBuffer` calls: NoSuchMethodError on every stream, build run 39990774489), protobuf 3.25.9, Jackson 2.18.12
+> (jackson-bom; 483 keeps 2.22.1), Guava 33.5.0 (needed by gRPC 1.78). `build.yml` runs `trino-arrow-flight/bundle/check-bundle.sh`
+> on every zip: the jar list must equal `bundle/trino-<v>.txt` and Netty/gRPC/protobuf/Jackson must each ship one version.
+> Build all versions run 39991724522 (455/477/483 green, bundle check passed); e2e int4 Trino 455 partial 1+3 servers run
+> 39991081221 green (TPC-H, failover incl. mid-stream kill); e2e int7 Trino 483 partial 1 server run 39991939760 green.
+> Note: the audit's "Netty 4.1.100 / gRPC 1.65.0" was not what this repo's pom built (it already pinned 4.1.114 / 1.65.1);
+> protobuf 3.25.4 and Jackson 2.18.0 were real.
 
 > **Use server int7** (2026-10-23, local coordinator): `arrow-flight-server-1.0.0-int7.jar` sha256 2b9595ab…06fa + `int7-plugins.tar.zst` sha256 4d2416f4…1af4 (plugins s3/lakefs/iceberg/hive + START-NOTES.txt) = int6b + all stand fixes (lakeFS: JOIN commit mixing, complete-mode lag, tags; Iceberg: file:/s3a roots, LocalFileSystem, Gravitino errors; Hive: HDFS paths with space/%, out-of-root partitions hidden, metastore fail-fast, UNAVAILABLE on outage; Iceberg equality deletes read all columns — correct, slow). Replace int6/int6b in CI with int7; rerun the full suite once. **Done (session 19)**: Trino 455, local warehouse —
 > partial 1+3 servers run 39982788809, complete 3 servers run 39982792807, all green, `orders_del` deletes OK.
@@ -170,7 +178,7 @@ Kept up to date after every work session so work can be resumed from this reposi
    Session 12: 477 + int6 complete mode 3 servers: every check passed (TPC-H 22/22, projection, TopN, dynfilter,
    splits, types 2/2, Iceberg incl. failover on `ice`, two nodes down), but the job hit its 30-min limit 4 s before
    the end (run 39927746471, cancelled) → `timeout-minutes: 40`. Not run: 483 int6 on 1 server, 477 int6 1 server.
-7. Open follow-ups (pick by value): int7 on Trino 477/483 and with `iceberg-warehouse=s3` (not yet run); maintainer answers in Open questions
+7. Open follow-ups (pick by value): int7 on Trino 477 and on 483 with 3 servers / complete mode (483 partial 1 server done, run 39991939760) and with `iceberg-warehouse=s3` (not yet run); maintainer answers in Open questions
    (defaults for TopN, dynamic filters, split count / parallelism). Mid-stream kill in complete mode — investigated
    (session 12), stays INFO: delays now default to 50/65/80/90 % of the healthy baseline in complete mode; in run
    39927746471 (baseline 17.9 s, kills at 8/11/14/16 s) all 4 kills still found flight3's streams open but empty
@@ -185,6 +193,11 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **Dependency ceiling from Arrow 18.1** (session 20): gRPC cannot go past 1.78.x (and so Netty stays 4.1, protobuf 3.25)
+  until Arrow Java is upgraded (Arrow 19.0.0 uses gRPC 1.79, Netty 4.2.9, protobuf 4.33). Upgrade Arrow (bigger change:
+  memory/Flight API, e2e on all versions), or stay on 18.1 with the current pins? Also: the zip bundles
+  `jackson-annotations` and `opentelemetry-api/context` 1.37.0 although the pom declares them `provided` (the
+  trino-maven-plugin resolves its own set; SPI packages are loaded from Trino anyway, so harmless) — clean up or leave?
 - **Mid-stream kill in complete mode** (session 12): kills at up to 90 % of the query time never hit a stream after
   its first batch (the server streams a node's part only once complete, in a burst). The partial-mode check covers
   the plugin's "no retry after data" rule. Add a throttled-network variant for complete mode, or leave it as INFO?
@@ -352,3 +365,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   a read and mid-stream kill (hit after data in complete mode too, clean error), two nodes down. ~66 Actions minutes.
   No plugin code changed; invariants hold. The maintainer's "Dependency audit" note arrived during this session: it is
   the next item (before other follow-ups); not started.
+- 2026-10-23 (cloud session 20): dependency audit item done. Pins Netty 4.1.139 / gRPC 1.78.0 / protobuf 3.25.9 / Jackson
+  2.18.12 / Guava 33.5.0; first try with gRPC 1.82.4 failed the unit tests (run 39990774489, Arrow 18.1 needs a gRPC internal
+  removed in 1.79); bundle drift check in `build.yml` (first version failed on the zip's file naming, run 39991081290;
+  green 39991483490). Build all versions run 39991724522 green; e2e int4 455 partial 1+3 servers run 39991081221 and int7 483
+  partial 1 server run 39991939760 green. Push e2e 39990774578 cancelled (broken build). ~55 Actions minutes. Plugin code
+  unchanged (dependencies only); invariants hold (failover checks incl. mid-stream kill green, token auth in every e2e run).

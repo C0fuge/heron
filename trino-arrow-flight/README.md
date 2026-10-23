@@ -106,6 +106,12 @@ load in 477/483 and vice versa. CI builds all three on request (`build` workflow
 longer has the `enable_large_dynamic_filters` session property (the e2e script passes it only
 where `SHOW SESSION` lists it).
 
+Bundled dependencies are pinned in the root `pom.xml` (Netty 4.1.139, gRPC 1.78.0, protobuf
+3.25.9, Jackson 2.18.12 — 2.22.1 for 483). gRPC cannot go past 1.78 while Arrow is 18.1 (gRPC 1.79
+removed an internal method Arrow's Flight client calls). The CI build compares the jars in each zip
+with `bundle/trino-<version>.txt` (`bundle/check-bundle.sh`) and fails on any difference, so a
+version change has to update that list in the same commit.
+
 ## Install
 
 ```bash
