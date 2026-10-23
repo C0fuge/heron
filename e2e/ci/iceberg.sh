@@ -94,10 +94,13 @@ INSERT INTO wh.ice.commits SELECT * FROM $p/customer\` WHERE c_custkey BETWEEN 5
 SQL
   if [ "$ICEBERG_WAREHOUSE" = s3 ]; then
     # rclone serve s3 (local backend) answers 500 "file already exists" when parallel PUTs create the
-    # same new directory: the table directories exist before Spark writes into them
-    local t
+    # same new directory, and refuses S3A's "dir/" marker objects over existing directories: the table
+    # directories exist before Spark writes, each holding a hidden object so S3A sees them as directories
+    local t d
     for t in lineitem orders customer orders_del customer_ren commits; do
-      mkdir -p "$ICEBERG_WH_DIR/ice/$t/data" "$ICEBERG_WH_DIR/ice/$t/metadata"
+      for d in data metadata; do
+        mkdir -p "$ICEBERG_WH_DIR/ice/$t/$d"; : > "$ICEBERG_WH_DIR/ice/$t/$d/.keep"
+      done
     done
   fi
   docker pull -q "$SPARK_IMAGE" >/dev/null
