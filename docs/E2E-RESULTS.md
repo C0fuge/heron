@@ -52,7 +52,7 @@ Failover checks (3 servers, `--hosts flight1,flight2,flight3`, catalog points to
 - *two killed*: flight2 and flight3 down, q01 q03 q05 q06 q18 → exact or clean error (observed: 5/5 exact,
   flight1 answers alone) With Iceberg on, also q01 q03 q18 on schema `ice`.
 
-- *killed mid-stream*: `SELECT count(*), checksum(ROW(<all 16 lineitem columns>)) FROM lineitem` (not pushed
+- *killed mid-stream*: `SELECT count(*), checksum(<col>) for each of the 16 lineitem columns FROM lineitem` (not pushed
   down, streams all of lineitem) run once on the healthy cluster as baseline, then
   with `docker kill flight3` after 9, 8, 10, 11 s (`KILL_STREAM_DELAYS`; restart of flight2+flight3 between
   attempts) → the answer must equal the baseline or the query fails cleanly; evidence of a hit is the plugin's

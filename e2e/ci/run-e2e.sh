@@ -288,7 +288,9 @@ if [ "$SERVERS" -ge 3 ]; then
   # of a hit is the plugin's "failed after delivering data" WARN for flight3; a miss on every delay
   # is INFO (timing-dependent). The query streams all of lineitem (checksum is not pushed down); its
   # streams open ~7-8 s after submission and one column took <1 s (runs 39886487789, 39888037652).
-  STREAM_SQL='SELECT count(*), checksum(ROW(l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment)) FROM lineitem'
+  # One checksum per column: checksum(ROW(...)) makes Trino's optimizer loop on the plugin's
+  # applyProjection (run 39889582040, see docs/STATUS.md).
+  STREAM_SQL='SELECT count(*), checksum(l_orderkey), checksum(l_partkey), checksum(l_suppkey), checksum(l_linenumber), checksum(l_quantity), checksum(l_extendedprice), checksum(l_discount), checksum(l_tax), checksum(l_returnflag), checksum(l_linestatus), checksum(l_shipdate), checksum(l_commitdate), checksum(l_receiptdate), checksum(l_shipinstruct), checksum(l_shipmode), checksum(l_comment) FROM lineitem'
   stream_query() {  # out-dir
     if docker exec trino trino --catalog flight --schema tpch --output-format TSV --execute "$STREAM_SQL" \
          > "$1/stream.tsv" 2> "$1/stream.err"; then rm -f "$1/stream.err"; else rm -f "$1/stream.tsv"; fi
