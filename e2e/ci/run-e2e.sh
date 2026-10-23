@@ -286,7 +286,8 @@ if [ "$SERVERS" -ge 3 ]; then
   # Node lost after its stream delivered data: the plugin must not retry (rows could be read twice),
   # so the query fails cleanly; an answer must equal the healthy baseline, never fewer rows. Evidence
   # of a hit is the plugin's "failed after delivering data" WARN for flight3; a miss on every delay
-  # is INFO (timing-dependent). The query streams most of lineitem (checksum is not pushed down).
+  # is INFO (timing-dependent). The query streams most of lineitem (checksum is not pushed down); its
+  # streams open ~8 s after submission (run 39886487789), hence the delays.
   STREAM_SQL='SELECT count(*), checksum(l_comment), checksum(l_orderkey), checksum(l_extendedprice) FROM lineitem'
   stream_query() {  # out-dir
     if docker exec trino trino --catalog flight --schema tpch --output-format TSV --execute "$STREAM_SQL" \
@@ -306,7 +307,7 @@ if [ "$SERVERS" -ge 3 ]; then
     fi
     cat "$dir/base/stream.tsv"
     printf 'attempt\tdelay_s\tresult\tflight3_hit\n' > "$OUT/killed-mid-stream-attempts.tsv"
-    for delay in ${KILL_STREAM_DELAYS:-2 3 1 5}; do
+    for delay in ${KILL_STREAM_DELAYS:-10 13 8 16}; do
       attempt=$((attempt + 1))
       adir="$dir/$attempt"; mkdir -p "$adir"
       [ "$attempt" -gt 1 ] && restart_lost
