@@ -45,10 +45,16 @@ split addresses).
 * **Filters** – `TupleDomain` on the supported scalar types is translated to a `WHERE`
   clause the server evaluates exactly (DuckDB), so Trino does not re-filter those
   predicates. Anything else stays in Trino as a residual filter.
-* **`ORDER BY` / `LIMIT` / aggregations** – applied by Trino. The server has no
-  server-side `ORDER BY`/`LIMIT`; aggregation pushdown is a possible follow-up
-  (the Spark connector does it, and `ArrowFlightClient.getFlightInfo` already accepts
-  an arbitrary statement).
+* **`LIMIT`** – the scan stops reading (and cancels the stream) once enough rows arrived;
+  Trino keeps its final `LIMIT`.
+* **`ORDER BY … LIMIT n` (TopN)** – off by default (`arrow-flight.topn-pushdown.enabled=true`
+  or session property `topn_pushdown_enabled`). When every sort key is a plain column of an
+  integer, decimal, boolean, date or timestamp type, the server query gets
+  `ORDER BY … LIMIT n`; each endpoint and range split returns its own top `n` rows and Trino
+  keeps its TopN over them. `DOUBLE`/`REAL` (NaN order) and `VARCHAR` (collation) keys are
+  not pushed.
+* **Aggregations** – count/sum/min/max/avg + `GROUP BY` (session property
+  `aggregation_pushdown_enabled`).
 
 ## Build
 

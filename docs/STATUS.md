@@ -92,10 +92,16 @@ Kept up to date after every work session so work can be resumed from this reposi
    connection is renewed only when the coordinator itself was lost or on UNAUTHENTICATED (re-handshake). A failed
    coordinator *call* still drops every pool (the whole cluster may have restarted; gRPC fails stale channels for
    up to ~2 min). Unit tests `lostNodeDropsOnlyItsOwnPooledConnections`, `lostCoordinatorKeepsOtherNodesPooledConnections`.
-3. **`ORDER BY … LIMIT` (TopN) pushdown** to the server (`applyTopN`): render `ORDER BY … LIMIT n` in
-   `SqlQueryBuilder` when all sort keys are pushable columns; in partial mode each endpoint returns its own top n
-   and Trino keeps its final TopN (do not report the TopN as fully guaranteed then); complete mode can guarantee
-   it. Unit + e2e (TPC-H q03/q10/q18-style queries, results unchanged, fewer rows read).
+3. **`ORDER BY … LIMIT` (TopN) pushdown** — done (session 7), **off by default**
+   (`arrow-flight.topn-pushdown.enabled` / session `topn_pushdown_enabled`). `applyTopN` renders
+   `ORDER BY <keys> NULLS FIRST|LAST LIMIT n` into every scan query (`TopN` in the table handle) when all keys are
+   plain columns of integer/decimal/boolean/date/timestamp type; never guaranteed (each endpoint and range split
+   returns its own top n). Kept apart from the client-side LIMIT (that one counts rows across a split's endpoints).
+   Not combined with a LIMIT below, an aggregation, a later filter or dynamic filters. Unit tests
+   `ArrowFlightMetadataTopNTest`; e2e `topn` check: 4 queries directly over scans (lineitem/orders/customer, n = 5…1000)
+   equal with the property on and off, EXPLAIN shows `topN=` in the scan. TPC-H q03/q10/q18 are unaffected (their
+   TopN sits above joins/aggregations, never on a scan). Open: rows-read reduction not measured; enable by default?
+   (see Open questions).
 4. **Dynamic filters**: review how dynamic filters are used (wait time, pushing IN-lists / ranges into the
    remote SQL, size limits). Measure on e2e SF1 joins (q05, q09); keep correct results.
 5. **Split count**: review the number of splits per endpoint / per query against server nodes and Trino workers.
@@ -103,6 +109,10 @@ Kept up to date after every work session so work can be resumed from this reposi
    build commands; keep 455 the default.
 
 ## Open questions
+- **TopN pushdown default** (session 7): implemented and green on int4 (partial 1+3 servers, complete 3 servers — see
+  Log) but **off by default** because the README said the server had no `ORDER BY`/`LIMIT`. The int4 server does
+  accept them. Enable by default on the stand (`arrow-flight.topn-pushdown.enabled=true`) once you have tried it? VARCHAR
+  sort keys are not pushed: is the server's DuckDB collation always binary (then they could be)?
 - (resolved) Workflow dispatch from cloud sessions: `gh workflow run` fails (GraphQL blocked by the session proxy);
   the REST call works: `gh api -X POST repos/C0fuge/heron/actions/workflows/e2e.yml/dispatches -f ref=main
   -f 'inputs[servers]=3' …` (session 6).

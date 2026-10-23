@@ -24,3 +24,5 @@ arrow-flight.bearer-token=test-token
 # next location (backup node) is tried. Keepalive pings only to servers that list backups.
 # arrow-flight.connect-timeout-millis=5000
 # arrow-flight.keepalive-millis=10000
+# Send ORDER BY ... LIMIT n to the server (each endpoint returns its own top n; Trino keeps its TopN)
+# arrow-flight.topn-pushdown.enabled=false

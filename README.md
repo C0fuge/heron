@@ -70,8 +70,8 @@ Both do the same thing, mapped onto two different plugin APIs:
 4. **Read**: each worker opens the Arrow stream for its ticket and converts every
    `VectorSchemaRoot` batch into the engine's columnar page/chunk.
 5. **Pushdown**: column pruning + simple `WHERE` predicates (the server evaluates them
-   exactly in DuckDB). `ORDER BY` / `LIMIT` / aggregation stay in the engine — the server
-   has no server-side `ORDER BY` / `LIMIT`.
+   exactly in DuckDB), aggregations, `LIMIT` (connector-side) and, optionally, `ORDER BY … LIMIT n`
+   (see `trino-arrow-flight/README.md`).
 
 See `trino-arrow-flight/README.md` and `starrocks-arrow-flight/DESIGN.md` for the details.
 
