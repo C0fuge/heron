@@ -23,6 +23,7 @@ ASSETS="${ASSETS:?}"; PLUGIN_ZIP="${PLUGIN_ZIP:?}"; OUT="${OUT:?}"
 TRINO_VERSION="${TRINO_VERSION:-455}"; RESULT_MODE="${RESULT_MODE:-partial}"
 SERVERS="${SERVERS:-1}"; SERVER_HEAP="${SERVER_HEAP:-2g}"; SERVER_BUILD="${SERVER_BUILD:-int4}"
 FAILOVER_QUERIES="${FAILOVER_QUERIES:-q01 q03 q05 q06 q18}"
+ICEBERG_FAILOVER_QUERIES="${ICEBERG_FAILOVER_QUERIES:-q01 q03 q18}"  # all in ICEBERG_QUERIES
 WORK="${WORK:-$(mktemp -d)}"
 NET=afe2e
 DUCKDB_EXT_VERSION=v1.4.5
@@ -230,40 +231,55 @@ if [ "$SERVERS" -ge 3 ]; then
   # The kill must hit a read of flight3: evidence is a failed query or the plugin's "failed before
   # any data; reading it from <backup>" WARN for flight3 (the endpoints were handed out before the
   # kill); otherwise flight3 is restarted and the kill retried with the next delay. In partial
-  # mode a miss on every delay fails the job.
-  log "failover: flight3 killed during a read"
-  printf 'attempt\tdelay_s\tq18\tflight3_hit\n' > "$OUT/killed-during-attempts.tsv"
-  attempt=0; hit=no
-  for delay in ${KILL_DURING_DELAYS:-2 1 4 6}; do
-    attempt=$((attempt + 1))
-    dir="$OUT/killed-during/$attempt"; mkdir -p "$dir"
-    if [ "$attempt" -gt 1 ]; then
-      docker rm -f flight3 >/dev/null; start_server flight3; wait_server flight3; sleep 5
-    fi
-    mark_log
-    run_query q18 "$dir" &
-    sleep "$delay"
-    docker kill flight3 >/dev/null
-    wait
-    check_exact_or_error "$dir" "$dir/summary.tsv" q18
-    result=$([ -f "$dir/q18.tsv" ] && echo answer || echo error)
-    log_since_mark | grep -E 'flight3' > "$dir/flight3-lines.txt" || true
-    if [ "$result" = error ] || grep -qE "$FAILOVER_MARKER" "$dir/flight3-lines.txt"; then hit=yes; fi
-    head -5 "$dir/flight3-lines.txt" | cut -c1-400
-    printf '%s\t%s\t%s\t%s\n' "$attempt" "$delay" "$result" "$hit" | tee -a "$OUT/killed-during-attempts.tsv"
-    [ "$hit" = yes ] && break
-  done
-  evidence=$([ "$hit" = yes ] && echo OK || { [ "$RESULT_MODE" = partial ] && echo FAIL || echo INFO; })
-  { printf 'query\tresult\tdetail\n'
-    printf 'q18\t%s\t%s attempt(s), all exact or clean errors; kill hit a read of flight3: %s\n' \
-      "$evidence" "$attempt" "$hit"; } | tee "$OUT/killed-during-summary.tsv"
-  [ "$evidence" != FAIL ] || status=1
+  # mode a miss on every delay fails the job (schema tpch; for the Iceberg schema a miss is INFO:
+  # whether flight3 serves any of its data files depends on how Spark split them).
+  kill_during() {  # schema out-name; flight3 must be running
+    local schema=$1 name=$2 attempt=0 hit=no delay dir result evidence
+    log "failover: flight3 killed during a read (schema $schema)"
+    printf 'attempt\tdelay_s\tq18\tflight3_hit\n' > "$OUT/$name-attempts.tsv"
+    for delay in ${KILL_DURING_DELAYS:-2 1 4 6}; do
+      attempt=$((attempt + 1))
+      dir="$OUT/$name/$attempt"; mkdir -p "$dir"
+      if [ "$attempt" -gt 1 ]; then
+        docker rm -f flight3 >/dev/null; start_server flight3; wait_server flight3; sleep 5
+      fi
+      mark_log
+      QUERY_SCHEMA=$schema run_query q18 "$dir" &
+      sleep "$delay"
+      docker kill flight3 >/dev/null
+      wait
+      check_exact_or_error "$dir" "$dir/summary.tsv" q18
+      result=$([ -f "$dir/q18.tsv" ] && echo answer || echo error)
+      log_since_mark | grep -E 'flight3' > "$dir/flight3-lines.txt" || true
+      if [ "$result" = error ] || grep -qE "$FAILOVER_MARKER" "$dir/flight3-lines.txt"; then hit=yes; fi
+      head -5 "$dir/flight3-lines.txt" | cut -c1-400
+      printf '%s\t%s\t%s\t%s\n' "$attempt" "$delay" "$result" "$hit" | tee -a "$OUT/$name-attempts.tsv"
+      [ "$hit" = yes ] && break
+    done
+    evidence=$([ "$hit" = yes ] && echo OK ||
+      { [ "$RESULT_MODE" = partial ] && [ "$schema" = tpch ] && echo FAIL || echo INFO; })
+    { printf 'query\tresult\tdetail\n'
+      printf 'q18\t%s\t%s attempt(s) on schema %s, all exact or clean errors; kill hit a read of flight3: %s\n' \
+        "$evidence" "$attempt" "$schema" "$hit"; } | tee "$OUT/$name-summary.tsv"
+    [ "$evidence" != FAIL ] || status=1
+  }
+  kill_during tpch killed-during
+  if [ "$ICEBERG" = 1 ]; then
+    # Iceberg tables: endpoints carry catalog (snapshot-pinned) tickets
+    docker rm -f flight3 >/dev/null; start_server flight3; wait_server flight3; sleep 5
+    kill_during ice killed-during-ice
+  fi
 
   # Two of three nodes lost (flight2 and flight3): every answer exact, or a clean error.
   log "failover: flight2 and flight3 down"
   mkdir -p "$OUT/two-killed"
   for q in $FAILOVER_QUERIES; do run_query "$q" "$OUT/two-killed"; done
   check_exact_or_error "$OUT/two-killed" "$OUT/two-killed-summary.tsv" $FAILOVER_QUERIES
+  if [ "$ICEBERG" = 1 ]; then
+    mkdir -p "$OUT/two-killed-ice"
+    for q in $ICEBERG_FAILOVER_QUERIES; do QUERY_SCHEMA=ice run_query "$q" "$OUT/two-killed-ice"; done
+    check_exact_or_error "$OUT/two-killed-ice" "$OUT/two-killed-ice-summary.tsv" $ICEBERG_FAILOVER_QUERIES
+  fi
   save_logs
 fi
 exit $status
