@@ -58,8 +58,25 @@ Kept up to date after every work session so work can be resumed from this reposi
 ## Next steps
 
 > **Stand, 3-node S3 cluster on int7 (2026-10-25):** plugin correct everywhere (22/22, B2, B5, mid-stream kill). Follow-ups: (a) q04 takes 8.1 s on the 3-node cluster vs 1.7 s single node while the servers answer equally fast — the time is in merging results of several endpoints in the plugin; profile and fix; (b) after a node restart the first query reuses the stale pooled connection to that node, fails, then reads the backup (+~1 s) — validate/evict pooled connections of a restarted node; (c) the catalog points at one host — support a list of coordinator hosts (`arrow-flight.hosts=a,b,c`) so a dead first host does not fail the query.
+>
+> (a) **Done (session 40), pending stand check.** Cause found in the code: with a grouped aggregation pushed to a cluster every
+> Flight node returns its own partial groups, and the plugin collected all of them in one boxed `LinkedHashMap` (one `ArrayList`
+> key per group, unaccounted memory) and emitted a single page. q04's `EXISTS` and q18's `IN` become `GROUP BY l_orderkey` on
+> lineitem (15M groups at SF10; likely also why q18 needed an 8 GB Trino heap on the 3-node stand). Now the server SQL gets
+> `ORDER BY <group columns> ASC NULLS FIRST` and `AggregationReader.SortedMerger` merges the endpoints as sorted streams
+> (k-way, one group in memory, pages of 8192 rows); a stream out of order fails the query (never a duplicated group). Only for
+> GROUP BY types the server orders like Trino (`isTopNSortable`: integer/decimal/boolean/date/timestamp(6); not VARCHAR/DOUBLE);
+> skipped when the catalog's last FlightInfo had one endpoint (single node: no server sort); the old hash merge stays the
+> fallback. `arrow-flight.aggregation-sorted-merge.enabled` / session `aggregation_sorted_merge_enabled`, default true. Unit
+> tests `AggregationReaderTest` (6, incl. random equality with the hash merge) + `SqlQueryBuilderTest`; e2e block `aggmerge`
+> (q04, q18, `GROUP BY l_orderkey` checksum: sorted = hash answers, EXPLAIN shows the pushed aggregation). Run 40140961985
+> (int7, 3 servers, SF1): all three equal; hash/sorted s: q04 2.12/1.89, q18 3.42/3.07, groups 1.83/1.60 (SF1 = 1.5M groups,
+> 4 vCPU runner). **Stand:** rerun q04/q18 on the 3-node cluster with the new plugin, with
+> `SET SESSION flight.aggregation_sorted_merge_enabled` true and false, and report times (and whether q18 runs with a
+> 4 GB heap now). Next: (b) stale pooled connection after a node restart (`FlightSqlSession` per-location generations only drop
+> pools after a failure seen by this Trino), then (c) a list of coordinator hosts.
 
-> **Queue empty (session 24, 2026-10-23):** items 1–6 are done and every remaining item-7 follow-up waits on an
+> **Queue empty (session 24, 2026-10-23; superseded by the stand note above):** items 1–6 are done and every remaining item-7 follow-up waits on an
 > answer in Open questions (TopN / dynamic-filter / split defaults, Arrow upgrade vs. 18.1 pins, bundle cleanup,
 > complete-mode throttled kill, int7 as push default, S3 warehouse default). Actions use since 2026-10-01 is already
 > ≥ 850 min of run time (92 runs). Until the maintainer answers one of them or adds a new item, a session should take
@@ -211,6 +228,11 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **`e2e-assets` re-uploaded 2026-10-24 21:51 UTC with int7 only** (int4–int6 removed): the push e2e default is now int7
+  (session 40). The int7 jar hash is unchanged (2b9595ab…06fa), but `int7-plugins.tar.zst` is now
+  `bad288e050ca1175271024dc01f6fcbdbb3c710308216ba2b56b30ae63e3183b` (STATUS had 4d2416f4…1af4): a new plugins build —
+  intended? What changed? (TPC-H, Iceberg and failover checks are green with it, run 40140961985; the server answers the
+  mid-stream baseline faster, 7.5 s.)
 - **Stand answers 2026-10-23 (local stand agent; split count / parallelism, TopN, dynamic filters, statement cache,
   collation).** Setup: 3-node HDFS cluster (REPL 2, 512 MB blocks, TPC-H SF10), server **int7** (sha256 2b9595ab…06fa) on
   each node with the stand's flags (`-Xmx2g`, `duckDbMemoryLimit=1GB`, `duckDbThreads=2`, 4 GB container), partial mode;
