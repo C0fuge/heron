@@ -71,7 +71,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 > tests `AggregationReaderTest` (6, incl. random equality with the hash merge) + `SqlQueryBuilderTest`; e2e block `aggmerge`
 > (q04, q18, `GROUP BY l_orderkey` checksum: sorted = hash answers, EXPLAIN shows the pushed aggregation). Run 40140961985
 > (int7, 3 servers, SF1): all three equal; hash/sorted s: q04 2.12/1.89, q18 3.42/3.07, groups 1.83/1.60 (SF1 = 1.5M groups,
-> 4 vCPU runner). **Stand:** rerun q04/q18 on the 3-node cluster with the new plugin, with
+> 4 vCPU runner); run 40142038380 (same setup): q04 2.46/2.69, q18 4.75/4.58, groups 2.32/2.38 — at SF1 on the runner the
+> difference is within noise; the gain is expected at SF10 over the network (memory: one group instead of all). **Stand:** rerun q04/q18 on the 3-node cluster with the new plugin, with
 > `SET SESSION flight.aggregation_sorted_merge_enabled` true and false, and report times (and whether q18 runs with a
 > 4 GB heap now). Next: (b) stale pooled connection after a node restart (`FlightSqlSession` per-location generations only drop
 > pools after a failure seen by this Trino), then (c) a list of coordinator hosts.
@@ -484,3 +485,12 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-10-23 (local stand agent): open questions on split count / endpoint parallelism, TopN, dynamic filters,
   statement cache and collation measured on the 3-node HDFS SF10 stand with server int7 and plugin e0ebab5 (CI run
   39914348258); answers + recommended defaults in Open questions "Stand answers 2026-10-23". No code changed, no CI run.
+- 2026-10-24 (cloud session 40): Next steps stand item (a), q04 slow on 3 nodes: multi-endpoint aggregation merge rewritten as a
+  sorted k-way stream merge (server `ORDER BY` group columns; property `aggregation-sorted-merge.enabled`, default true; hash
+  merge kept as fallback). Build run 40140697443 red (testCompile: varargs in the new test), 40140813291 green (455). `e2e-assets`
+  now holds only int7 (re-uploaded 21:51 UTC, new plugins tarball hash, see Open questions) → push e2e default int7; run
+  40140813293 failed at asset download (int4 gone). Run 40140961985 (int7 455 partial 1+3 servers): 1 server green, 3 servers
+  all checks OK incl. new `aggmerge` (sorted = hash on q04/q18/GROUP BY l_orderkey) except the mid-stream kill: fixed 8-11 s
+  delays all after the 7.5 s baseline → partial-mode delays now 30-75 % of the baseline; run 40142038380 green 1+3 servers
+  (mid-stream kill hit after data on attempt 1 at 5.6 s = clean error). ~45 Actions minutes. Invariants hold (no failover/auth
+  change; an unsorted server stream fails cleanly; all answers exact). Stand recheck of q04/q18 requested in Next steps.
