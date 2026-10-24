@@ -560,6 +560,36 @@ if [ "$SERVERS" -ge 3 ]; then
   }
   kill_mid_stream
 
+  # Nodes restarted between two queries: the plugin's pooled connections to them are stale. The next
+  # query must equal the healthy baseline; reads of flight3 should not fall back to a backup (a stale
+  # pooled connection is retried once on a new one: "lost its reused connection before any data … retrying on a new one").
+  # Pooled connections idle for 60 s are dropped anyway, so the restart is timed.
+  restarted_nodes() {
+    local dir="$OUT/restarted" result evidence start restart_s backups retries
+    log "failover: flight2 and flight3 restarted between two queries"
+    mkdir -p "$dir/warm" "$dir/after"
+    restart_lost
+    stream_query "$dir/warm"
+    start=$(date +%s.%N); restart_lost; restart_s=$(echo "$(date +%s.%N) - $start" | bc)
+    mark_log
+    stream_query "$dir/after"
+    if [ -f "$dir/after/stream.tsv" ]; then
+      cmp -s "$OUT/killed-mid-stream/base/stream.tsv" "$dir/after/stream.tsv" && result=exact || result=WRONG
+    else
+      result="error: $(grep -m1 -E 'Query .* failed|ERROR' "$dir/after/stream.err" | cut -c1-200)"
+    fi
+    log_since_mark | grep -E 'flight[23]' > "$dir/lines.txt" || true
+    backups=$(grep -cE "$FAILOVER_MARKER" "$dir/lines.txt" || true)
+    retries=$(grep -c 'lost its reused connection before any data' "$dir/lines.txt" || true)
+    head -5 "$dir/lines.txt" | cut -c1-400
+    evidence=$(case "$result" in exact) echo OK ;; WRONG) echo FAIL ;; *) echo INFO ;; esac)
+    { printf 'query\tresult\tdetail\n'
+      printf 'stream\t%s\t%s after a %.1f s restart; stale-connection retries %s, reads from a backup %s\n' \
+        "$evidence" "$result" "$restart_s" "$retries" "$backups"; } | tee "$OUT/restarted-summary.tsv"
+    [ "$evidence" != FAIL ] || status=1
+  }
+  [ -f "$OUT/killed-mid-stream/base/stream.tsv" ] && restarted_nodes
+
   # Two of three nodes lost (flight2 and flight3): every answer exact, or a clean error.
   log "failover: flight2 and flight3 down"
   docker kill flight2 flight3 >/dev/null 2>&1 || true  # back up if kill_during restarted them

@@ -24,6 +24,8 @@ import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Schema;
+import io.grpc.ConnectivityState;
+import io.grpc.ManagedChannel;
 import io.grpc.netty.GrpcSslContexts;
 import io.grpc.netty.NettyChannelBuilder;
 import io.netty.channel.ChannelOption;
@@ -75,6 +77,10 @@ import static java.util.Objects.requireNonNull;
  * HTTP/2 connection in one chain of buffers; with many parallel streams, some of them read
  * slowly (a join waiting for its other side), that chain grows deep enough to end the stream
  * with "Failed to read message" (a StackOverflowError when the chain is released).
+ *
+ * <p>Idle stream connections are pooled per location. One whose channel is failing is not handed
+ * out again; one that died unnoticed (its node restarted) fails its next stream, which is then
+ * read once more from the same location on a new connection (see {@link FlightDataStream}).
  */
 public class FlightSqlSession
         implements AutoCloseable
@@ -84,7 +90,23 @@ public class FlightSqlSession
     // A connection idle for longer may have been dropped by a firewall without notice.
     private static final long MAX_STREAM_CLIENT_IDLE_NANOS = TimeUnit.SECONDS.toNanos(60);
 
-    private record IdleClient(FlightClient client, long sinceNanos) {}
+    /** A data-stream connection; {@code channel} is null where Arrow's builder made it (no state to check). */
+    private record StreamClient(FlightClient client, ManagedChannel channel)
+    {
+        // False once gRPC knows the connection failed: RPCs on it would fail fast until its reconnect backoff ends.
+        boolean usable()
+        {
+            if (channel == null) {
+                return true;
+            }
+            ConnectivityState state = channel.getState(false);
+            return state != ConnectivityState.TRANSIENT_FAILURE && state != ConnectivityState.SHUTDOWN;
+        }
+    }
+
+    private record IdleClient(StreamClient client, long sinceNanos) {}
+
+    private record Leased(StreamClient client, boolean reused) {}
 
     private final FlightConfig config;
     private final BufferAllocator allocator;
@@ -291,17 +313,21 @@ public class FlightSqlSession
     {
         String poolKey = keepAlive ? "keepalive " + uri : uri;
         int leasedGeneration = generation(uri);
-        FlightClient client = leaseStreamClient(poolKey, uri, keepAlive);
+        Leased leased = leaseStreamClient(poolKey, uri, keepAlive);
+        StreamClient client = leased.client();
         FlightStream stream;
         try {
-            stream = client.getStream(ticket, callOptions());
+            stream = client.client().getStream(ticket, callOptions());
         }
         catch (RuntimeException e) {
-            closeQuietly(client);
+            closeQuietly(client.client());
             throw e;
         }
         return new FlightDataStream.Opened(stream,
-                reusable -> releaseStreamClient(poolKey, client, reusable && leasedGeneration == generation(uri)));
+                reusable -> releaseStreamClient(poolKey, client, reusable && leasedGeneration == generation(uri)),
+                // A pooled connection may be stale; once another stream's failure retired the location's
+                // connections, this one fails over at once instead.
+                () -> leased.reused() && leasedGeneration == generation(uri));
     }
 
     /**
@@ -339,7 +365,7 @@ public class FlightSqlSession
             Deque<IdleClient> idle = idleStreamClients.get(poolKey);
             IdleClient candidate;
             while (idle != null && (candidate = idle.pollFirst()) != null) {
-                closeQuietly(candidate.client());
+                closeQuietly(candidate.client().client());
             }
         }
     }
@@ -355,26 +381,27 @@ public class FlightSqlSession
         return count;
     }
 
-    private FlightClient leaseStreamClient(String poolKey, String uri, boolean keepAlive)
+    private Leased leaseStreamClient(String poolKey, String uri, boolean keepAlive)
     {
         Deque<IdleClient> idle = idleStreamClients.get(poolKey);
         if (idle != null) {
             IdleClient candidate;
             while ((candidate = idle.pollFirst()) != null) {
-                if (System.nanoTime() - candidate.sinceNanos() < MAX_STREAM_CLIENT_IDLE_NANOS) {
-                    return candidate.client();
+                if (System.nanoTime() - candidate.sinceNanos() < MAX_STREAM_CLIENT_IDLE_NANOS
+                        && candidate.client().usable()) {
+                    return new Leased(candidate.client(), true);
                 }
-                closeQuietly(candidate.client());
+                closeQuietly(candidate.client().client());
             }
         }
-        return buildStreamClient(location(uri), keepAlive);
+        return new Leased(buildStreamClient(location(uri), keepAlive), false);
     }
 
-    private void releaseStreamClient(String poolKey, FlightClient client, boolean reusable)
+    private void releaseStreamClient(String poolKey, StreamClient client, boolean reusable)
     {
         Deque<IdleClient> idle = idleStreamClients.computeIfAbsent(poolKey, key -> new ConcurrentLinkedDeque<>());
         if (!reusable || closed || idle.size() >= MAX_IDLE_STREAM_CLIENTS) {
-            closeQuietly(client);
+            closeQuietly(client.client());
             return;
         }
         idle.addFirst(new IdleClient(client, System.nanoTime()));
@@ -383,7 +410,7 @@ public class FlightSqlSession
         while ((oldest = idle.peekLast()) != null
                 && System.nanoTime() - oldest.sinceNanos() >= MAX_STREAM_CLIENT_IDLE_NANOS
                 && idle.removeLastOccurrence(oldest)) {
-            closeQuietly(oldest.client());
+            closeQuietly(oldest.client().client());
         }
         if (closed) {
             closeIdleStreamClients();
@@ -395,7 +422,7 @@ public class FlightSqlSession
         for (Deque<IdleClient> idle : idleStreamClients.values()) {
             IdleClient candidate;
             while ((candidate = idle.pollFirst()) != null) {
-                closeQuietly(candidate.client());
+                closeQuietly(candidate.client().client());
             }
         }
     }
@@ -432,13 +459,13 @@ public class FlightSqlSession
      * A data-stream connection: like {@link #buildClient} without middleware (same TLS settings),
      * plus a connect timeout and, if asked, keepalive pings answered within the connect timeout.
      */
-    private FlightClient buildStreamClient(Location location, boolean keepAlive)
+    private StreamClient buildStreamClient(Location location, boolean keepAlive)
     {
         String scheme = Optional.ofNullable(location.getUri().getScheme()).orElse("").toLowerCase(Locale.ROOT);
         boolean tls = scheme.equals("grpc+tls");
         if (!tls && !scheme.equals("grpc+tcp") && !scheme.equals("grpc")) {
             // e.g. grpc+unix: Arrow's own builder knows how to reach it
-            return buildClient(location, false);
+            return new StreamClient(buildClient(location, false), null);
         }
         NettyChannelBuilder builder = NettyChannelBuilder.forAddress(location.toSocketAddress());
         if (tls) {
@@ -474,7 +501,8 @@ public class FlightSqlSession
                     .keepAliveTimeout(connectTimeout > 0 ? connectTimeout : 20_000, TimeUnit.MILLISECONDS)
                     .keepAliveWithoutCalls(true);
         }
-        return FlightGrpcUtils.createFlightClient(allocator, builder.build());
+        ManagedChannel channel = builder.build();
+        return new StreamClient(FlightGrpcUtils.createFlightClient(allocator, channel), channel);
     }
 
     private CredentialCallOption authenticate(FlightClient client)

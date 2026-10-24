@@ -13,6 +13,7 @@ import java.net.UnknownHostException;
 import java.nio.channels.UnresolvedAddressException;
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 import static java.util.Objects.requireNonNull;
@@ -25,6 +26,10 @@ import static java.util.Objects.requireNonNull;
  * (UNAVAILABLE: connection refused, connect timeout, unknown host, connection lost) before the
  * stream handed any batch to the caller, the same ticket is read from the next location. Once a
  * batch (or the end of the stream) was returned, a failure is final, so no row is read twice.
+ *
+ * <p>A connection reused from the pool may have died unnoticed (the node restarted since): when
+ * such a stream fails unreachable before any data, the same location is tried once more on a new
+ * connection before the next location.
  */
 public final class FlightDataStream
         implements AutoCloseable
@@ -42,8 +47,10 @@ public final class FlightDataStream
      * A stream at one location.
      *
      * @param release called once when the stream is closed; true if the connection is fit for another stream
+     * @param staleConnection asked when the stream failed unreachable before any data: true if the failure may be
+     *         the reused connection's own, so a new connection to the same location is worth one try
      */
-    record Opened(FlightStream stream, Consumer<Boolean> release) {}
+    record Opened(FlightStream stream, Consumer<Boolean> release, BooleanSupplier staleConnection) {}
 
     private final List<String> locations;
     private final Opener opener;
@@ -52,6 +59,8 @@ public final class FlightDataStream
     private Opened current;
     // A next() call returned normally: data (or the end) reached the caller, retrying could duplicate rows.
     private boolean delivered;
+    // The current location was already retried on a new connection.
+    private boolean retriedOnNewConnection;
     private boolean failed;
     private boolean cancelled;
     private boolean closed;
@@ -82,7 +91,18 @@ public final class FlightDataStream
             catch (RuntimeException e) {
                 failed = true;
                 String location = locations.get(index);
+                // asked before onFailure, which retires the location's pooled connections
+                boolean retryHere = !delivered && !cancelled && !closed && !retriedOnNewConnection
+                        && current != null && isUnreachable(e) && current.staleConnection().getAsBoolean();
                 onFailure.accept(location, e);
+                if (retryHere) {
+                    LOG.warn("Flight stream at {} lost its reused connection before any data ({}); "
+                            + "retrying on a new one", location, e.getMessage());
+                    closeCurrent();
+                    failed = false;
+                    retriedOnNewConnection = true;
+                    continue;
+                }
                 if (delivered && !cancelled && !closed) {
                     LOG.warn("Flight stream at {} failed after delivering data ({}); not retried", location, e.getMessage());
                 }
@@ -93,6 +113,7 @@ public final class FlightDataStream
                         location, e.getMessage(), locations.get(index + 1));
                 closeCurrent();
                 failed = false;
+                retriedOnNewConnection = false;
                 index++;
             }
         }

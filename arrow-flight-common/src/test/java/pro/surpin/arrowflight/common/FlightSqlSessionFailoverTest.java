@@ -123,12 +123,17 @@ class FlightSqlSessionFailoverTest
         }
     }
 
-    /** Relays TCP to a node; once silent it drops everything, like a host that vanished. */
+    /**
+     * Relays TCP to a node; once silent it drops everything, like a host that vanished. After
+     * {@link #restart()} the connections open until then are reset when the client next sends on
+     * them, like those to a node that restarted without the client noticing; new ones are relayed.
+     */
     private static final class SilencingProxy
             implements AutoCloseable
     {
         private final ServerSocket listener = new ServerSocket(0, 50, java.net.InetAddress.getLoopbackAddress());
         private final List<Socket> sockets = java.util.Collections.synchronizedList(new ArrayList<>());
+        private final java.util.Set<Socket> stale = java.util.concurrent.ConcurrentHashMap.newKeySet();
         private volatile boolean silent;
 
         SilencingProxy(int targetPort)
@@ -160,6 +165,12 @@ class FlightSqlSessionFailoverTest
                 try {
                     int n;
                     while ((n = from.getInputStream().read(buffer)) >= 0) {
+                        if (stale.contains(from)) {
+                            from.setSoLinger(true, 0);
+                            from.close();
+                            to.close();
+                            return;
+                        }
                         if (!silent) {
                             to.getOutputStream().write(buffer, 0, n);
                         }
@@ -176,6 +187,13 @@ class FlightSqlSessionFailoverTest
         String uri()
         {
             return "grpc+tcp://127.0.0.1:" + listener.getLocalPort();
+        }
+
+        void restart()
+        {
+            synchronized (sockets) {
+                stale.addAll(sockets);
+            }
         }
 
         @Override
@@ -395,6 +413,82 @@ class FlightSqlSessionFailoverTest
             assertEquals(ROWS, readAll(stream).size());
         }
         assertEquals(1, session.idleStreamClients(uri));
+    }
+
+    private static int port(String uri)
+    {
+        return Integer.parseInt(uri.substring(uri.lastIndexOf(':') + 1));
+    }
+
+    @Test
+    void staleConnectionToARestartedNodeIsRetriedOnANewOne()
+            throws Exception
+    {
+        Node node = new Node(allocator).start();
+        try (SilencingProxy proxy = new SilencingProxy(port(node.uri()))) {
+            List<String> locations = List.of(proxy.uri(), backup.uri());
+            try (FlightDataStream stream = session.openStream(new byte[] {1}, locations)) {
+                assertEquals(ROWS, readAll(stream).size());
+            }
+            assertEquals(1, session.idleStreamClients(proxy.uri()));
+
+            proxy.restart();
+            try (FlightDataStream stream = session.openStream(new byte[] {1}, locations)) {
+                assertEquals(ROWS, readAll(stream).size());
+                // read from the restarted node, not its backup
+                assertEquals(proxy.uri(), stream.location());
+            }
+            assertEquals(2, node.calls.get());
+            assertEquals(0, backup.calls.get());
+            assertEquals(1, session.idleStreamClients(proxy.uri()));
+        }
+        finally {
+            node.close();
+        }
+    }
+
+    @Test
+    void staleConnectionToANodeThatStaysDownIsRetriedOnceThenFailedOver()
+            throws Exception
+    {
+        Node node = new Node(allocator).start();
+        try {
+            List<String> locations;
+            try (SilencingProxy proxy = new SilencingProxy(port(node.uri()))) {
+                locations = List.of(proxy.uri(), backup.uri());
+                try (FlightDataStream stream = session.openStream(new byte[] {1}, locations)) {
+                    assertEquals(ROWS, readAll(stream).size());
+                }
+                proxy.restart();
+            }
+            // the proxy's port now refuses connections
+            try (FlightDataStream stream = session.openStream(new byte[] {1}, locations)) {
+                assertEquals(ROWS, readAll(stream).size());
+                assertEquals(backup.uri(), stream.location());
+            }
+            assertEquals(1, node.calls.get());
+            assertEquals(1, backup.calls.get());
+            assertEquals(0, session.idleStreamClients(locations.get(0)));
+        }
+        finally {
+            node.close();
+        }
+    }
+
+    @Test
+    void serverErrorOnAReusedConnectionIsNotRetried()
+    {
+        List<String> locations = List.of(coordinator.uri(), backup.uri());
+        try (FlightDataStream stream = session.openStream(new byte[] {1}, locations)) {
+            assertEquals(ROWS, readAll(stream).size());
+        }
+        coordinator.mode = Mode.FAIL_INVALID;
+        try (FlightDataStream stream = session.openStream(new byte[] {1}, locations)) {
+            FlightRuntimeException e = assertThrows(FlightRuntimeException.class, stream::next);
+            assertEquals(FlightStatusCode.INVALID_ARGUMENT, e.status().code());
+        }
+        assertEquals(2, coordinator.calls.get());
+        assertEquals(0, backup.calls.get());
     }
 
     @Test
