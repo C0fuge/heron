@@ -57,6 +57,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Stand, 3-node S3 cluster on int7 (2026-10-25):** plugin correct everywhere (22/22, B2, B5, mid-stream kill). Follow-ups: (a) q04 takes 8.1 s on the 3-node cluster vs 1.7 s single node while the servers answer equally fast — the time is in merging results of several endpoints in the plugin; profile and fix; (b) after a node restart the first query reuses the stale pooled connection to that node, fails, then reads the backup (+~1 s) — validate/evict pooled connections of a restarted node; (c) the catalog points at one host — support a list of coordinator hosts (`arrow-flight.hosts=a,b,c`) so a dead first host does not fail the query.
+
 > **Queue empty (session 24, 2026-10-23):** items 1–6 are done and every remaining item-7 follow-up waits on an
 > answer in Open questions (TopN / dynamic-filter / split defaults, Arrow upgrade vs. 18.1 pins, bundle cleanup,
 > complete-mode throttled kill, int7 as push default, S3 warehouse default). Actions use since 2026-10-01 is already
