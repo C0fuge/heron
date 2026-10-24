@@ -24,9 +24,13 @@ A recurring cloud session develops this repo; it starts with zero context every 
 
 ## Rules
 
-- The repo is **private**. Release `e2e-assets` holds the maintainer's server build — never make the repo
-  public, never copy those assets elsewhere, never attach them to a product release.
-- Actions minutes are limited (~2000/month shared with the maintainer's other private repos): keep jobs short,
+- The repo is **public** (since 2026-10-24, maintainer's decision: free Actions minutes). Everything pushed —
+  code, docs, releases, CI logs — is visible to anyone: never commit secrets, credentials or personal data (names,
+  e-mail addresses, home paths, host names of the maintainer's machines or of production systems). Local commits use
+  `C0fuge <189659128+C0fuge@users.noreply.github.com>`. Keep the repo low-profile: no description, topics or website,
+  no links to it from other projects.
+- Release `e2e-assets` holds the maintainer's server build — don't attach it to a product release.
+- Actions minutes are free (public repo), but keep jobs short:
   cache Maven and Docker layers, run the end-to-end job only when plugin code changed or on request.
 - No secrets, credentials or personal data in the repo; test tokens are generated in the job.
 - Commit/push only to this repository; no issues/PRs elsewhere.
