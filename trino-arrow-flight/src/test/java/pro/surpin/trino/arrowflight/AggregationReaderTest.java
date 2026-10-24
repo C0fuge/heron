@@ -55,9 +55,9 @@ class AggregationReaderTest
     void mergesEqualGroupsOfSeveralSortedStreams()
     {
         // rows: k, count, sum, min
-        TestStream a = stream(List.of(row(1L, 1L, 10L, 10L), row(3L, 2L, 30L, 5L)), List.of(row(7L, 1L, 70L, 70L)));
-        TestStream b = stream(List.of(row(null, 4L, 4L, 1L), row(3L, 1L, 3L, 3L), row(4L, 1L, 40L, 40L)));
-        TestStream c = stream(List.of(), List.of(row(1L, 2L, 5L, 2L), row(7L, 3L, 7L, 1L)));
+        TestStream a = stream(batch(row(1L, 1L, 10L, 10L), row(3L, 2L, 30L, 5L)), batch(row(7L, 1L, 70L, 70L)));
+        TestStream b = stream(batch(row(null, 4L, 4L, 1L), row(3L, 1L, 3L, 3L), row(4L, 1L, 40L, 40L)));
+        TestStream c = stream(batch(), batch(row(1L, 2L, 5L, 2L), row(7L, 3L, 7L, 1L)));
 
         List<Object[]> merged = drain(reader(AGGREGATION).sortedMerger(List.of(a, b, c), 1000));
 
@@ -96,8 +96,8 @@ class AggregationReaderTest
     @Test
     void streamOutOfOrderFailsInsteadOfReturningAGroupTwice()
     {
-        TestStream unsorted = stream(List.of(row(5L, 1L, 1L, 1L), row(2L, 1L, 1L, 1L)));
-        TestStream other = stream(List.of(row(2L, 1L, 1L, 1L)));
+        TestStream unsorted = stream(batch(row(5L, 1L, 1L, 1L), row(2L, 1L, 1L, 1L)));
+        TestStream other = stream(batch(row(2L, 1L, 1L, 1L)));
         AggregationReader.SortedMerger merger = reader(AGGREGATION).sortedMerger(List.of(unsorted, other), 1000);
         TrinoException e = assertThrows(TrinoException.class, () -> drain(merger));
         assertTrue(e.getMessage().contains("out of GROUP BY order"), e.getMessage());
@@ -158,8 +158,8 @@ class AggregationReaderTest
     @Test
     void closeCancelsStreamsNotYetFinished()
     {
-        TestStream a = stream(List.of(row(1L, 1L, 1L, 1L)), List.of(row(2L, 1L, 1L, 1L)), List.of(row(3L, 1L, 1L, 1L)));
-        TestStream b = stream(List.of(row(1L, 1L, 1L, 1L)), List.of(row(5L, 1L, 1L, 1L)));
+        TestStream a = stream(batch(row(1L, 1L, 1L, 1L)), batch(row(2L, 1L, 1L, 1L)), batch(row(3L, 1L, 1L, 1L)));
+        TestStream b = stream(batch(row(1L, 1L, 1L, 1L)), batch(row(5L, 1L, 1L, 1L)));
         AggregationReader.SortedMerger merger = reader(AGGREGATION).sortedMerger(List.of(a, b), 1);
         assertEquals(1, merger.nextPage().getPositionCount());
         assertFalse(a.closed || b.closed);
@@ -172,6 +172,33 @@ class AggregationReaderTest
     private static Object[] row(Object... values)
     {
         return values;
+    }
+
+    // Fixed arities: a varargs Object[]... would take a single row as the whole array.
+    private static List<Object[]> batch()
+    {
+        return List.of();
+    }
+
+    private static List<Object[]> batch(Object[] a)
+    {
+        List<Object[]> rows = new ArrayList<>();
+        rows.add(a);
+        return rows;
+    }
+
+    private static List<Object[]> batch(Object[] a, Object[] b)
+    {
+        List<Object[]> rows = batch(a);
+        rows.add(b);
+        return rows;
+    }
+
+    private static List<Object[]> batch(Object[] a, Object[] b, Object[] c)
+    {
+        List<Object[]> rows = batch(a, b);
+        rows.add(c);
+        return rows;
     }
 
     @SafeVarargs
