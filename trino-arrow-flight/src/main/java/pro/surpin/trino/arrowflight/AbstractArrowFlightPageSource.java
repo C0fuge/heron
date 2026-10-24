@@ -48,6 +48,7 @@ public abstract class AbstractArrowFlightPageSource
         implements ConnectorPageSource
 {
     private static final Logger log = Logger.get(AbstractArrowFlightPageSource.class);
+    private static final int SORTED_MERGE_PAGE_ROWS = 8192;
 
     private final ArrowFlightClient client;
     private final ArrowTypeConverter converter;
@@ -58,6 +59,7 @@ public abstract class AbstractArrowFlightPageSource
     private final long dynamicFilterDeadlineNanos;
     private final int dynamicFilterMaxValues;
     private final int endpointParallelism;
+    private final boolean sortedAggregationMerge;
 
     /** Plain scans: table columns fetched from the server (expressions are computed here). */
     private final List<ArrowFlightColumnHandle> serverColumns;
@@ -67,6 +69,7 @@ public abstract class AbstractArrowFlightPageSource
     private int nextEndpoint;
     private FlightDataStream stream;
     private ParallelStreamReader parallelReader;
+    private AggregationReader.SortedMerger sortedMerger;
     private boolean finished;
     private long remainingRows;
     private long completedBytes;
@@ -82,7 +85,8 @@ public abstract class AbstractArrowFlightPageSource
             DynamicFilter dynamicFilter,
             int dynamicFilterWaitMillis,
             int dynamicFilterMaxValues,
-            int endpointParallelism)
+            int endpointParallelism,
+            boolean sortedAggregationMerge)
     {
         this.client = requireNonNull(client, "client is null");
         this.converter = requireNonNull(converter, "converter is null");
@@ -93,6 +97,7 @@ public abstract class AbstractArrowFlightPageSource
         this.dynamicFilterDeadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(dynamicFilterWaitMillis);
         this.dynamicFilterMaxValues = dynamicFilterMaxValues;
         this.endpointParallelism = endpointParallelism;
+        this.sortedAggregationMerge = sortedAggregationMerge;
         this.remainingRows = table.getLimit().orElse(Long.MAX_VALUE);
         this.aggregationReader = table.getAggregation().map(a -> new AggregationReader(a, converter)).orElse(null);
         this.serverColumns = aggregationReader == null ? SqlQueryBuilder.baseColumns(table, columns) : List.of();
@@ -219,12 +224,25 @@ public abstract class AbstractArrowFlightPageSource
             }
         }
 
+        // Several endpoints each return their own partial groups. Sorted by the grouping columns they are merged
+        // as streams; otherwise all groups are collected in a hash table first (slow and memory-hungry with
+        // millions of groups, e.g. GROUP BY l_orderkey). The sort is skipped where one endpoint is expected.
+        boolean sortedGroups = aggregationReader != null && sortedAggregationMerge && aggregationReader.canMergeSorted()
+                && client.expectsSeveralEndpoints();
         String sql = aggregationReader != null
-                ? SqlQueryBuilder.buildAggregationSql(table, extra)
+                ? SqlQueryBuilder.buildAggregationSql(table, extra, sortedGroups)
                 : SqlQueryBuilder.buildScanSql(table, serverColumns, extra);
         log.debug("Flight query: %s", sql);
         FlightInfo info = client.getFlightInfo(sql);
         endpoints = info.getEndpoints();
+        client.recordEndpointCount(endpoints.size());
+        if (sortedGroups && endpoints.size() > 1) {
+            List<AggregationReader.PageStream> streams = new ArrayList<>();
+            for (FlightEndpoint endpoint : endpoints) {
+                streams.add(rawPageStream(endpoint));
+            }
+            sortedMerger = aggregationReader.sortedMerger(streams, SORTED_MERGE_PAGE_ROWS);
+        }
         if (aggregationReader == null && endpointParallelism > 1 && endpoints.size() > 1) {
             List<Supplier<ParallelStreamReader.BatchStream>> streams = new ArrayList<>();
             for (FlightEndpoint endpoint : endpoints) {
@@ -261,6 +279,51 @@ public abstract class AbstractArrowFlightPageSource
     {
         List<String> uris = endpoint.getLocations().stream().map(l -> l.getUri().toString()).toList();
         return client.openStream(endpoint.getTicket().getBytes(), uris);
+    }
+
+    /** Raw aggregation pages of one endpoint; the stream is opened on the first call. */
+    private AggregationReader.PageStream rawPageStream(FlightEndpoint endpoint)
+    {
+        return new AggregationReader.PageStream()
+        {
+            private FlightDataStream stream;
+            private boolean done;
+
+            @Override
+            public Page next()
+            {
+                if (done) {
+                    return null;
+                }
+                if (stream == null) {
+                    stream = openStream(endpoint);
+                }
+                while (stream.next()) {
+                    VectorSchemaRoot root = stream.getRoot();
+                    if (root.getRowCount() > 0) {
+                        return aggregationReader.rawPage(root);
+                    }
+                }
+                done = true;
+                stream.close();
+                return null;
+            }
+
+            @Override
+            public void close()
+            {
+                if (stream != null && !done) {
+                    done = true;
+                    try {
+                        stream.cancel("closed");
+                    }
+                    catch (Exception ignored) {
+                        // best effort
+                    }
+                    stream.close();
+                }
+            }
+        };
     }
 
     private static ParallelStreamReader.BatchStream batchStream(FlightDataStream stream)
@@ -341,6 +404,10 @@ public abstract class AbstractArrowFlightPageSource
 
     private Page nextAggregationPage()
     {
+        if (sortedMerger != null) {
+            Page raw = sortedMerger.nextPage();
+            return raw == null ? null : aggregationReader.finish(raw, columns);
+        }
         if (endpoints.size() <= 1) {
             VectorSchemaRoot root = nextBatch();
             return root == null ? null : aggregationReader.finish(aggregationReader.rawPage(root), columns);
@@ -368,6 +435,9 @@ public abstract class AbstractArrowFlightPageSource
     {
         if (parallelReader != null) {
             parallelReader.close();
+        }
+        if (sortedMerger != null) {
+            sortedMerger.close();
         }
         if (stream != null) {
             stream.close();

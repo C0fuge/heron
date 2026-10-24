@@ -57,6 +57,7 @@ public class ArrowFlightConfig
     private int dynamicFilteringWaitMillis = 10_000;
     private int dynamicFilteringMaxValues = 1000;
     private int endpointReadParallelism = 1;
+    private boolean aggregationSortedMergeEnabled = true;
     // Off by default: every query's filter values differ, and the server keeps a prepared
     // statement per distinct SQL text forever (DuckDbAdapter.stmtCache), i.e. leaks memory.
     private boolean dynamicFilteringEnabled;
@@ -466,6 +467,20 @@ public class ArrowFlightConfig
     public ArrowFlightConfig setEndpointReadParallelism(int endpointReadParallelism)
     {
         this.endpointReadParallelism = endpointReadParallelism;
+        return this;
+    }
+
+    public boolean isAggregationSortedMergeEnabled()
+    {
+        return aggregationSortedMergeEnabled;
+    }
+
+    @Config("arrow-flight.aggregation-sorted-merge.enabled")
+    @ConfigDescription("Ask the server for grouped aggregation results sorted by the GROUP BY columns, so the groups of "
+            + "several Flight nodes are merged as sorted streams instead of in one in-memory hash table")
+    public ArrowFlightConfig setAggregationSortedMergeEnabled(boolean aggregationSortedMergeEnabled)
+    {
+        this.aggregationSortedMergeEnabled = aggregationSortedMergeEnabled;
         return this;
     }
 

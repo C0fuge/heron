@@ -174,6 +174,7 @@ return correct results against 50k rows.
 | `arrow-flight.split-min-rows` | `1000000` | no range split smaller than this many rows (after the scan's filters, estimated) |
 | `arrow-flight.split-columns` | *(empty)* | range-split column per table, e.g. `tpch.lineitem=l_orderkey`; default: the first integer/date column |
 | `arrow-flight.endpoint-read-parallelism` | `1` | endpoints of one split read at the same time (session `endpoint_read_parallelism`). The server answers each split's query with one endpoint per Flight node; `1` reads them one after another, so a split keeps one node busy at a time. Plain scans only; failover rules per endpoint are unchanged |
+| `arrow-flight.aggregation-sorted-merge.enabled` | `true` | grouped aggregation pushed to a cluster: each Flight node returns its own partial groups, which the plugin merges. With this on, the server SQL gets `ORDER BY <group columns> NULLS FIRST` and the plugin merges the endpoints as sorted streams (one group in memory, pages emitted as they are merged); off = all groups collected in one hash table first (slow and memory-hungry with millions of groups, e.g. `GROUP BY l_orderkey` in TPC-H q04/q18). Only for GROUP BY columns of integer/decimal/boolean/date/timestamp(6) type; skipped once a query saw a single endpoint. A stream that arrives out of order fails the query (session `aggregation_sorted_merge_enabled`) |
 
 ## Limitations / TODO
 

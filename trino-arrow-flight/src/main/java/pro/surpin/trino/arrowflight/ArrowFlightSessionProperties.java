@@ -26,6 +26,7 @@ public final class ArrowFlightSessionProperties
     public static final String DYNAMIC_FILTERING_WAIT_TIMEOUT_MS = "dynamic_filtering_wait_timeout_ms";
     public static final String DYNAMIC_FILTERING_MAX_VALUES = "dynamic_filtering_max_values";
     public static final String ENDPOINT_READ_PARALLELISM = "endpoint_read_parallelism";
+    public static final String AGGREGATION_SORTED_MERGE_ENABLED = "aggregation_sorted_merge_enabled";
 
     private final List<PropertyMetadata<?>> properties;
 
@@ -52,7 +53,9 @@ public final class ArrowFlightSessionProperties
                 integerProperty(DYNAMIC_FILTERING_MAX_VALUES,
                         "Largest IN list a join dynamic filter becomes in the server SQL", config.getDynamicFilteringMaxValues(), false),
                 integerProperty(ENDPOINT_READ_PARALLELISM,
-                        "Endpoints (Flight nodes) of one split read at the same time", config.getEndpointReadParallelism(), false));
+                        "Endpoints (Flight nodes) of one split read at the same time", config.getEndpointReadParallelism(), false),
+                booleanProperty(AGGREGATION_SORTED_MERGE_ENABLED,
+                        "Merge the groups of several Flight nodes as streams sorted by the server", config.isAggregationSortedMergeEnabled(), false));
     }
 
     public List<PropertyMetadata<?>> getSessionProperties()
@@ -102,6 +105,11 @@ public final class ArrowFlightSessionProperties
     public static int getEndpointReadParallelism(ConnectorSession session)
     {
         return Math.max(1, session.getProperty(ENDPOINT_READ_PARALLELISM, Integer.class));
+    }
+
+    public static boolean isAggregationSortedMergeEnabled(ConnectorSession session)
+    {
+        return session.getProperty(AGGREGATION_SORTED_MERGE_ENABLED, Boolean.class);
     }
 
     public static boolean isDynamicFilteringEnabled(ConnectorSession session)

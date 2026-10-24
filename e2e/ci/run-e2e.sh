@@ -238,6 +238,43 @@ for i in "${!TOPN_QUERIES[@]}"; do
 done
 grep -m1 'topN=' "$OUT/topn/0-explain.txt" | cut -c1-300 || true
 
+# Grouped aggregation merge: with several endpoints the plugin merges their partial groups. Sorted merge (default:
+# the server orders the groups, the plugin merges streams) and the old hash merge must give the same answers;
+# times per setting go to aggmerge-times.tsv (INFO: STATUS "q04 slow on 3 nodes"). EXPLAIN must show the
+# aggregation in the scan, otherwise the check proves nothing.
+log "aggregation merge: sorted vs hash"
+mkdir -p "$OUT/aggmerge"
+AGGMERGE_QUERIES=(q04 q18 groups)
+AGGMERGE_GROUPS_SQL='SELECT count(*), sum(c), checksum(s) FROM (SELECT l_orderkey, count(*) AS c, sum(l_quantity) AS s FROM lineitem GROUP BY l_orderkey)'
+aggmerge_run() {  # sorted|hash name
+  local t0 args; t0=$(date +%s.%N)
+  if [ "$2" = groups ]; then args=(--execute "$AGGMERGE_GROUPS_SQL"); else args=(-f "/queries/$2.sql"); fi
+  docker exec trino trino --catalog flight --schema tpch --source "e2e-aggmerge-$2-$1" \
+    --session "flight.aggregation_sorted_merge_enabled=$([ "$1" = sorted ] && echo true || echo false)" \
+    --output-format TSV "${args[@]}" > "$OUT/aggmerge/$2-$1.tsv" 2> "$OUT/aggmerge/$2-$1.err" || rm -f "$OUT/aggmerge/$2-$1.tsv"
+  printf '%.2f' "$(echo "$(date +%s.%N) - $t0" | bc)"
+}
+printf 'query\tresult\tdetail\n' > "$OUT/aggmerge-summary.tsv"
+printf 'query\thash_s\tsorted_s\thash2_s\tsorted2_s\n' > "$OUT/aggmerge-times.tsv"
+docker exec trino trino --catalog flight --schema tpch --execute "EXPLAIN $AGGMERGE_GROUPS_SQL" > "$OUT/aggmerge/groups-explain.txt" 2>&1 || true
+for name in "${AGGMERGE_QUERIES[@]}"; do
+  h1=$(aggmerge_run hash "$name"); s1=$(aggmerge_run sorted "$name")
+  h2=$(aggmerge_run hash "$name"); s2=$(aggmerge_run sorted "$name")
+  if [ ! -f "$OUT/aggmerge/$name-hash.tsv" ] || [ ! -f "$OUT/aggmerge/$name-sorted.tsv" ]; then
+    result=FAIL; detail="error: $(cat "$OUT/aggmerge/$name-sorted.err" "$OUT/aggmerge/$name-hash.err" 2>/dev/null | grep -m1 -E 'failed|ERROR' | cut -c1-300 || true)"
+  elif ! cmp -s "$OUT/aggmerge/$name-hash.tsv" "$OUT/aggmerge/$name-sorted.tsv"; then
+    result=FAIL; detail="answers differ"
+  elif [ "$name" = groups ] && ! grep -q 'groupBy=' "$OUT/aggmerge/groups-explain.txt"; then
+    result=FAIL; detail="equal, but EXPLAIN shows no pushed aggregation"
+  else
+    result=OK; detail="$(wc -l < "$OUT/aggmerge/$name-sorted.tsv") rows equal: $(head -c 120 "$OUT/aggmerge/$name-sorted.tsv" | tr '\t\n' '  ')"
+  fi
+  [ "$result" = OK ] || status=1
+  printf '%s\t%s\t%s\n' "$name" "$result" "$detail" | tee -a "$OUT/aggmerge-summary.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$h1" "$s1" "$h2" "$s2" | tee -a "$OUT/aggmerge-times.tsv"
+done
+grep -m1 'groupBy=' "$OUT/aggmerge/groups-explain.txt" | cut -c1-300 || true
+
 # Dynamic filters (off by default): TPC-H joins with flight.dynamic_filtering_enabled must still equal the DuckDB
 # reference, with the default IN-list cap (on: 1000 values, more become the [min, max] span) and a large one
 # (big: DF_BIG_VALUES, plus Trino's enable_large_dynamic_filters so Trino itself keeps up to ~100k distinct keys). Rows the scans read (Trino physicalInputPositions = rows the plugin got from the server) and

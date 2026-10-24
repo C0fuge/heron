@@ -63,6 +63,19 @@ class SqlQueryBuilderTest
     }
 
     @Test
+    void sortedGroupsAddOrderByGroupingColumnsNullsFirst()
+    {
+        ArrowFlightColumnHandle count = new ArrowFlightColumnHandle("afagg0", BIGINT);
+        ArrowFlightTableHandle handle = table("", ID, NAME).withAggregation(new Aggregation(List.of(ID, NAME),
+                List.of(new AggregateColumn(AggregateColumn.Function.COUNT_STAR, Optional.empty(), count))));
+        assertEquals("SELECT id, name, count(*) AS afagg0 FROM test_schema.test_table GROUP BY id, name",
+                SqlQueryBuilder.buildAggregationSql(handle, List.of()));
+        assertEquals("SELECT id, name, count(*) AS afagg0 FROM test_schema.test_table WHERE id > 1 GROUP BY id, name "
+                        + "ORDER BY id ASC NULLS FIRST, name ASC NULLS FIRST",
+                SqlQueryBuilder.buildAggregationSql(handle, List.of("id > 1"), true));
+    }
+
+    @Test
     void unconstrainedTableHasNoWhere()
     {
         ArrowFlightTableHandle handle = new ArrowFlightTableHandle("s", "t", ImmutableList.of(ID), "");

@@ -19,10 +19,11 @@ public final class ArrowFlightPageSource
             io.trino.spi.connector.DynamicFilter dynamicFilter,
             int dynamicFilterWaitMillis,
             int dynamicFilterMaxValues,
-            int endpointParallelism)
+            int endpointParallelism,
+            boolean sortedAggregationMerge)
     {
         super(client, typeConverter, table, split, columns, dynamicFilter, dynamicFilterWaitMillis, dynamicFilterMaxValues,
-                endpointParallelism);
+                endpointParallelism, sortedAggregationMerge);
     }
 
     @Override

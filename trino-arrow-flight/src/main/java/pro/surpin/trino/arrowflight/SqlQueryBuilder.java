@@ -103,6 +103,15 @@ public final class SqlQueryBuilder
 
     public static String buildAggregationSql(ArrowFlightTableHandle table, List<String> extraConjuncts)
     {
+        return buildAggregationSql(table, extraConjuncts, false);
+    }
+
+    /**
+     * {@code sortedGroups}: also {@code ORDER BY} the grouping columns (NULLS FIRST), so that the partial groups of
+     * several endpoints can be merged as sorted streams ({@link AggregationReader.SortedMerger}).
+     */
+    public static String buildAggregationSql(ArrowFlightTableHandle table, List<String> extraConjuncts, boolean sortedGroups)
+    {
         Aggregation aggregation = table.getAggregation().orElseThrow();
         String q = table.getIdentifierQuote();
         List<String> select = new ArrayList<>();
@@ -138,6 +147,11 @@ public final class SqlQueryBuilder
             sql.append(" GROUP BY ").append(aggregation.getGroupingColumns().stream()
                     .map(c -> quoteIdentifier(c.getColumnName(), q))
                     .collect(Collectors.joining(", ")));
+            if (sortedGroups) {
+                sql.append(" ORDER BY ").append(aggregation.getGroupingColumns().stream()
+                        .map(c -> quoteIdentifier(c.getColumnName(), q) + " ASC NULLS FIRST")
+                        .collect(Collectors.joining(", ")));
+            }
         }
         return sql.toString();
     }
