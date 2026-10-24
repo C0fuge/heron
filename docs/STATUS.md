@@ -209,6 +209,62 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **Stand answers 2026-10-23 (local stand agent; split count / parallelism, TopN, dynamic filters, statement cache,
+  collation).** Setup: 3-node HDFS cluster (REPL 2, 512 MB blocks, TPC-H SF10), server **int7** (sha256 2b9595ab…06fa) on
+  each node with the stand's flags (`-Xmx2g`, `duckDbMemoryLimit=1GB`, `duckDbThreads=2`, 4 GB container), partial mode;
+  Trino 455 single node, plugin = CI artifact of run 39914348258 (e0ebab5, the last plugin code change), **8 GB heap**
+  (4 GB and 6 GB both failed q18 with `Java heap space`). Times = median of 3 warm runs after one warm-up, settings
+  interleaved per round (s); rows = Trino `physicalInputPositions`. Every answer was identical across settings;
+  full TPC-H 22 = **05bc0dc2713a** with defaults, with the recommended settings (TopN on), with s8/p3 and with large
+  dynamic filters.
+  - Split count / endpoint read parallelism (`s` = `flight.split_count`, `p` = `flight.endpoint_read_parallelism`):
+
+    | query | s1 p1 | s4 p1 (default) | s8 p1 | s1 p3 | s4 p3 | s8 p3 |
+    |---|---|---|---|---|---|---|
+    | full-scan `checksum(ROW(16 cols))` | 43.05 | 13.71 | 11.64 | 42.81 | 13.70 | 11.85 |
+    | q03 | 3.11 | 1.66 | 2.01 | 2.02 | 1.70 | 2.05 |
+    | q18 | 11.10 | 7.37 | 7.92 | 11.91 | 7.45 | 10.08 |
+
+    Rows read equal in all settings (59,986,052 / 39,923,968 / 91,486,052). One split is 3x slower on the scan (one
+    Trino driver consumes the split; reading its 3 endpoints in parallel does not change that: 43.05 vs 42.81). 8 splits
+    help only the bare scan (−15 %) and cost q03 +21 % and q18 +7 % (s8 p3 q18 +37 %). Parallelism 3 helps only with one
+    split (q03 3.11 → 2.02). **Recommended defaults: keep `split-count` 4 and `endpoint-read-parallelism` 1.** Full suite
+    s8 p3: 52.3 s vs 48.9 s default (sum of medians).
+  - TopN pushdown (`flight.topn_pushdown_enabled` off / on): `SELECT l_orderkey, l_linenumber, l_extendedprice FROM
+    lineitem ORDER BY l_extendedprice DESC, l_orderkey, l_linenumber LIMIT 10` **0.86 → 0.26 s**, rows 59,986,052 → 100
+    (80 in one run; ≤ 10 per split endpoint); q03 1.86 / 1.75, q10 1.54 / 1.50, q18 9.04 / 6.74 (off range 7.10–9.17:
+    noise) with identical rows read (their TopN sits above a join/aggregation, as expected). Over the network the
+    server-side sort wins, unlike the CI runner. Full suite with it on: 22/22 05bc0dc2713a, 48.7 s (default 48.9 s).
+    **Recommended default: `arrow-flight.topn-pushdown.enabled=true`.**
+  - Dynamic filters (off / on = 1000 values / big = 100000 values + `enable_large_dynamic_filters=true`):
+
+    | query | time off / on / big | rows read off / on / big |
+    |---|---|---|
+    | q02 | 0.48 / 0.44 / 1.07 | 16,207,906 / 16,044,525 / 1,656,923 |
+    | q05 | 3.29 / 3.26 / 2.22 | 63,861,997 / 62,573,983 / 14,617,286 |
+    | q08 | 2.04 / 2.06 / 5.02 | 66,157,068 / 64,950,660 / 5,373,915 |
+    | q09 | 2.97 / 3.06 / 7.17 | 83,194,859 / 83,194,859 / 83,194,456 |
+
+    "on" changes nothing measurable; "big" cuts rows 4–12x on q02/q05/q08 but is faster only on q05 (−33 %) and 2.2–2.5x
+    slower on q02/q08/q09 (DuckDB evaluating 100k-value IN lists); full suite with big 68.5 s vs 48.9 s. **Memory:** in
+    the first big run two of the three servers were OOM-killed by their 4 GB container limit during q08 (later queries
+    failed cleanly "Connection refused" / "server unavailable", no wrong answers); a server's RSS after a q08 is
+    0.6–0.8 GB with filters off and 2.0–3.3 GB with big (6 runs, no growth from run to run, i.e. per-query memory, not
+    a leak). **Recommended defaults: keep `dynamic-filtering.enabled=false`, `max-values` 1000;** do not use the big
+    setting on nodes with ~4 GB.
+  - Statement cache (int7 code, `DuckDbAdapter`): **bounded.** Each Flight worker thread has its own DuckDB
+    connection with an LRU `StatementCache` (`LinkedHashMap` access order) of at most
+    `arrowflight.duckdb.statementCacheSize` / `-DduckDbStatementCacheSize` (default 64) prepared statements; evicted ones
+    are closed; sessions of ended threads are closed every 15 s (server commit 01c156f, 2026-10-14). The Hazelcast
+    `statement-cache` map entries (handles, parameters) have a 10-min TTL. The bound is a count, not bytes: 64 big
+    dynamic-filter texts per thread are kept, but the repeated-run test above showed no growth.
+  - Collation: **binary.** The server sets no collation (no `default_collation`, no `COLLATE` in the code);
+    `current_setting('default_collation')` = `''`; clients cannot change it (lockdown on by default →
+    `lock_configuration = true`; `SET default_collation = 'nocase'` → "Only queries are allowed, not SET"). Test on
+    the stand: `ORDER BY s` over 'b','B','a','A','e','Z','_','aa','a ','~', chr(127), chr(200), chr(228), chr(233),
+    chr(8364) gives `A|B|Z|_|a|a |aa|b|e|~|DEL|È|ä|é|€` on the server, **identical** to Trino's order of the same
+    values (code point / UTF-8 byte order). So VARCHAR sort keys could be pushed in TopN (code change + unit test; holds
+    while the server keeps lockdown on).
 - **Dependency ceiling from Arrow 18.1** (session 20): gRPC cannot go past 1.78.x (and so Netty stays 4.1, protobuf 3.25)
   until Arrow Java is upgraded (Arrow 19.0.0 uses gRPC 1.79, Netty 4.2.9, protobuf 4.33). Upgrade Arrow (bigger change:
   memory/Flight API, e2e on all versions), or stay on 18.1 with the current pins? Also: the zip bundles
@@ -219,16 +275,16 @@ Kept up to date after every work session so work can be resumed from this reposi
   the plugin's "no retry after data" rule. Add a throttled-network variant for complete mode, or leave it as INFO?
   (Session 14: with `iceberg-warehouse=s3`, complete mode, the 9 s kill did hit after data — run 39949173080; a hit is
   possible but not reliable.)
-- **Split count / endpoint read parallelism** (session 9): on the CI runner (everything on 4 vCPUs) neither more range splits
+- **Split count / endpoint read parallelism** (session 9; **answered on the stand 2026-10-23, see "Stand answers" above**): on the CI runner (everything on 4 vCPUs) neither more range splits
   nor parallel endpoint reads give a clear gain; parallel reads helped the 3-server full scan (16.0 → 12.8 s) and q03. On
   the stand, try `SET SESSION flight.endpoint_read_parallelism = 3` (3 nodes) and `flight.split_count` 1/4/8 on SF10
   (e.g. the full-scan checksum and q03/q18) and tell whether to change the defaults (1 and 4).
-- **Dynamic filters** (session 8): with them on, every query's SQL text differs. The config comment says the server
+- **Dynamic filters** (session 8; **answered on the stand 2026-10-23, see "Stand answers" above**): with them on, every query's SQL text differs. The config comment says the server
   keeps a prepared statement per distinct text forever (`DuckDbAdapter.stmtCache`). Is that cache bounded in int4/int6?
   If yes, dynamic filtering could be tried on the stand (`arrow-flight.dynamic-filtering.enabled=true`; with Trino's
   `enable_large_dynamic_filters=true` and `arrow-flight.dynamic-filtering.max-values=100000` it cut rows read 3–12× on
   q02/q05/q08/q09 at SF1, answers exact). Measurements: Next steps item 4.
-- **TopN pushdown default** (session 7): implemented and green on int4 (partial 1+3 servers, complete 3 servers — see
+- **TopN pushdown default** (session 7; **answered on the stand 2026-10-23, see "Stand answers" above**): implemented and green on int4 (partial 1+3 servers, complete 3 servers — see
   Log) but **off by default** because the README said the server had no `ORDER BY`/`LIMIT`. The int4 server does
   accept them. Enable by default on the stand (`arrow-flight.topn-pushdown.enabled=true`) once you have tried it?
   Session 15 measurement (Next steps item 3): rows read drop to n per split (6M → 40), but on the CI runner the two
@@ -401,3 +457,6 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-10-23 (cloud session 24): nothing actionable — Next steps hold only items that wait on Open questions; last runs all
   green (latest 40014711279). No CI run, no code change. Added the "Queue empty" note to Next steps so later sessions stop early
   (≥ 850 Actions minutes used this month). Invariants untouched.
+- 2026-10-23 (local stand agent): open questions on split count / endpoint parallelism, TopN, dynamic filters,
+  statement cache and collation measured on the 3-node HDFS SF10 stand with server int7 and plugin e0ebab5 (CI run
+  39914348258); answers + recommended defaults in Open questions "Stand answers 2026-10-23". No code changed, no CI run.
