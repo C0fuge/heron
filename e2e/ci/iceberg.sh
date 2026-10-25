@@ -229,6 +229,12 @@ ice_time_travel() {
     ice_out time-travel OK "VERSION AS OF first/last snapshot 5000/6000 rows, TIMESTAMP AS OF '$at UTC' 5000, versioned scan = parquet (4900 rows)"
   else
     ice_out time-travel FAIL "first $first: $(echo $r1 | cut -c1-200) | last $last: $(echo $r2 | cut -c1-200) | at '$at': $(echo $r3 | cut -c1-200) | scan: $(echo $scan_v | cut -c1-200) vs $(echo $scan_p)"
+    # diagnostics: the full error and what the server logged for these statements
+    { echo "--- trino error (first snapshot)"; echo "$r1" | head -5 | cut -c1-1500
+      local h; for h in ${HOSTS//,/ }; do
+        echo "--- $h log lines naming AS OF / ParserException"
+        docker logs "$h" 2>&1 | grep -E -B2 -A6 'AS OF|ParserException' | head -60 | cut -c1-1500 || true; done
+    } 2>&1 | tee "$OUT/iceberg-time-travel-diagnostics.txt"
   fi
   # a version on a table that is not an Iceberg table must not be ignored silently
   plain=$(tq "SELECT count(*) FROM tpch.customer FOR VERSION AS OF $first")
