@@ -122,6 +122,13 @@ arrow-flight.host=flight1
 arrow-flight.port=32010
 arrow-flight.bearer-token=$TOKEN
 CAT
+# Same servers, but a list of coordinators: used by the coordinator-down check (3 servers).
+cat > "$WORK/etc/catalog/flighth.properties" <<CAT
+connector.name=arrow_flight
+arrow-flight.hosts=flight1,flight2:32010,flight3
+arrow-flight.port=32010
+arrow-flight.bearer-token=$TOKEN
+CAT
 cat > "$WORK/etc/jvm.config" <<JVM
 -server
 -Xmx3G
@@ -134,6 +141,7 @@ JVM
 docker run -d --name trino --network $NET -p 127.0.0.1:8080:8080 \
   -v "$WORK/plugin":/usr/lib/trino/plugin/arrow-flight:ro \
   -v "$WORK/etc/catalog/flight.properties":/etc/trino/catalog/flight.properties:ro \
+  -v "$WORK/etc/catalog/flighth.properties":/etc/trino/catalog/flighth.properties:ro \
   -v "$WORK/etc/jvm.config":/etc/trino/jvm.config:ro \
   -v "$REPO/e2e/ci/queries":/queries:ro \
   "trinodb/trino:$TRINO_VERSION" >/dev/null
@@ -146,7 +154,7 @@ docker exec trino trino --execute 'SHOW SCHEMAS FROM flight' | tee "$OUT/schemas
 
 run_query() {  # query-name out-dir
   local start; start=$(date +%s.%N)
-  if docker exec trino trino --catalog flight --schema "${QUERY_SCHEMA:-tpch}" --output-format TSV -f "/queries/$1.sql" \
+  if docker exec trino trino --catalog "${QUERY_CATALOG:-flight}" --schema "${QUERY_SCHEMA:-tpch}" --output-format TSV -f "/queries/$1.sql" \
        > "$2/$1.tsv" 2> "$2/$1.err"; then
     rm -f "$2/$1.err"
   else
@@ -602,6 +610,28 @@ if [ "$SERVERS" -ge 3 ]; then
     for q in $ICEBERG_FAILOVER_QUERIES; do QUERY_SCHEMA=ice run_query "$q" "$OUT/two-killed-ice"; done
     check_exact_or_error "$OUT/two-killed-ice" "$OUT/two-killed-ice-summary.tsv" $ICEBERG_FAILOVER_QUERIES
   fi
+
+  # The catalog's first coordinator lost: catalog flighth (arrow-flight.hosts=flight1,flight2,flight3)
+  # connected to flight1 by a first query, then flight1 is killed. Every answer must be exact (a
+  # clean error fails too: flight2 and flight3 are up); the Trino log must show the switch.
+  log "failover: coordinator flight1 down, catalog with a host list"
+  restart_lost
+  mkdir -p "$OUT/coordinator-down/warm" "$OUT/coordinator-down/after"
+  QUERY_CATALOG=flighth run_query q06 "$OUT/coordinator-down/warm"
+  check_exact_or_error "$OUT/coordinator-down/warm" "$OUT/coordinator-down-warm-summary.tsv" q06
+  mark_log
+  docker kill flight1 >/dev/null
+  sleep "${KILL_SETTLE_SECONDS:-10}"
+  for q in $FAILOVER_QUERIES; do QUERY_CATALOG=flighth run_query "$q" "$OUT/coordinator-down/after"; done
+  check_exact_or_error "$OUT/coordinator-down/after" "$OUT/coordinator-down-summary.tsv" $FAILOVER_QUERIES
+  log_since_mark | grep -E 'Flight coordinator' | head -5 | cut -c1-400 | tee "$OUT/coordinator-down/lines.txt" || true
+  [ -f "$OUT/coordinator-down/warm/q06.tsv" ] || { echo "coordinator-down: warm-up q06 failed"; status=1; }
+  for q in $FAILOVER_QUERIES; do
+    [ -f "$OUT/coordinator-down/after/$q.tsv" ] \
+      || { echo "coordinator-down: $q failed: $(head -c 300 "$OUT/coordinator-down/after/$q.err")"; status=1; }
+  done
+  grep -q 'Using Flight coordinator flight2' "$OUT/coordinator-down/lines.txt" \
+    || { echo "coordinator-down: no switch to flight2 in the Trino log"; status=1; }
   save_logs
 fi
 exit $status

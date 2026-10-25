@@ -1,5 +1,8 @@
 package pro.surpin.arrowflight.common;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 
 import static java.util.Objects.requireNonNull;
@@ -11,8 +14,12 @@ import static java.util.Objects.requireNonNull;
  */
 public final class FlightConfig
 {
+    /** A coordinator to connect to; {@code host} without brackets. */
+    public record Coordinator(String host, int port) {}
+
     private final String host;
     private final int port;
+    private final List<Coordinator> coordinators;
     private final boolean tlsEnabled;
     private final boolean tlsVerifyServer;
     private final Optional<String> tlsTruststorePath;
@@ -33,6 +40,7 @@ public final class FlightConfig
     {
         this.host = requireNonNull(b.host, "host is null");
         this.port = b.port;
+        this.coordinators = coordinators(b.host, b.port, b.alternateHosts);
         this.tlsEnabled = b.tlsEnabled;
         this.tlsVerifyServer = b.tlsVerifyServer;
         this.tlsTruststorePath = Optional.ofNullable(b.tlsTruststorePath);
@@ -61,8 +69,71 @@ public final class FlightConfig
         return new Builder(host);
     }
 
+    /**
+     * Parses {@code host}, {@code host:port} or {@code [ipv6]:port}; the port defaults to
+     * {@code defaultPort}. Entries naming the same host and port twice are kept once.
+     */
+    private static List<Coordinator> coordinators(String host, int defaultPort, List<String> alternateHosts)
+    {
+        LinkedHashSet<Coordinator> result = new LinkedHashSet<>();
+        result.add(new Coordinator(host, defaultPort));
+        for (String entry : alternateHosts) {
+            result.add(parseCoordinator(entry, defaultPort));
+        }
+        return List.copyOf(result);
+    }
+
+    public static Coordinator parseCoordinator(String entry, int defaultPort)
+    {
+        String value = entry.trim();
+        String host = value;
+        int port = defaultPort;
+        if (value.startsWith("[")) {
+            int end = value.indexOf(']');
+            if (end < 0) {
+                throw new IllegalArgumentException("Malformed Flight host: " + entry);
+            }
+            host = value.substring(1, end);
+            String rest = value.substring(end + 1);
+            if (!rest.isEmpty()) {
+                if (!rest.startsWith(":")) {
+                    throw new IllegalArgumentException("Malformed Flight host: " + entry);
+                }
+                port = parsePort(rest.substring(1), entry);
+            }
+        }
+        else if (value.indexOf(':') >= 0 && value.indexOf(':') == value.lastIndexOf(':')) {
+            host = value.substring(0, value.indexOf(':'));
+            port = parsePort(value.substring(value.indexOf(':') + 1), entry);
+        }
+        if (host.isEmpty()) {
+            throw new IllegalArgumentException("Malformed Flight host: " + entry);
+        }
+        return new Coordinator(host, port);
+    }
+
+    private static int parsePort(String value, String entry)
+    {
+        try {
+            int port = Integer.parseInt(value);
+            if (port < 1 || port > 65535) {
+                throw new NumberFormatException();
+            }
+            return port;
+        }
+        catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Malformed port in Flight host: " + entry);
+        }
+    }
+
+    /** The first coordinator's host. */
     public String getHost() { return host; }
     public int getPort() { return port; }
+    /**
+     * Coordinators in the order they are tried: the configured host first, then the alternates.
+     * The session moves to the next one only when the current one cannot be reached.
+     */
+    public List<Coordinator> getCoordinators() { return coordinators; }
     public boolean isTlsEnabled() { return tlsEnabled; }
     public boolean isTlsVerifyServer() { return tlsVerifyServer; }
     public Optional<String> getTlsTruststorePath() { return tlsTruststorePath; }
@@ -88,6 +159,7 @@ public final class FlightConfig
     {
         private final String host;
         private int port = 32010;
+        private List<String> alternateHosts = List.of();
         private boolean tlsEnabled;
         private boolean tlsVerifyServer = true;
         private String tlsTruststorePath;
@@ -110,6 +182,18 @@ public final class FlightConfig
         }
 
         public Builder port(int port) { this.port = port; return this; }
+        /** Further coordinators ({@code host} or {@code host:port}) tried when the ones before cannot be reached. */
+        public Builder alternateHosts(List<String> v)
+        {
+            List<String> hosts = new ArrayList<>();
+            for (String entry : v) {
+                if (entry != null && !entry.isBlank()) {
+                    hosts.add(entry);
+                }
+            }
+            this.alternateHosts = List.copyOf(hosts);
+            return this;
+        }
         public Builder tlsEnabled(boolean v) { this.tlsEnabled = v; return this; }
         public Builder tlsVerifyServer(boolean v) { this.tlsVerifyServer = v; return this; }
         public Builder tlsTruststorePath(String v) { this.tlsTruststorePath = emptyToNull(v); return this; }

@@ -3,10 +3,12 @@ package pro.surpin.trino.arrowflight;
 import io.airlift.configuration.Config;
 import io.airlift.configuration.ConfigDescription;
 import io.airlift.configuration.ConfigSecuritySensitive;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotNull;
 import pro.surpin.arrowflight.common.FlightConfig;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -16,6 +18,8 @@ import java.util.Optional;
 public class ArrowFlightConfig
 {
     private String host;
+    // Alternative to host: coordinators tried in order while the ones before cannot be reached.
+    private List<String> hosts = List.of();
     private int port = 32010;
 
     private boolean tlsEnabled;
@@ -62,7 +66,6 @@ public class ArrowFlightConfig
     // statement per distinct SQL text forever (DuckDbAdapter.stmtCache), i.e. leaks memory.
     private boolean dynamicFilteringEnabled;
 
-    @NotNull
     public String getHost()
     {
         return host;
@@ -74,6 +77,35 @@ public class ArrowFlightConfig
     {
         this.host = host;
         return this;
+    }
+
+    public List<String> getHosts()
+    {
+        return hosts;
+    }
+
+    @Config("arrow-flight.hosts")
+    @ConfigDescription("Comma-separated Arrow Flight SQL coordinators (host or host:port), tried in order "
+            + "while the ones before cannot be reached; instead of arrow-flight.host")
+    public ArrowFlightConfig setHosts(String hosts)
+    {
+        List<String> list = new ArrayList<>();
+        if (hosts != null) {
+            for (String entry : hosts.split(",")) {
+                if (!entry.isBlank()) {
+                    list.add(entry.trim());
+                }
+            }
+        }
+        this.hosts = List.copyOf(list);
+        return this;
+    }
+
+    @AssertTrue(message = "Set exactly one of arrow-flight.host and arrow-flight.hosts")
+    public boolean isCoordinatorConfigured()
+    {
+        boolean single = host != null && !host.isBlank();
+        return single != !hosts.isEmpty();
     }
 
     @Min(1)
@@ -487,8 +519,22 @@ public class ArrowFlightConfig
     /** Translate the Trino/airlift catalog properties into the engine-neutral common config. */
     public FlightConfig toFlightConfig()
     {
-        return FlightConfig.builder(host)
-                .port(port)
+        String firstHost = host;
+        int firstPort = port;
+        List<String> alternates = new ArrayList<>();
+        if (!hosts.isEmpty()) {
+            // arrow-flight.port is the default for every entry without its own port
+            FlightConfig.Coordinator first = FlightConfig.parseCoordinator(hosts.get(0), port);
+            firstHost = first.host();
+            firstPort = first.port();
+            for (String entry : hosts.subList(1, hosts.size())) {
+                FlightConfig.Coordinator c = FlightConfig.parseCoordinator(entry, port);
+                alternates.add((c.host().indexOf(':') >= 0 ? "[" + c.host() + "]" : c.host()) + ":" + c.port());
+            }
+        }
+        return FlightConfig.builder(firstHost)
+                .port(firstPort)
+                .alternateHosts(alternates)
                 .tlsEnabled(tlsEnabled)
                 .tlsVerifyServer(tlsVerifyServer)
                 .tlsTruststorePath(tlsTruststorePath.orElse(null))

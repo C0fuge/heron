@@ -3,6 +3,8 @@ connector.name=arrow_flight
 
 arrow-flight.host=localhost
 arrow-flight.port=32010
+# Or several coordinators of one cluster, tried in order while the ones before cannot be reached:
+# arrow-flight.hosts=flight1,flight2,flight3:32010
 
 # Auth: use EITHER user+password (BasicAuth) OR bearer-token.
 arrow-flight.user=test-user

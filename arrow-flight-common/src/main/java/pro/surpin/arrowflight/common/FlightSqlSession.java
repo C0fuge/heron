@@ -66,6 +66,8 @@ import static java.util.Objects.requireNonNull;
  *
  * <p>The coordinator connection is opened lazily on first use, so a temporarily unreachable
  * server does not break connector/catalog creation.
+ * With several coordinators configured, the session stays on the one it reached and connects to
+ * the next only when the current one cannot be reached (never on a server or credentials error).
  *
  * <p>A data stream is read from the endpoint's locations in order: when the first cannot be
  * reached before any data was read, the next one is tried (see {@link FlightDataStream}). Data
@@ -126,6 +128,8 @@ public class FlightSqlSession
     // Bumped when a location is found unreachable: stream connections to it opened before are not reused.
     private final ConcurrentMap<String, AtomicInteger> locationGenerations = new ConcurrentHashMap<>();
     private volatile FlightClient coordinatorClient;
+    // The coordinator in use (index into FlightConfig.getCoordinators()); kept until it cannot be reached.
+    private volatile int coordinatorIndex;
     private volatile FlightSqlClient sqlClient;
     private volatile CredentialCallOption authOption;
 
@@ -140,21 +144,58 @@ public class FlightSqlSession
         if (connected) {
             return;
         }
-        Location location = config.isTlsEnabled()
-                ? Location.forGrpcTls(config.getHost(), config.getPort())
-                : Location.forGrpcInsecure(config.getHost(), config.getPort());
+        List<FlightConfig.Coordinator> coordinators = config.getCoordinators();
+        RuntimeException failure = null;
+        // Starting with the one in use; the next is tried only when this one cannot be reached at all.
+        for (int i = 0; i < coordinators.size(); i++) {
+            int index = (coordinatorIndex + i) % coordinators.size();
+            FlightConfig.Coordinator coordinator = coordinators.get(index);
+            Location location = config.isTlsEnabled()
+                    ? Location.forGrpcTls(coordinator.host(), coordinator.port())
+                    : Location.forGrpcInsecure(coordinator.host(), coordinator.port());
+            FlightClient client = buildClient(location, config.getPassword().isPresent());
+            try {
+                this.authOption = authenticate(client, coordinators.size() > 1);
+            }
+            catch (RuntimeException e) {
+                closeQuietly(client);
+                if (failure == null) {
+                    failure = e;
+                }
+                else {
+                    failure.addSuppressed(e);
+                }
+                if (!isCoordinatorUnreachable(e) || i + 1 == coordinators.size()) {
+                    throw failure;
+                }
+                FlightConfig.Coordinator next = coordinators.get((index + 1) % coordinators.size());
+                LOG.warn("Flight coordinator {}:{} cannot be reached ({}); trying {}:{}",
+                        coordinator.host(), coordinator.port(), e.getMessage(), next.host(), next.port());
+                continue;
+            }
+            if (index != coordinatorIndex) {
+                LOG.info("Using Flight coordinator {}:{}", coordinator.host(), coordinator.port());
+                coordinatorIndex = index;
+            }
+            this.coordinatorClient = client;
+            this.sqlClient = new FlightSqlClient(client);
+            this.connected = true;
+            return;
+        }
+    }
 
-        FlightClient client = buildClient(location, config.getPassword().isPresent());
-        try {
-            this.authOption = authenticate(client);
+    // Connection refused/unresolved, UNAVAILABLE, or no handshake answer within its deadline (a host that is gone).
+    private static boolean isCoordinatorUnreachable(Throwable e)
+    {
+        if (FlightDataStream.isUnreachable(e)) {
+            return true;
         }
-        catch (RuntimeException e) {
-            closeQuietly(client);
-            throw e;
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof FlightRuntimeException f) {
+                return f.status().code() == FlightStatusCode.TIMED_OUT;
+            }
         }
-        this.coordinatorClient = client;
-        this.sqlClient = new FlightSqlClient(client);
-        this.connected = true;
+        return false;
     }
 
     /**
@@ -180,7 +221,8 @@ public class FlightSqlSession
         else {
             invalidateLocation(coordinatorUri());
         }
-        LOG.info("Reconnecting to Flight server {}:{}", config.getHost(), config.getPort());
+        FlightConfig.Coordinator coordinator = currentCoordinator();
+        LOG.info("Reconnecting to Flight server {}:{}", coordinator.host(), coordinator.port());
     }
 
     private static boolean isConnectionLost(Throwable e)
@@ -336,20 +378,31 @@ public class FlightSqlSession
      */
     List<String> streamLocations(List<String> locationUris)
     {
-        String coordinator = coordinatorUri();
         LinkedHashSet<String> result = new LinkedHashSet<>();
         for (String uri : locationUris) {
-            result.add(isCoordinator(uri) ? coordinator : uri);
+            result.add(configuredCoordinator(uri).map(this::uriOf).orElse(uri));
         }
         if (result.isEmpty()) {
-            result.add(coordinator);
+            result.add(coordinatorUri());
         }
         return List.copyOf(result);
     }
 
-    private String coordinatorUri()
+    private FlightConfig.Coordinator currentCoordinator()
     {
-        return (config.isTlsEnabled() ? "grpc+tls://" : "grpc+tcp://") + config.getHost() + ":" + config.getPort();
+        return config.getCoordinators().get(coordinatorIndex);
+    }
+
+    /** The coordinator in use, as this catalog names it. */
+    String coordinatorUri()
+    {
+        return uriOf(currentCoordinator());
+    }
+
+    private String uriOf(FlightConfig.Coordinator coordinator)
+    {
+        String host = coordinator.host().indexOf(':') >= 0 ? "[" + coordinator.host() + "]" : coordinator.host();
+        return (config.isTlsEnabled() ? "grpc+tls://" : "grpc+tcp://") + host + ":" + coordinator.port();
     }
 
     private int generation(String uri)
@@ -505,10 +558,15 @@ public class FlightSqlSession
         return new StreamClient(FlightGrpcUtils.createFlightClient(allocator, channel), channel);
     }
 
-    private CredentialCallOption authenticate(FlightClient client)
+    private CredentialCallOption authenticate(FlightClient client, boolean deadline)
     {
         List<CallOption> handshakeOptions = new ArrayList<>();
         headerCallOption().ifPresent(handshakeOptions::add);
+        // With other coordinators to try, a host that swallows the connection attempt must not hold the
+        // query for TCP's own timeout; the handshake gets twice the data connections' connect timeout.
+        if (deadline && config.getConnectTimeoutMillis() > 0) {
+            handshakeOptions.add(CallOptions.timeout(2 * config.getConnectTimeoutMillis(), TimeUnit.MILLISECONDS));
+        }
 
         boolean usePassword = config.getPassword().isPresent();
         CredentialCallOption credential = new CredentialCallOption(usePassword
@@ -565,14 +623,22 @@ public class FlightSqlSession
         }
     }
 
-    private boolean isCoordinator(String uri)
+    /** The configured coordinator {@code uri} points at, if any. */
+    private Optional<FlightConfig.Coordinator> configuredCoordinator(String uri)
     {
         try {
             URI parsed = URI.create(uri);
-            return config.getHost().equalsIgnoreCase(parsed.getHost()) && config.getPort() == parsed.getPort();
+            String host = parsed.getHost();
+            if (host == null) {
+                return Optional.empty();
+            }
+            String bare = host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+            return config.getCoordinators().stream()
+                    .filter(c -> c.host().equalsIgnoreCase(bare) && c.port() == parsed.getPort())
+                    .findFirst();
         }
         catch (RuntimeException e) {
-            return false;
+            return Optional.empty();
         }
     }
 
