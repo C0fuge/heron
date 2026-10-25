@@ -621,5 +621,5 @@ Kept up to date after every work session so work can be resumed from this reposi
   (`e2e/ci/flight_probe.py`; runs 40225756304, 40226815637): the server refuses the clause (jOOQ "Feature only supported in pro
   edition"; complete mode: DuckDB syntax error) — KNOWN for c3b276054cc3, Open question filed. e2e default stays 4eaab052deaf.
   ~110 Actions minutes. Invariants hold (unversioned queries unchanged; time-travel errors are clean server errors).
-- 2026-10-25 (cloud sessions 51, 52): first Next-steps item (time travel) still blocked on the server (no build newer than
+- 2026-10-25 (cloud sessions 51, 52, 53): first Next-steps item (time travel) still blocked on the server (no build newer than
   c3b276054cc3 in `e2e-assets`, no new maintainer answer); lock taken and released, no CI runs.
