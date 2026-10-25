@@ -93,6 +93,25 @@ Kept up to date after every work session so work can be resumed from this reposi
 > 40145935916 green (1+3 servers). **Stand:** restart one node, run a query within 60 s, and check the Trino log: expected
 > `lost its reused connection … retrying on a new one` and no read from a backup (no +~1 s). Next: (c) a list of
 > coordinator hosts (`arrow-flight.hosts=a,b,c`).
+>
+> (c) **Done (session 42), pending stand check.** New catalog property `arrow-flight.hosts=a,b:port,[ipv6]:port` (instead of
+> `arrow-flight.host`; exactly one of the two; default port `arrow-flight.port`). `FlightSqlSession.ensureConnected` tries the
+> coordinators starting with the one in use and moves to the next only when the current one is unreachable (refused,
+> unresolved, UNAVAILABLE, or TIMED_OUT of the handshake, which gets a deadline of 2 x `connect-timeout-millis` only when
+> several hosts are configured); credentials/server errors are thrown as before, never retried elsewhere. Sticky: the session
+> stays on the new coordinator. Endpoints without locations are read from the coordinator in use; any configured coordinator
+> named in a location is normalized as before. One `arrow-flight.host` = old behaviour (no handshake deadline). Log lines:
+> `Flight coordinator a:32010 cannot be reached (…); trying b:32010`, `Using Flight coordinator b:32010`. Unit tests:
+> `FlightSqlSessionFailoverTest` (21; new: refused first host, lost coordinator moves and stays, silent host given up within the
+> handshake deadline, UNAUTHENTICATED not failed over, location naming, list parsing), `ArrowFlightConfigTest` (3). e2e block
+> `coordinator-down` (3 servers, catalog `flighth` = `flight1,flight2:32010,flight3`): warm-up q06 on flight1, flight1 killed,
+> q01 q03 q05 q06 q18 all exact, switch to flight2 logged. Runs: build 40148691957, e2e 40148691975 green (1+3 servers).
+> **Follow-up found:** the first query after the kill switched only after ~31 s (query 01:13:38, switch 01:14:09): the
+> first coordinator call hangs on the existing connection to the dead host (no keepalive, no deadline on coordinator calls;
+> `docker kill` drops packets, no RST) until gRPC gives up. Same delay with a single host (there it then fails). Next: give
+> the coordinator connection keepalive pings (like data connections; needs a channel built with `NettyChannelBuilder` +
+> the bearer middleware, or a deadline on metadata calls) so a dead coordinator is noticed within ~`connect-timeout-millis`.
+> **Stand:** catalog with `arrow-flight.hosts=<n1>,<n2>,<n3>`, stop n1, run TPC-H q01/q18: exact, and the time to the switch.
 
 > **Queue empty (session 24, 2026-10-23; superseded by the stand note above):** items 1–6 are done and every remaining item-7 follow-up waits on an
 > answer in Open questions (TopN / dynamic-filter / split defaults, Arrow upgrade vs. 18.1 pins, bundle cleanup,
@@ -518,3 +537,10 @@ Kept up to date after every work session so work can be resumed from this reposi
   baseline 9.1 s; answers exact) → delays 60-90 % of the baseline; e2e 40145935916 green 1+3 servers (mid-stream hit after
   data at 8.8 s = clean error; `restarted` exact). ~65 Actions minutes. Invariants hold (retry only before any data, only on
   unreachable errors; server errors and auth unchanged). Next: (c) list of coordinator hosts.
+- 2026-10-25 (cloud session 42): stand follow-up (c), list of coordinator hosts: `arrow-flight.hosts`, failover to the next
+  coordinator only when the current one is unreachable, sticky (details in Next steps). 6 + 3 unit tests (local run of the
+  common module 21/21 too); e2e block `coordinator-down`. Build 40148691957 green, e2e 40148691975 green 1+3 servers
+  (`coordinator-down` 5/5 exact after flight1 killed). ~25 Actions minutes. Invariants hold (single host unchanged; auth and
+  server errors are not retried on another host; data-stream failover untouched). Found: ~31 s until the switch because the
+  coordinator connection has no keepalive → next step. `gh` in the session rejects its token (`GH_TOKEN` invalid); CI was
+  followed through the GitHub MCP tools and the public API.
