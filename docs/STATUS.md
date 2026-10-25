@@ -560,5 +560,5 @@ Kept up to date after every work session so work can be resumed from this reposi
   without the change). Build 40152506378 green, e2e 40152506314 green 1+3 servers; `coordinator-down` first query after the kill
   13.5 s (was ~31 s). ~27 Actions minutes. Invariants hold (single host unchanged; auth and server errors not retried elsewhere;
   data-stream failover untouched). Stand-note items (a)-(c') all wait on stand checks; no new code item queued.
-- 2026-10-25 (cloud session 44): no code item open (stand-note items (a)-(c') wait on stand checks, no new maintainer answer
+- 2026-10-25 (cloud sessions 44, 45): no code item open (stand-note items (a)-(c') wait on stand checks, no new maintainer answer
   or item since session 43); lock taken and released, no CI runs.
