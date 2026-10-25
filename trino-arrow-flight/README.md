@@ -151,7 +151,7 @@ return correct results against 50k rows.
 | Property | Default | Notes |
 |---|---|---|
 | `arrow-flight.host` | – | required unless `arrow-flight.hosts` is set |
-| `arrow-flight.hosts` | – | instead of `arrow-flight.host`: comma-separated coordinators, `host` or `host:port` (`[ipv6]:port`), default port `arrow-flight.port`. Tried in order: the catalog stays on the one it reached and moves to the next only when it cannot be reached (refused, unresolved, UNAVAILABLE, or no handshake answer within 2 x `connect-timeout-millis`); a server or credentials error is never retried elsewhere |
+| `arrow-flight.hosts` | – | instead of `arrow-flight.host`: comma-separated coordinators, `host` or `host:port` (`[ipv6]:port`), default port `arrow-flight.port`. Tried in order: the catalog stays on the one it reached and moves to the next only when it cannot be reached (refused, unresolved, UNAVAILABLE, or no handshake answer within 2 x `connect-timeout-millis`); a server or credentials error is never retried elsewhere. With several hosts the coordinator connection also sends keepalive pings (`keepalive-millis`, answered within `connect-timeout-millis`), so a coordinator that vanishes during a call is given up within ~15 s |
 | `arrow-flight.port` | `32010` | |
 | `arrow-flight.user` | – | BasicAuth user |
 | `arrow-flight.password` | – | BasicAuth password (secret) |

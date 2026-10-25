@@ -622,8 +622,19 @@ if [ "$SERVERS" -ge 3 ]; then
   mark_log
   docker kill flight1 >/dev/null
   sleep "${KILL_SETTLE_SECONDS:-10}"
-  for q in $FAILOVER_QUERIES; do QUERY_CATALOG=flighth run_query "$q" "$OUT/coordinator-down/after"; done
+  # The first query after the kill pays for noticing the dead coordinator: its connection pings every
+  # 10 s and gives up after the 5 s connect timeout (was ~31 s without keepalive, session 42).
+  first_start=$(date +%s.%N)
+  first_done=
+  for q in $FAILOVER_QUERIES; do
+    QUERY_CATALOG=flighth run_query "$q" "$OUT/coordinator-down/after"
+    [ -n "$first_done" ] || first_done=$(echo "$(date +%s.%N) - $first_start" | bc)
+  done
   check_exact_or_error "$OUT/coordinator-down/after" "$OUT/coordinator-down-summary.tsv" $FAILOVER_QUERIES
+  printf 'coordinator-down: first query after the kill took %.1f s\n' "$first_done" | tee "$OUT/coordinator-down/first.txt"
+  if [ "$(echo "$first_done > ${COORDINATOR_SWITCH_MAX_SECONDS:-25}" | bc)" = 1 ]; then
+    echo "coordinator-down: FAIL first query took more than ${COORDINATOR_SWITCH_MAX_SECONDS:-25} s"; status=1
+  fi
   log_since_mark | grep -E 'Flight coordinator' | head -5 | cut -c1-400 | tee "$OUT/coordinator-down/lines.txt" || true
   [ -f "$OUT/coordinator-down/warm/q06.tsv" ] || { echo "coordinator-down: warm-up q06 failed"; status=1; }
   for q in $FAILOVER_QUERIES; do

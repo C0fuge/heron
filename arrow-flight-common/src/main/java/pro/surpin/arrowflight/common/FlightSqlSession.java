@@ -17,6 +17,7 @@ import org.apache.arrow.flight.auth2.BasicAuthCredentialWriter;
 import org.apache.arrow.flight.auth2.BearerCredentialWriter;
 import org.apache.arrow.flight.auth2.ClientBearerHeaderHandler;
 import org.apache.arrow.flight.auth2.ClientIncomingAuthHeaderMiddleware;
+import org.apache.arrow.flight.grpc.ClientInterceptorAdapter;
 import org.apache.arrow.flight.grpc.CredentialCallOption;
 import org.apache.arrow.flight.sql.FlightSqlClient;
 import org.apache.arrow.memory.BufferAllocator;
@@ -67,7 +68,8 @@ import static java.util.Objects.requireNonNull;
  * <p>The coordinator connection is opened lazily on first use, so a temporarily unreachable
  * server does not break connector/catalog creation.
  * With several coordinators configured, the session stays on the one it reached and connects to
- * the next only when the current one cannot be reached (never on a server or credentials error).
+ * the next only when the current one cannot be reached (never on a server or credentials error);
+ * the coordinator connection then sends keepalive pings like a data connection to a cluster.
  *
  * <p>A data stream is read from the endpoint's locations in order: when the first cannot be
  * reached before any data was read, the next one is tried (see {@link FlightDataStream}). Data
@@ -153,7 +155,9 @@ public class FlightSqlSession
             Location location = config.isTlsEnabled()
                     ? Location.forGrpcTls(coordinator.host(), coordinator.port())
                     : Location.forGrpcInsecure(coordinator.host(), coordinator.port());
-            FlightClient client = buildClient(location, config.getPassword().isPresent());
+            FlightClient client = coordinators.size() > 1
+                    ? buildCoordinatorClient(location)
+                    : buildClient(location, config.getPassword().isPresent());
             try {
                 this.authOption = authenticate(client, coordinators.size() > 1);
             }
@@ -514,11 +518,40 @@ public class FlightSqlSession
      */
     private StreamClient buildStreamClient(Location location, boolean keepAlive)
     {
+        Optional<NettyChannelBuilder> builder = channelBuilder(location, keepAlive);
+        if (builder.isEmpty()) {
+            // e.g. grpc+unix: Arrow's own builder knows how to reach it
+            return new StreamClient(buildClient(location, false), null);
+        }
+        ManagedChannel channel = builder.get().build();
+        return new StreamClient(FlightGrpcUtils.createFlightClient(allocator, channel), channel);
+    }
+
+    /**
+     * The connection to one of several configured coordinators: like a data connection with
+     * keepalive pings (a cluster's server accepts them), so that a coordinator that vanished
+     * without closing its connection fails the call running on it within keepalive + connect
+     * timeout and the next coordinator is tried, instead of the call hanging until TCP gives up.
+     */
+    private FlightClient buildCoordinatorClient(Location location)
+    {
+        Optional<NettyChannelBuilder> builder = channelBuilder(location, config.getKeepAliveMillis() > 0);
+        if (builder.isEmpty()) {
+            return buildClient(location, config.getPassword().isPresent());
+        }
+        if (config.getPassword().isPresent()) {
+            builder.get().intercept(new ClientInterceptorAdapter(List.of(bearerFactory)));
+        }
+        return FlightGrpcUtils.createFlightClient(allocator, builder.get().build());
+    }
+
+    /** A Netty channel for a grpc+tcp/grpc+tls location; empty for other schemes. */
+    private Optional<NettyChannelBuilder> channelBuilder(Location location, boolean keepAlive)
+    {
         String scheme = Optional.ofNullable(location.getUri().getScheme()).orElse("").toLowerCase(Locale.ROOT);
         boolean tls = scheme.equals("grpc+tls");
         if (!tls && !scheme.equals("grpc+tcp") && !scheme.equals("grpc")) {
-            // e.g. grpc+unix: Arrow's own builder knows how to reach it
-            return new StreamClient(buildClient(location, false), null);
+            return Optional.empty();
         }
         NettyChannelBuilder builder = NettyChannelBuilder.forAddress(location.toSocketAddress());
         if (tls) {
@@ -554,8 +587,7 @@ public class FlightSqlSession
                     .keepAliveTimeout(connectTimeout > 0 ? connectTimeout : 20_000, TimeUnit.MILLISECONDS)
                     .keepAliveWithoutCalls(true);
         }
-        ManagedChannel channel = builder.build();
-        return new StreamClient(FlightGrpcUtils.createFlightClient(allocator, channel), channel);
+        return Optional.of(builder);
     }
 
     private CredentialCallOption authenticate(FlightClient client, boolean deadline)

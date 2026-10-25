@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -34,6 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Ordered failover of data streams over an endpoint's locations, against in-process Flight servers. */
@@ -647,6 +649,79 @@ class FlightSqlSessionFailoverTest
                 assertEquals(0, coordinator.infoCalls.get());
                 assertEquals(1, backup.infoCalls.get());
             }
+        }
+    }
+
+    @Test
+    void coordinatorThatGoesSilentDuringACallIsDetectedByKeepaliveAndTheNextOneIsUsed()
+            throws Exception
+    {
+        try (SilencingProxy proxy = new SilencingProxy(port(coordinator.uri()));
+                FlightSqlSession hosts = coordinatorsSession(500, 1, proxy.uri(), backup.uri())) {
+            hosts.getFlightInfo("SELECT 1");
+            assertEquals(1, coordinator.infoCalls.get());
+            // the host vanishes: nothing reaches it any more, nothing comes back, the connection stays open
+            proxy.silent = true;
+            long start = System.nanoTime();
+            assertTimeoutPreemptively(Duration.ofSeconds(40), () -> hosts.getFlightInfo("SELECT 1"));
+            long millis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+            // gRPC pings at most every 10 s; the ping is not answered within the 500 ms connect timeout,
+            // then the new handshake with the silent host times out after 1 s
+            assertTrue(millis < 25_000, "switched after " + millis + " ms");
+            assertEquals(1, coordinator.infoCalls.get());
+            assertEquals(1, backup.infoCalls.get());
+            assertEquals(backup.uri(), hosts.coordinatorUri());
+        }
+    }
+
+    @Test
+    void severalCoordinatorsWithBasicAuthUseTheBearerTokenTheServerReturns()
+            throws Exception
+    {
+        AtomicInteger bearerCalls = new AtomicInteger();
+        CallHeaderAuthenticator basicThenBearer = headers -> {
+            String value = headers.get("Authorization");
+            if (value != null && value.equals("Bearer issued")) {
+                bearerCalls.incrementAndGet();
+                return () -> "user";
+            }
+            if (value != null && value.startsWith("Basic ")) {
+                return new CallHeaderAuthenticator.AuthResult()
+                {
+                    @Override
+                    public String getPeerIdentity()
+                    {
+                        return "user";
+                    }
+
+                    @Override
+                    public void appendToOutgoingHeaders(org.apache.arrow.flight.CallHeaders outgoing)
+                    {
+                        outgoing.insert("Authorization", "Bearer issued");
+                    }
+                };
+            }
+            throw CallStatus.UNAUTHENTICATED.withDescription("no credentials").toRuntimeException();
+        };
+        Node secured = new Node(allocator);
+        secured.server = FlightServer.builder(allocator, Location.forGrpcInsecure("127.0.0.1", 0), secured)
+                .headerAuthenticator(basicThenBearer)
+                .build()
+                .start();
+        try (FlightSqlSession hosts = new FlightSqlSession(FlightConfig.builder("127.0.0.1")
+                .port(port(closedPortUri()))
+                .alternateHosts(List.of("127.0.0.1:" + port(secured.uri())))
+                .user("user")
+                .password("secret")
+                .maxRetries(0)
+                .connectTimeoutMillis(500)
+                .build())) {
+            hosts.getFlightInfo("SELECT 1");
+            assertEquals(1, secured.infoCalls.get());
+            assertEquals(1, bearerCalls.get());
+        }
+        finally {
+            secured.close();
         }
     }
 
