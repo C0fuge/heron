@@ -176,10 +176,12 @@ public final class SqlQueryBuilder
         return type.equals(BIGINT) || type.equals(INTEGER) || type.equals(SMALLINT) || type.equals(TINYINT);
     }
 
-    private static String tableName(ArrowFlightTableHandle table)
+    /** {@code schema.table}, followed by the time-travel clause if the query names a table version. */
+    public static String tableName(ArrowFlightTableHandle table)
     {
         String q = table.getIdentifierQuote();
-        return quoteIdentifier(table.getSchemaName(), q) + '.' + quoteIdentifier(table.getTableName(), q);
+        return quoteIdentifier(table.getSchemaName(), q) + '.' + quoteIdentifier(table.getTableName(), q)
+                + table.getVersion().map(TableVersion::toSql).orElse("");
     }
 
     /** Appends the WHERE clause, if any; returns whether one was written. */

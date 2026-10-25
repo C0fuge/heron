@@ -96,12 +96,14 @@ public class ArrowFlightMetadata
             Optional<ConnectorTableVersion> startVersion,
             Optional<ConnectorTableVersion> endVersion)
     {
-        if (startVersion.isPresent() || endVersion.isPresent()) {
+        if (startVersion.isPresent()) {
             throw new io.trino.spi.TrinoException(
-                    io.trino.spi.StandardErrorCode.NOT_SUPPORTED, "This connector does not support versioned tables");
+                    io.trino.spi.StandardErrorCode.NOT_SUPPORTED, "This connector does not support reading a range of table versions");
         }
+        // FOR VERSION / TIMESTAMP AS OF arrives as the end version; forwarded to the server (Iceberg tables)
+        Optional<TableVersion> version = endVersion.map(v -> TableVersion.from(session, v));
         try {
-            Schema arrowSchema = client.resultSchema(selectAll(tableName));
+            Schema arrowSchema = client.resultSchema(selectAll(tableName) + version.map(TableVersion::toSql).orElse(""));
             ImmutableList.Builder<ArrowFlightColumnHandle> columns = ImmutableList.builder();
             for (Field field : arrowSchema.getFields()) {
                 Type type;
@@ -117,7 +119,7 @@ public class ArrowFlightMetadata
                 columns.add(new ArrowFlightColumnHandle(field.getName(), type));
             }
             return new ArrowFlightTableHandle(tableName.getSchemaName(), tableName.getTableName(),
-                    columns.build(), identifierQuote);
+                    columns.build(), version, identifierQuote);
         }
         catch (RuntimeException e) {
             // Unknown table -> Trino expects null so it can raise "Table does not exist". But the
@@ -483,7 +485,7 @@ public class ArrowFlightMetadata
         if (!ArrowFlightSessionProperties.isStatisticsEnabled(session) || handle.getAggregation().isPresent()) {
             return TableStatistics.empty();
         }
-        OptionalLong rows = statistics.rowCount(handle.getSchemaName(), handle.getTableName());
+        OptionalLong rows = statistics.rowCount(handle);
         if (rows.isEmpty()) {
             return TableStatistics.empty();
         }

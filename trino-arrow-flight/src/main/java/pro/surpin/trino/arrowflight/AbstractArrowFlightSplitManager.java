@@ -69,7 +69,7 @@ public abstract class AbstractArrowFlightSplitManager
         if (column.isEmpty()) {
             return Optional.empty();
         }
-        OptionalLong rows = statistics.rowCount(handle.getSchemaName(), handle.getTableName());
+        OptionalLong rows = statistics.rowCount(handle);
         if (rows.isEmpty() || rows.getAsLong() < 2 * minRowsPerSplit) {
             return Optional.empty();
         }
@@ -82,7 +82,7 @@ public abstract class AbstractArrowFlightSplitManager
             return Optional.empty();
         }
         int count = (int) Math.min(maxSplits, (long) (expected / minRowsPerSplit));
-        Optional<ArrowFlightStatistics.Range> range = statistics.range(handle.getSchemaName(), handle.getTableName(), column.get().getColumnName());
+        Optional<ArrowFlightStatistics.Range> range = statistics.range(handle, column.get().getColumnName());
         if (range.isEmpty()) {
             return Optional.empty();
         }

@@ -42,6 +42,9 @@ public final class ArrowFlightTableHandle
     /** ORDER BY ... LIMIT n run by the server per query (not guaranteed: Trino keeps its TopN). Set by applyTopN. */
     private final Optional<TopN> topN;
 
+    /** Iceberg time travel (FOR VERSION / TIMESTAMP AS OF) written after the table name. Set by getTableHandle. */
+    private final Optional<TableVersion> version;
+
     /** Quote character for identifiers in generated SQL; empty = none (this server's default). */
     private final String identifierQuote;
 
@@ -56,6 +59,7 @@ public final class ArrowFlightTableHandle
             @JsonProperty("aggregation") Optional<Aggregation> aggregation,
             @JsonProperty("limit") OptionalLong limit,
             @JsonProperty("topN") Optional<TopN> topN,
+            @JsonProperty("version") Optional<TableVersion> version,
             @JsonProperty("identifierQuote") String identifierQuote)
     {
         this.schemaName = requireNonNull(schemaName, "schemaName is null");
@@ -68,14 +72,21 @@ public final class ArrowFlightTableHandle
         this.aggregation = requireNonNull(aggregation, "aggregation is null");
         this.limit = requireNonNull(limit, "limit is null");
         this.topN = topN == null ? Optional.empty() : topN;
+        this.version = version == null ? Optional.empty() : version;
         this.identifierQuote = identifierQuote == null ? "" : identifierQuote;
     }
 
     public ArrowFlightTableHandle(String schemaName, String tableName,
             List<ArrowFlightColumnHandle> columns, String identifierQuote)
     {
+        this(schemaName, tableName, columns, Optional.empty(), identifierQuote);
+    }
+
+    public ArrowFlightTableHandle(String schemaName, String tableName,
+            List<ArrowFlightColumnHandle> columns, Optional<TableVersion> version, String identifierQuote)
+    {
         this(schemaName, tableName, columns, Optional.empty(), TupleDomain.all(), List.of(),
-                Optional.empty(), OptionalLong.empty(), Optional.empty(), identifierQuote);
+                Optional.empty(), OptionalLong.empty(), Optional.empty(), version, identifierQuote);
     }
 
     @JsonProperty
@@ -133,6 +144,12 @@ public final class ArrowFlightTableHandle
     }
 
     @JsonProperty
+    public Optional<TableVersion> getVersion()
+    {
+        return version;
+    }
+
+    @JsonProperty
     public String getIdentifierQuote()
     {
         return identifierQuote;
@@ -152,37 +169,37 @@ public final class ArrowFlightTableHandle
     public ArrowFlightTableHandle withProjectedColumns(List<ArrowFlightColumnHandle> newProjection)
     {
         return new ArrowFlightTableHandle(schemaName, tableName, columns, Optional.of(newProjection),
-                constraint, extraPredicates, aggregation, limit, topN, identifierQuote);
+                constraint, extraPredicates, aggregation, limit, topN, version, identifierQuote);
     }
 
     public ArrowFlightTableHandle withConstraint(TupleDomain<ColumnHandle> newConstraint)
     {
         return new ArrowFlightTableHandle(schemaName, tableName, columns, projectedColumns,
-                newConstraint, extraPredicates, aggregation, limit, topN, identifierQuote);
+                newConstraint, extraPredicates, aggregation, limit, topN, version, identifierQuote);
     }
 
     public ArrowFlightTableHandle withExtraPredicates(List<String> newPredicates)
     {
         return new ArrowFlightTableHandle(schemaName, tableName, columns, projectedColumns,
-                constraint, newPredicates, aggregation, limit, topN, identifierQuote);
+                constraint, newPredicates, aggregation, limit, topN, version, identifierQuote);
     }
 
     public ArrowFlightTableHandle withAggregation(Aggregation newAggregation)
     {
         return new ArrowFlightTableHandle(schemaName, tableName, columns, Optional.empty(),
-                constraint, extraPredicates, Optional.of(newAggregation), limit, topN, identifierQuote);
+                constraint, extraPredicates, Optional.of(newAggregation), limit, topN, version, identifierQuote);
     }
 
     public ArrowFlightTableHandle withLimit(long newLimit)
     {
         return new ArrowFlightTableHandle(schemaName, tableName, columns, projectedColumns,
-                constraint, extraPredicates, aggregation, OptionalLong.of(newLimit), topN, identifierQuote);
+                constraint, extraPredicates, aggregation, OptionalLong.of(newLimit), topN, version, identifierQuote);
     }
 
     public ArrowFlightTableHandle withTopN(TopN newTopN)
     {
         return new ArrowFlightTableHandle(schemaName, tableName, columns, projectedColumns,
-                constraint, extraPredicates, aggregation, limit, Optional.of(newTopN), identifierQuote);
+                constraint, extraPredicates, aggregation, limit, Optional.of(newTopN), version, identifierQuote);
     }
 
     @Override
@@ -203,6 +220,7 @@ public final class ArrowFlightTableHandle
                 && aggregation.equals(other.aggregation)
                 && limit.equals(other.limit)
                 && topN.equals(other.topN)
+                && version.equals(other.version)
                 && identifierQuote.equals(other.identifierQuote);
     }
 
@@ -210,13 +228,14 @@ public final class ArrowFlightTableHandle
     public int hashCode()
     {
         return Objects.hash(schemaName, tableName, columns, projectedColumns, constraint, extraPredicates,
-                aggregation, limit, topN, identifierQuote);
+                aggregation, limit, topN, version, identifierQuote);
     }
 
     @Override
     public String toString()
     {
         StringBuilder sb = new StringBuilder(schemaName).append('.').append(tableName);
+        version.ifPresent(v -> sb.append(' ').append(v));
         projectedColumns.ifPresent(c -> sb.append(' ').append(c));
         if (!extraPredicates.isEmpty()) {
             sb.append(" where ").append(extraPredicates);

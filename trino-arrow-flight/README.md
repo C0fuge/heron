@@ -177,6 +177,17 @@ return correct results against 50k rows.
 | `arrow-flight.endpoint-read-parallelism` | `1` | endpoints of one split read at the same time (session `endpoint_read_parallelism`). The server answers each split's query with one endpoint per Flight node; `1` reads them one after another, so a split keeps one node busy at a time. Plain scans only; failover rules per endpoint are unchanged |
 | `arrow-flight.aggregation-sorted-merge.enabled` | `true` | grouped aggregation pushed to a cluster: each Flight node returns its own partial groups, which the plugin merges. With this on, the server SQL gets `ORDER BY <group columns> NULLS FIRST` and the plugin merges the endpoints as sorted streams (one group in memory, pages emitted as they are merged); off = all groups collected in one hash table first (slow and memory-hungry with millions of groups, e.g. `GROUP BY l_orderkey` in TPC-H q04/q18). Only for GROUP BY columns of integer/decimal/boolean/date/timestamp(6) type; skipped once a query saw a single endpoint. A stream that arrives out of order fails the query (session `aggregation_sorted_merge_enabled`) |
 
+### Iceberg time travel
+
+`SELECT … FROM flight.ice.t FOR VERSION AS OF <snapshot id>` and
+`… FOR TIMESTAMP AS OF TIMESTAMP '2026-10-25 10:00:00 UTC'` are forwarded to the server after the table
+name (`FROM ice.t FOR VERSION AS OF 123` / `FOR TIMESTAMP AS OF TIMESTAMP '2026-10-25 10:00:00.000000 UTC'`)
+in every query of that scan (columns, statistics, splits, scans, aggregations), so the columns and rows
+are those of that snapshot. Needs a server build with Iceberg time travel (from `c3b276054cc3`); a
+timestamp without zone is read in the session time zone, as in Trino's Iceberg connector. Branch or
+tag names (`FOR VERSION AS OF 'main'`) and version ranges are refused. On a table that is not an
+Iceberg table the server answers with an error.
+
 ## Limitations / TODO
 
 * Read-only. No `INSERT` / `CREATE TABLE` (the server's writer path is experimental).

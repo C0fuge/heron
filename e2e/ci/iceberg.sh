@@ -17,6 +17,9 @@
 # TPC-H queries on schema ice equal the DuckDB reference, and a commit made between two queries
 # is seen by the later query only (within ICEBERG_COMMIT_WAIT seconds; complete mode refreshes its
 # views every 60 s). Server log lines 'answeredCompletely' (partial-mode fallbacks) are reported.
+# Time travel (server builds from c3b276054cc3; ICEBERG_TIME_TRAVEL=0|1): after the commit, ice.commits
+# FOR VERSION AS OF its first / last snapshot and FOR TIMESTAMP AS OF the first snapshot's commit time
+# answer 5000 / 6000 / 5000 rows, and a versioned scan equals the Parquet rows of that snapshot.
 
 SPARK_IMAGE="${SPARK_IMAGE:-apache/spark:3.5.3}"
 ICEBERG_SPARK_JAR="${ICEBERG_SPARK_JAR:-https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar}"
@@ -26,6 +29,7 @@ ICEBERG_WAREHOUSE="${ICEBERG_WAREHOUSE:-local}"  # local | s3
 HADOOP_AWS_JAR="${HADOOP_AWS_JAR:-https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar}"
 AWS_SDK_BUNDLE_JAR="${AWS_SDK_BUNDLE_JAR:-https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar}"
 ICEBERG_SERVER_CP=/app/conf:
+case "$SERVER_BUILD" in int*|4eaab052deaf) ICEBERG_TIME_TRAVEL="${ICEBERG_TIME_TRAVEL:-0}" ;; *) ICEBERG_TIME_TRAVEL="${ICEBERG_TIME_TRAVEL:-1}" ;; esac
 # 1 = put core-site.xml (fs.file.impl=LocalFileSystem) on the server classpath; 0 = leave it out.
 # Default 1 only for int5/int6; int7 sets fs.file.impl itself (run 40006799225 green without it)
 case "$SERVER_BUILD" in int5|int6) ICEBERG_CORE_SITE="${ICEBERG_CORE_SITE:-1}" ;; *) ICEBERG_CORE_SITE="${ICEBERG_CORE_SITE:-0}" ;; esac
@@ -195,6 +199,46 @@ ice_compare() {
   fi
 }
 
+# snapshots of ice.commits from its current metadata file: "<id> <timestamp-ms>" per line, oldest first
+ice_snapshots() {
+  local md="$ICEBERG_WH_DIR/ice/commits/metadata"
+  python3 -I -c 'import json, sys
+m = json.load(open(sys.argv[1]))
+for s in sorted(m.get("snapshots", []), key=lambda s: s["timestamp-ms"]):
+    print(s["snapshot-id"], s["timestamp-ms"])' "$md/v$(cat "$md/version-hint.text").metadata.json"
+}
+
+ice_time_travel() {
+  local snaps first first_ms last at r1 r2 r3 scan_v scan_p plain
+  snaps=$(ice_snapshots) || { ice_out time-travel FAIL "cannot read the snapshots of ice.commits"; return; }
+  echo "$snaps" > "$OUT/iceberg-commits-snapshots.txt"
+  first=$(head -1 <<< "$snaps" | cut -d' ' -f1); first_ms=$(head -1 <<< "$snaps" | cut -d' ' -f2)
+  last=$(tail -1 <<< "$snaps" | cut -d' ' -f1)
+  if [ "$(wc -l <<< "$snaps")" -lt 2 ] || [ "$first" = "$last" ]; then
+    ice_out time-travel FAIL "ice.commits should have 2 snapshots after the commit: $(echo $snaps)"; return
+  fi
+  at=$(date -u -d "@$((first_ms / 1000))" '+%F %T').$(printf '%03d' $((first_ms % 1000)))
+  r1=$(tq "SELECT count(*), max(c_custkey) FROM ice.commits FOR VERSION AS OF $first")
+  r2=$(tq "SELECT count(*), max(c_custkey) FROM ice.commits FOR VERSION AS OF $last")
+  r3=$(tq "SELECT count(*), max(c_custkey) FROM ice.commits FOR TIMESTAMP AS OF TIMESTAMP '$at UTC'")
+  # a plain scan (no aggregation pushed) of the old snapshot, compared with the Parquet rows it holds
+  scan_v=$(tq "SELECT count(*), checksum(c_name), checksum(c_acctbal) FROM (SELECT c_name, c_acctbal FROM ice.commits FOR VERSION AS OF $first WHERE c_custkey > 100)")
+  scan_p=$(tq "SELECT count(*), checksum(c_name), checksum(c_acctbal) FROM tpch.customer WHERE c_custkey > 100 AND c_custkey <= 5000")
+  if [ "$r1" = $'5000\t5000' ] && [ "$r2" = $'6000\t6000' ] && [ "$r3" = $'5000\t5000' ] && [ "$scan_v" = "$scan_p" ] \
+     && [[ "$scan_v" =~ ^4900$'\t' ]]; then
+    ice_out time-travel OK "VERSION AS OF first/last snapshot 5000/6000 rows, TIMESTAMP AS OF '$at UTC' 5000, versioned scan = parquet (4900 rows)"
+  else
+    ice_out time-travel FAIL "first $first: $(echo $r1 | cut -c1-200) | last $last: $(echo $r2 | cut -c1-200) | at '$at': $(echo $r3 | cut -c1-200) | scan: $(echo $scan_v | cut -c1-200) vs $(echo $scan_p)"
+  fi
+  # a version on a table that is not an Iceberg table must not be ignored silently
+  plain=$(tq "SELECT count(*) FROM tpch.customer FOR VERSION AS OF $first")
+  if [[ "$plain" =~ ^[0-9]+$ ]]; then
+    ice_out time-travel:parquet INFO "server ignored FOR VERSION AS OF on Parquet table tpch.customer: $plain rows"
+  else
+    ice_out time-travel:parquet OK "FOR VERSION AS OF on Parquet table tpch.customer fails cleanly: $(echo "$plain" | head -1 | cut -c1-200)"
+  fi
+}
+
 iceberg_check() {
   log "iceberg: schema ice vs parquet schema tpch"
   printf 'check\tresult\tdetail\n' > "$OUT/iceberg-summary.tsv"
@@ -241,6 +285,8 @@ iceberg_check() {
   else
     ice_out commit FAIL "before: $(echo $before); after ${waited}s: $(echo "$after" | cut -c1-200)"
   fi
+  [ "$ICEBERG_TIME_TRAVEL" != 1 ] || ice_time_travel
+
 
   local h n
   for h in ${HOSTS//,/ }; do

@@ -61,7 +61,7 @@ final class ScanEstimator
         if (!isOrderedInteger(type)) {
             return 0.5;
         }
-        Optional<ArrowFlightStatistics.Range> stats = statistics.range(handle.getSchemaName(), handle.getTableName(), column.getColumnName());
+        Optional<ArrowFlightStatistics.Range> stats = statistics.range(handle, column.getColumnName());
         if (stats.isEmpty()) {
             return 0.5;
         }

@@ -46,9 +46,9 @@ public class ArrowFlightStatistics
         this.quote = config.getIdentifierQuote();
     }
 
-    public OptionalLong rowCount(String schema, String table)
+    public OptionalLong rowCount(ArrowFlightTableHandle table)
     {
-        String from = from(schema, table);
+        String from = SqlQueryBuilder.tableName(table);
         return cached(rowCounts, from, () -> {
             List<long[]> rows = query("SELECT count(*) AS c FROM " + from, 1);
             if (rows == null) {
@@ -63,9 +63,9 @@ public class ArrowFlightStatistics
     }
 
     /** min/max of an integer or date column, empty if unknown or the table is empty. */
-    public Optional<Range> range(String schema, String table, String column)
+    public Optional<Range> range(ArrowFlightTableHandle table, String column)
     {
-        String from = from(schema, table);
+        String from = SqlQueryBuilder.tableName(table);
         String c = SqlQueryBuilder.quoteIdentifier(column, quote);
         return cached(ranges, from + "#" + column, () -> {
             String sql = "SELECT min(" + c + ") AS a, max(" + c + ") AS b FROM " + from;
@@ -92,11 +92,6 @@ public class ArrowFlightStatistics
             }
             return min > max ? Optional.empty() : Optional.of(new Range(min, max));
         }, Optional.empty());
-    }
-
-    private String from(String schema, String table)
-    {
-        return SqlQueryBuilder.quoteIdentifier(schema, quote) + "." + SqlQueryBuilder.quoteIdentifier(table, quote);
     }
 
     /** {@code loader} returns null when the server could not be asked; that is not cached. */
