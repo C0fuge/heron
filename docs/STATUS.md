@@ -57,6 +57,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **New server build `server-1.0.0-c3b276054cc3`** (2026-10-25, local coordinator): = 4eaab052deaf + Iceberg time travel (`FOR VERSION AS OF <snapshot>` / `FOR TIMESTAMP AS OF TIMESTAMP '… UTC'` after an Iceberg table name) + ZooKeeper client and lz4-java back in the runtime libs set (production HA with ZooKeeper). Assets `arrow-flight-server-1.0.0-c3b276054cc3-linux.jar`, `flight-plugins-1.0.0-c3b276054cc3.tar.zst`, `flight-server-libs-1.0.0-c3b276054cc3.tar.zst` (sums in SHA256SUMS). Run the suite once against it; if green make it the default. Connector follow-up: forward the time-travel clause (Trino `FOR VERSION/TIMESTAMP AS OF`, StarRocks own syntax if any) to the server — additive, no approval needed.
+
 > **New server build `server-1.0.0-4eaab052deaf`** (2026-10-25, local coordinator; built by the server repo CI from main 4eaab05 = int7 + hadoopfs timeout defaults 3 s / 10 s + dependency security upgrades (Jackson 2.21, Netty 4.2.19, Parquet codecs, Hive libthrift, upstream-sync items) + a fresh, much smaller runtime libs set): assets `arrow-flight-server-1.0.0-4eaab052deaf-linux.jar`, `flight-plugins-1.0.0-4eaab052deaf.tar.zst`, `flight-server-libs-1.0.0-4eaab052deaf.tar.zst` (replaces flight-server-libs.tar.zst for this build), START-NOTES.md (sums in SHA256SUMS). Not stand-verified yet: run your full suite once against it (keep int7 as the fallback default until it is green); report regressions under Open questions.
 >
 > **CI suite green on 4eaab052deaf (session 47), stand check pending.** e2e now takes the server-CI asset names
