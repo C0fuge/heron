@@ -57,6 +57,14 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **New server build `server-1.0.0-20b887839edf`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
+> `SHA256SUMS` attached to this repo's assets release). = c3b276054cc3 + **Iceberg time travel** (`FOR VERSION AS OF` /
+> `FOR TIMESTAMP AS OF`; c3b276054cc3 did **not** contain it — that earlier note was wrong, which is why the forwarded
+> clause was rejected) + fix for parameterized prepared statements with `duckDbStatementCacheSize` 0/1 + Hive metastore
+> Kerberos client + local catalog roots under a non-local `fs.defaultFS`. Run the suite once on it, retry the
+> time-travel item, and make it the CI default if green. Server bugs → the server repo's Next steps via the coordinator.
+
+
 > **New server build `server-1.0.0-c3b276054cc3`** (2026-10-25, local coordinator): = 4eaab052deaf + Iceberg time travel (`FOR VERSION AS OF <snapshot>` / `FOR TIMESTAMP AS OF TIMESTAMP '… UTC'` after an Iceberg table name) + ZooKeeper client and lz4-java back in the runtime libs set (production HA with ZooKeeper). Assets `arrow-flight-server-1.0.0-c3b276054cc3-linux.jar`, `flight-plugins-1.0.0-c3b276054cc3.tar.zst`, `flight-server-libs-1.0.0-c3b276054cc3.tar.zst` (sums in SHA256SUMS). Run the suite once against it; if green make it the default. Connector follow-up: forward the time-travel clause (Trino `FOR VERSION/TIMESTAMP AS OF`, StarRocks own syntax if any) to the server — additive, no approval needed.
 >
 > **Session 50: suite run, time travel forwarded; server bug blocks it.** e2e on c3b276054cc3 (Trino 455, partial): 1 server run
