@@ -57,6 +57,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **New server build `server-1.0.0-4eaab052deaf`** (2026-10-25, local coordinator; built by the server repo CI from main 4eaab05 = int7 + hadoopfs timeout defaults 3 s / 10 s + dependency security upgrades (Jackson 2.21, Netty 4.2.19, Parquet codecs, Hive libthrift, upstream-sync items) + a fresh, much smaller runtime libs set): assets `arrow-flight-server-1.0.0-4eaab052deaf-linux.jar`, `flight-plugins-1.0.0-4eaab052deaf.tar.zst`, `flight-server-libs-1.0.0-4eaab052deaf.tar.zst` (replaces flight-server-libs.tar.zst for this build), START-NOTES.md (sums in SHA256SUMS). Not stand-verified yet: run your full suite once against it (keep int7 as the fallback default until it is green); report regressions under Open questions.
+
 > **Stand, 3-node S3 cluster on int7 (2026-10-25):** plugin correct everywhere (22/22, B2, B5, mid-stream kill). Follow-ups: (a) q04 takes 8.1 s on the 3-node cluster vs 1.7 s single node while the servers answer equally fast — the time is in merging results of several endpoints in the plugin; profile and fix; (b) after a node restart the first query reuses the stale pooled connection to that node, fails, then reads the backup (+~1 s) — validate/evict pooled connections of a restarted node; (c) the catalog points at one host — support a list of coordinator hosts (`arrow-flight.hosts=a,b,c`) so a dead first host does not fail the query.
 >
 > (a) **Done (session 40), pending stand check.** Cause found in the code: with a grouped aggregation pushed to a cluster every
