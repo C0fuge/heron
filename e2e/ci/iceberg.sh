@@ -227,6 +227,10 @@ ice_time_travel() {
   if [ "$r1" = $'5000\t5000' ] && [ "$r2" = $'6000\t6000' ] && [ "$r3" = $'5000\t5000' ] && [ "$scan_v" = "$scan_p" ] \
      && [[ "$scan_v" =~ ^4900$'\t' ]]; then
     ice_out time-travel OK "VERSION AS OF first/last snapshot 5000/6000 rows, TIMESTAMP AS OF '$at UTC' 5000, versioned scan = parquet (4900 rows)"
+  elif [ "$SERVER_BUILD" = c3b276054cc3 ] && [[ "$r1" == *"ParserException: Feature o"* ]]; then
+    # Known server bug (c3b276054cc3): its SQL parser (jOOQ open-source edition) refuses the clause on every path,
+    # "Feature only supported in pro edition: ... FOR [*]VERSION AS OF" (clean error, no rows); any later build FAILs
+    ice_out time-travel KNOWN "server refuses FOR VERSION/TIMESTAMP AS OF: jOOQ 'Feature only supported in pro edition' (clean error)"
   else
     ice_out time-travel FAIL "first $first: $(echo $r1 | cut -c1-200) | last $last: $(echo $r2 | cut -c1-200) | at '$at': $(echo $r3 | cut -c1-200) | scan: $(echo $scan_v | cut -c1-200) vs $(echo $scan_p)"
     # diagnostics: the full error and what the server logged for these statements

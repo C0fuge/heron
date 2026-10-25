@@ -183,7 +183,8 @@ return correct results against 50k rows.
 `… FOR TIMESTAMP AS OF TIMESTAMP '2026-10-25 10:00:00 UTC'` are forwarded to the server after the table
 name (`FROM ice.t FOR VERSION AS OF 123` / `FOR TIMESTAMP AS OF TIMESTAMP '2026-10-25 10:00:00.000000 UTC'`)
 in every query of that scan (columns, statistics, splits, scans, aggregations), so the columns and rows
-are those of that snapshot. Needs a server build with Iceberg time travel (from `c3b276054cc3`); a
+are those of that snapshot. Needs a server build that parses the clause (`c3b276054cc3` announced it but still refuses it, see
+`docs/STATUS.md`); a
 timestamp without zone is read in the session time zone, as in Trino's Iceberg connector. Branch or
 tag names (`FOR VERSION AS OF 'main'`) and version ranges are refused. On a table that is not an
 Iceberg table the server answers with an error.
