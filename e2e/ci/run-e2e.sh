@@ -522,13 +522,14 @@ if [ "$SERVERS" -ge 3 ]; then
     # at 8-11 s found flight3's streams open but still empty (run 39920606099, 4/4 "before any data").
     # Kill there at 50/65/80/90 % of the healthy baseline instead.
     # Partial mode: streams deliver from the start, so kill well inside the query. Fixed 8-11 s delays missed 4/4
-    # once the server (int7 re-upload 2026-10-24) answered the baseline in 7.5 s (run 40140961985): 30-75 %.
+    # once the server (int7 re-upload 2026-10-24) answered the baseline in 7.5 s (run 40140961985); 30-75 % then
+    # missed 4/4 with a 9.1 s baseline (run 40144727674: flight3's streams had not opened at 5.5 s): 60-90 %.
     if [ -n "${KILL_STREAM_DELAYS:-}" ]; then
       delays=$KILL_STREAM_DELAYS
     elif [ "$RESULT_MODE" = complete ]; then
       delays=$(awk -v b="$base_s" 'BEGIN { printf "%d %d %d %d", b*0.5, b*0.65, b*0.8, b*0.9 }')
     else
-      delays=$(awk -v b="$base_s" 'BEGIN { printf "%.1f %.1f %.1f %.1f", b*0.6, b*0.45, b*0.75, b*0.3 }')
+      delays=$(awk -v b="$base_s" 'BEGIN { printf "%.1f %.1f %.1f %.1f", b*0.8, b*0.7, b*0.9, b*0.6 }')
     fi
     log "mid-stream kill delays: $delays"
     for delay in $delays; do
