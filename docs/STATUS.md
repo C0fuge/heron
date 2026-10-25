@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int4|int5|int6|int7 (int5+ also run `e2e/ci/iceberg.sh`). int7 is not in `SHA256SUMS`;
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
@@ -58,6 +58,15 @@ Kept up to date after every work session so work can be resumed from this reposi
 ## Next steps
 
 > **New server build `server-1.0.0-4eaab052deaf`** (2026-10-25, local coordinator; built by the server repo CI from main 4eaab05 = int7 + hadoopfs timeout defaults 3 s / 10 s + dependency security upgrades (Jackson 2.21, Netty 4.2.19, Parquet codecs, Hive libthrift, upstream-sync items) + a fresh, much smaller runtime libs set): assets `arrow-flight-server-1.0.0-4eaab052deaf-linux.jar`, `flight-plugins-1.0.0-4eaab052deaf.tar.zst`, `flight-server-libs-1.0.0-4eaab052deaf.tar.zst` (replaces flight-server-libs.tar.zst for this build), START-NOTES.md (sums in SHA256SUMS). Not stand-verified yet: run your full suite once against it (keep int7 as the fallback default until it is green); report regressions under Open questions.
+>
+> **CI suite green on 4eaab052deaf (session 47), stand check pending.** e2e now takes the server-CI asset names
+> (`arrow-flight-server-1.0.0-<b>-linux.jar`, `flight-plugins-1.0.0-<b>.tar.zst`, its own `flight-server-libs-1.0.0-<b>.tar.zst`,
+> `libs/SHA256SUMS` verified; the 520 MB int7 libs are not downloaded for it). Trino 455, local Iceberg warehouse, server started
+> unchanged (same `-D` options, httpfs only): partial 1+3 servers run 40167126909 and complete 3 servers run 40167715652 all green —
+> TPC-H 22/22, types, projection, TopN, dynfilter, splits, aggmerge, Iceberg incl. `orders_del` deletes and commit, failover (node
+> lost before, kill during a read on `tpch` and `ice`, mid-stream kill hit after data = clean error, `restarted` exact with 0 backup
+> reads, two nodes down, `coordinator-down` 14.1 / 14.3 s). No regression against int7. The push/dispatch default `server-build` is
+> now `4eaab052deaf`; `int7` stays selectable (and in the release) as the fallback.
 
 > **Stand, 3-node S3 cluster on int7 (2026-10-25):** plugin correct everywhere (22/22, B2, B5, mid-stream kill). Follow-ups: (a) q04 takes 8.1 s on the 3-node cluster vs 1.7 s single node while the servers answer equally fast — the time is in merging results of several endpoints in the plugin; profile and fix; (b) after a node restart the first query reuses the stale pooled connection to that node, fails, then reads the backup (+~1 s) — validate/evict pooled connections of a restarted node; (c) the catalog points at one host — support a list of coordinator hosts (`arrow-flight.hosts=a,b,c`) so a dead first host does not fail the query.
 >
@@ -564,3 +573,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   data-stream failover untouched). Stand-note items (a)-(c') all wait on stand checks; no new code item queued.
 - 2026-10-25 (cloud sessions 44, 45, 46): no code item open (stand-note items (a)-(c') wait on stand checks, no new maintainer answer
   or item since session 43); lock taken and released, no CI runs.
+- 2026-10-25 (cloud session 47): first Next-steps item, new server build `4eaab052deaf`: e2e learned the server-CI asset names
+  (`[skip ci]` commit, runs dispatched); Trino 455 partial 1+3 servers run 40167126909 and complete 3 servers run 40167715652 green
+  (every check incl. Iceberg, failover, mid-stream kill hit after data, coordinator-down 14 s). e2e default `server-build` switched to
+  `4eaab052deaf` (int7 selectable). ~55 Actions minutes. No plugin code changed; invariants hold. Stand-note items (a)-(c') and the
+  new build still wait on the stand.

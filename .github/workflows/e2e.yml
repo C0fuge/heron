@@ -17,7 +17,7 @@ on:
         default: 'both'
       server-build:
         description: 'Flight server build from e2e-assets: int7, or a server CI build id such as 4eaab052deaf (int4-int6 were removed)'
-        default: 'int7'
+        default: '4eaab052deaf'
       iceberg-warehouse:
         description: 'Iceberg warehouse for int5+ (local directory or s3 = the rclone bucket, written through s3a)'
         default: 'local'
@@ -54,7 +54,7 @@ jobs:
       SERVERS: ${{ matrix.servers }}
       TRINO_VERSION: ${{ inputs.trino || '455' }}
       RESULT_MODE: ${{ inputs.result-mode || 'partial' }}
-      SERVER_BUILD: ${{ inputs.server-build || 'int7' }}
+      SERVER_BUILD: ${{ inputs.server-build || '4eaab052deaf' }}
       ICEBERG_WAREHOUSE: ${{ inputs.iceberg-warehouse || 'local' }}
       ICEBERG_CORE_SITE: ${{ inputs.iceberg-core-site }}
     steps:
@@ -85,7 +85,7 @@ jobs:
             gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "$RUNNER_TEMP/assets/$name"
           done
           cd "$RUNNER_TEMP/assets" && ls -l && sha256sum --check --ignore-missing SHA256SUMS
-          # builds newer than SHA256SUMS (int7): print the hashes to compare with docs/STATUS.md
+          # builds not in SHA256SUMS (int7): print the hashes to compare with docs/STATUS.md
           sha256sum arrow-flight-server-*.jar *plugins*.tar.zst flight-server-libs*.tar.zst
       - name: Run e2e
         run: |
