@@ -7,7 +7,7 @@
 # (PAR_QUERIES: answers vs the reference, times in splits-times.tsv).
 #
 #   ASSETS=<dir with the e2e-assets release files>  PLUGIN_ZIP=<plugin zip>  OUT=<results dir>
-#   TRINO_VERSION=455  RESULT_MODE=partial  SERVERS=1|3  SERVER_BUILD=int4|int5|int6|int7  e2e/ci/run-e2e.sh
+#   TRINO_VERSION=455  RESULT_MODE=partial  SERVERS=1|3  SERVER_BUILD=int4..int7|<server CI build id>  e2e/ci/run-e2e.sh
 #
 # SERVERS=3 forms a cluster (backup locations) and then checks endpoint failover: a node lost
 # before the queries (partitioned, then killed: answers must still be exact), a node killed during a read (clean error or exact
@@ -42,15 +42,26 @@ log() { echo "== $(date -u +%T) $*"; }
 
 log "unpack assets"
 mkdir -p "$WORK/server" "$WORK/data" "$WORK/plugin"
-cp "$ASSETS/arrow-flight-server-1.0.0-$SERVER_BUILD.jar" "$WORK/server/server.jar"
-tar --zstd -xf "$ASSETS/$SERVER_BUILD-plugins.tar.zst" -C "$WORK/server"
-if [ -f "$ASSETS/flight-server-libs.tar.zst" ]; then
-  tar --zstd -xf "$ASSETS/flight-server-libs.tar.zst" -C "$WORK/server"
+# Asset names: intN builds = arrow-flight-server-1.0.0-intN.jar + intN-plugins.tar.zst + the shared
+# flight-server-libs.tar.zst; server-repo CI builds (e.g. 4eaab052deaf) = arrow-flight-server-1.0.0-<b>-linux.jar +
+# flight-plugins-1.0.0-<b>.tar.zst + their own flight-server-libs-1.0.0-<b>.tar.zst (never mixed with other libs).
+case "$SERVER_BUILD" in
+  int*) SERVER_JAR="arrow-flight-server-1.0.0-$SERVER_BUILD.jar"; SERVER_PLUGINS="$SERVER_BUILD-plugins.tar.zst"
+        SERVER_LIBS="flight-server-libs.tar.zst" ;;
+  *)    SERVER_JAR="arrow-flight-server-1.0.0-$SERVER_BUILD-linux.jar"; SERVER_PLUGINS="flight-plugins-1.0.0-$SERVER_BUILD.tar.zst"
+        SERVER_LIBS="flight-server-libs-1.0.0-$SERVER_BUILD.tar.zst" ;;
+esac
+cp "$ASSETS/$SERVER_JAR" "$WORK/server/server.jar"
+tar --zstd -xf "$ASSETS/$SERVER_PLUGINS" -C "$WORK/server"
+if [ -f "$ASSETS/$SERVER_LIBS" ]; then
+  tar --zstd -xf "$ASSETS/$SERVER_LIBS" -C "$WORK/server"
+  if [ -f "$WORK/server/libs/SHA256SUMS" ]; then (cd "$WORK/server/libs" && sha256sum --quiet -c SHA256SUMS); fi
 else
-  log "flight-server-libs.tar.zst not in the release: running the server jar alone"
+  log "$SERVER_LIBS not in the release: running the server jar alone"
 fi
 mkdir -p "$WORK/server/libs"
-find "$WORK/server" -maxdepth 3 -name 'START-NOTES*' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
+ls "$WORK/server" "$WORK/server/plugins" || true; ls "$WORK/server/libs" | wc -l
+find "$WORK/server" "$ASSETS" -maxdepth 3 -name 'START-NOTES*' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
 tar --zstd -xf "$ASSETS/test-data-sf1-types.tar.zst" -C "$WORK/data"
 find "$WORK/data" -maxdepth 3 -type d
 unzip -qj "$PLUGIN_ZIP" -d "$WORK/plugin"

@@ -16,7 +16,7 @@ on:
         description: 'Flight servers: 1, 3 (cluster + failover checks) or both'
         default: 'both'
       server-build:
-        description: 'Flight server build from e2e-assets (int7 only since 2026-10-24; int4-int6 were removed from the release)'
+        description: 'Flight server build from e2e-assets: int7, or a server CI build id such as 4eaab052deaf (int4-int6 were removed)'
         default: 'int7'
       iceberg-warehouse:
         description: 'Iceberg warehouse for int5+ (local directory or s3 = the rclone bucket, written through s3a)'
@@ -76,14 +76,17 @@ jobs:
           while read -r id name; do
             # only the selected server build (the release holds several)
             case "$name" in
-              arrow-flight-server-*.jar|*-plugins.tar.zst)
+              arrow-flight-server-*.jar|*-plugins.tar.zst|flight-plugins-*.tar.zst|flight-server-libs-*.tar.zst)
                 case "$name" in *"$SERVER_BUILD"*) ;; *) continue ;; esac ;;
+              # shared libs of the intN builds (520 MB); server CI builds ship their own flight-server-libs-1.0.0-<b>
+              flight-server-libs.tar.zst)
+                case "$SERVER_BUILD" in int*) ;; *) continue ;; esac ;;
             esac
             gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "$RUNNER_TEMP/assets/$name"
           done
           cd "$RUNNER_TEMP/assets" && ls -l && sha256sum --check --ignore-missing SHA256SUMS
           # builds newer than SHA256SUMS (int7): print the hashes to compare with docs/STATUS.md
-          sha256sum arrow-flight-server-*.jar *-plugins.tar.zst
+          sha256sum arrow-flight-server-*.jar *plugins*.tar.zst flight-server-libs*.tar.zst
       - name: Run e2e
         run: |
           ASSETS="$RUNNER_TEMP/assets" OUT="$RUNNER_TEMP/out" WORK="$RUNNER_TEMP/work" \
