@@ -235,6 +235,14 @@ ice_time_travel() {
         echo "--- $h log lines naming AS OF / ParserException"
         docker logs "$h" 2>&1 | grep -E -B2 -A6 'AS OF|ParserException' | head -60 | cut -c1-1500 || true; done
     } 2>&1 | tee "$OUT/iceberg-time-travel-diagnostics.txt"
+    # the same clauses sent straight to the server's execute path (GetFlightInfo + DoGet, no schema call)
+    docker run --rm --network "$NET" -e FLIGHT_TOKEN="$TOKEN" -v "$REPO/e2e/ci":/probe:ro python:3.12-slim \
+      sh -c 'pip install -q --disable-pip-version-check adbc-driver-flightsql pyarrow >/dev/null 2>&1 && python /probe/flight_probe.py "$@"' \
+      probe grpc://flight1:32010 \
+      "SELECT count(*) AS c FROM ice.commits FOR VERSION AS OF $first" \
+      "SELECT count(*) AS c FROM ice.commits FOR TIMESTAMP AS OF TIMESTAMP '$at UTC'" \
+      "SELECT * FROM ice.commits FOR VERSION AS OF $first" \
+      "SELECT count(*) AS c FROM ice.commits" 2>&1 | tee -a "$OUT/iceberg-time-travel-diagnostics.txt" || true
   fi
   # a version on a table that is not an Iceberg table must not be ignored silently
   plain=$(tq "SELECT count(*) FROM tpch.customer FOR VERSION AS OF $first")
