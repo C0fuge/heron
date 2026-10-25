@@ -74,8 +74,25 @@ Kept up to date after every work session so work can be resumed from this reposi
 > 4 vCPU runner); run 40142038380 (same setup): q04 2.46/2.69, q18 4.75/4.58, groups 2.32/2.38 — at SF1 on the runner the
 > difference is within noise; the gain is expected at SF10 over the network (memory: one group instead of all). **Stand:** rerun q04/q18 on the 3-node cluster with the new plugin, with
 > `SET SESSION flight.aggregation_sorted_merge_enabled` true and false, and report times (and whether q18 runs with a
-> 4 GB heap now). Next: (b) stale pooled connection after a node restart (`FlightSqlSession` per-location generations only drop
-> pools after a failure seen by this Trino), then (c) a list of coordinator hosts.
+> 4 GB heap now).
+>
+> (b) **Done (session 41), pending stand check.** A pooled data-stream connection to a node that restarted may have died
+> unnoticed (no FIN reached Trino); its next stream then failed unreachable before any data and was read from the backup.
+> Now (`FlightDataStream` + `FlightSqlSession.openAt`) a stream on a **reused** pooled connection that fails unreachable
+> before any data is retried **once on a new connection to the same location** before the next location — only while no other
+> stream has retired that location's connections since the lease (generation unchanged), so of a burst of streams to a dead
+> node only the first pays (at most one connect timeout, 5 s, for a black-holed host; refused/unresolved is immediate).
+> Pooled channels gRPC already reports TRANSIENT_FAILURE/SHUTDOWN are not leased again. Server errors are never retried;
+> after data nothing changes. Log line: `Flight stream at … lost its reused connection before any data (…); retrying on a new
+> one`. Unit tests (`FlightSqlSessionFailoverTest`, 15): `staleConnectionToARestartedNodeIsRetriedOnANewOne` (proxy resets
+> the old connections, like a restarted node; fails over to the backup without the fix — verified),
+> `staleConnectionToANodeThatStaysDownIsRetriedOnceThenFailedOver`, `serverErrorOnAReusedConnectionIsNotRetried`. e2e block
+> `restarted` (3 servers): warm pool, flight2+flight3 restarted (~17-18 s), lineitem stream checksum = baseline; CI's
+> `docker rm -f` closes connections cleanly, so it showed 0 stale retries / 0 backup reads (the stale case does not
+> reproduce there; the retry path did fire in the kill checks, with clean failover after). Runs: build 40144727653, e2e
+> 40145935916 green (1+3 servers). **Stand:** restart one node, run a query within 60 s, and check the Trino log: expected
+> `lost its reused connection … retrying on a new one` and no read from a backup (no +~1 s). Next: (c) a list of
+> coordinator hosts (`arrow-flight.hosts=a,b,c`).
 
 > **Queue empty (session 24, 2026-10-23; superseded by the stand note above):** items 1–6 are done and every remaining item-7 follow-up waits on an
 > answer in Open questions (TopN / dynamic-filter / split defaults, Arrow upgrade vs. 18.1 pins, bundle cleanup,
@@ -494,3 +511,10 @@ Kept up to date after every work session so work can be resumed from this reposi
   delays all after the 7.5 s baseline → partial-mode delays now 30-75 % of the baseline; run 40142038380 green 1+3 servers
   (mid-stream kill hit after data on attempt 1 at 5.6 s = clean error). ~45 Actions minutes. Invariants hold (no failover/auth
   change; an unsorted server stream fails cleanly; all answers exact). Stand recheck of q04/q18 requested in Next steps.
+- 2026-10-25 (cloud session 41): stand follow-up (b), stale pooled connection after a node restart: a stream on a reused
+  pooled connection that fails unreachable before any data is retried once on a new connection to the same location; failing
+  pooled channels are not leased (details in Next steps). 3 unit tests; e2e block `restarted`. Build 40144727653 green; e2e
+  40144727674 red only on the partial-mode mid-stream kill (all four 30-75 % delays landed before flight3's first batch,
+  baseline 9.1 s; answers exact) → delays 60-90 % of the baseline; e2e 40145935916 green 1+3 servers (mid-stream hit after
+  data at 8.8 s = clean error; `restarted` exact). ~65 Actions minutes. Invariants hold (retry only before any data, only on
+  unreachable errors; server errors and auth unchanged). Next: (c) list of coordinator hosts.
