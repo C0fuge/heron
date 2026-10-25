@@ -112,6 +112,17 @@ Kept up to date after every work session so work can be resumed from this reposi
 > the coordinator connection keepalive pings (like data connections; needs a channel built with `NettyChannelBuilder` +
 > the bearer middleware, or a deadline on metadata calls) so a dead coordinator is noticed within ~`connect-timeout-millis`.
 > **Stand:** catalog with `arrow-flight.hosts=<n1>,<n2>,<n3>`, stop n1, run TPC-H q01/q18: exact, and the time to the switch.
+>
+> (c') **Done (session 43), pending stand check.** With `arrow-flight.hosts` (several coordinators) the coordinator connection is now
+> built like a data connection (`NettyChannelBuilder`: connect timeout, keepalive pings every `keepalive-millis` answered within
+> `connect-timeout-millis`; BasicAuth's bearer captured via Arrow's `ClientInterceptorAdapter` + the same middleware). A coordinator
+> that vanishes during a call fails that call within ~keepalive + connect timeout (≤ ~15 s with defaults), then the next coordinator is
+> used. A single `arrow-flight.host` keeps Arrow's builder (no pings: old servers close pinging connections). Unit tests
+> (`FlightSqlSessionFailoverTest`, 23): `coordinatorThatGoesSilentDuringACallIsDetectedByKeepaliveAndTheNextOneIsUsed` (11.6 s;
+> hangs past 40 s without the fix — verified), `severalCoordinatorsWithBasicAuthUseTheBearerTokenTheServerReturns` (fails without the
+> interceptor — verified). e2e `coordinator-down` now times the first query after the kill and FAILs above
+> `COORDINATOR_SWITCH_MAX_SECONDS` (25): run 40152506314 **13.5 s** (switch 11 s after the query started; was ~31 s), 5/5 exact.
+> Build 40152506378 green. **Stand:** as (c), plus the time of the first query after stopping n1 (expected ≤ ~15 s + query).
 
 > **Queue empty (session 24, 2026-10-23; superseded by the stand note above):** items 1–6 are done and every remaining item-7 follow-up waits on an
 > answer in Open questions (TopN / dynamic-filter / split defaults, Arrow upgrade vs. 18.1 pins, bundle cleanup,
@@ -544,3 +555,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   server errors are not retried on another host; data-stream failover untouched). Found: ~31 s until the switch because the
   coordinator connection has no keepalive → next step. `gh` in the session rejects its token (`GH_TOKEN` invalid); CI was
   followed through the GitHub MCP tools and the public API.
+- 2026-10-25 (cloud session 43): follow-up of (c): keepalive on the coordinator connection when several hosts are configured
+  (details in Next steps, item c'). 2 new unit tests (local run 23/23 with JDK 21 via `-Dmaven.compiler.release=21`; both fail
+  without the change). Build 40152506378 green, e2e 40152506314 green 1+3 servers; `coordinator-down` first query after the kill
+  13.5 s (was ~31 s). ~27 Actions minutes. Invariants hold (single host unchanged; auth and server errors not retried elsewhere;
+  data-stream failover untouched). Stand-note items (a)-(c') all wait on stand checks; no new code item queued.
