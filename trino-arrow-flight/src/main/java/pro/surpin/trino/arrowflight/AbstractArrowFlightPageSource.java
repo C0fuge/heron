@@ -455,7 +455,6 @@ public abstract class AbstractArrowFlightPageSource
         if (sortedMerger != null) {
             sortedMerger.close();
         }
-        hashMerger = null;
         if (stream != null) {
             stream.close();
             stream = null;
@@ -475,5 +474,6 @@ public abstract class AbstractArrowFlightPageSource
             }
         }
         closeStream();
+        hashMerger = null;
     }
 }

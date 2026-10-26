@@ -6,6 +6,7 @@ import pro.surpin.arrowflight.common.FlightSqlSession;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -16,6 +17,7 @@ public class ArrowFlightClient
         extends FlightSqlSession
 {
     static final long SEVERAL_ENDPOINTS_MEMORY_NANOS = TimeUnit.HOURS.toNanos(1);
+    static final int SINGLE_ENDPOINT_ANSWERS = 100;
 
     @Inject
     public ArrowFlightClient(ArrowFlightConfig config)
@@ -26,15 +28,17 @@ public class ArrowFlightClient
     // When a FlightInfo last had several endpoints (System.nanoTime(), valid once sawSeveralEndpoints).
     private final AtomicLong lastSeveralEndpointsNanos = new AtomicLong();
     private final AtomicBoolean sawSeveralEndpoints = new AtomicBoolean();
-    private final AtomicBoolean sawFlightInfo = new AtomicBoolean();
+    // FlightInfos with a single endpoint while none with several was seen.
+    private final AtomicInteger singleEndpointAnswers = new AtomicInteger();
 
     /**
-     * Hint for planning a query before its FlightInfo is known: will it likely have more than one endpoint? True
-     * until a FlightInfo was seen, and while one with several endpoints was seen in the last
-     * {@link #SEVERAL_ENDPOINTS_MEMORY_NANOS}. A cluster that answers some queries with a single endpoint (a server
-     * that answers one completely) must not turn the hint off for the queries that run next: the hint decides
-     * whether a grouped aggregation is merged as sorted streams or in memory (TPC-H q18 on 3 nodes held every group
-     * of lineitem in the heap). Only an install that answers with one endpoint for that long counts as single-node.
+     * Hint for planning a query before its FlightInfo is known: will it likely have more than one endpoint? It decides
+     * whether a grouped aggregation is merged as sorted streams or in memory (TPC-H q18 on 3 nodes held every group of
+     * lineitem in the heap), so it errs towards "several": true for {@link #SEVERAL_ENDPOINTS_MEMORY_NANOS} after a
+     * FlightInfo with several endpoints, and until {@link #SINGLE_ENDPOINT_ANSWERS} FlightInfos in a row had one. A
+     * cluster answers some queries with one endpoint (a key range whose files lie on one node, a query answered
+     * completely), also as the very first query of a catalog; only an install that never answers with more counts as
+     * single-node.
      */
     public boolean expectsSeveralEndpoints()
     {
@@ -43,8 +47,11 @@ public class ArrowFlightClient
 
     boolean expectsSeveralEndpoints(long nowNanos)
     {
-        return !sawFlightInfo.get()
-                || (sawSeveralEndpoints.get() && nowNanos - lastSeveralEndpointsNanos.get() < SEVERAL_ENDPOINTS_MEMORY_NANOS);
+        if (sawSeveralEndpoints.get()) {
+            return nowNanos - lastSeveralEndpointsNanos.get() < SEVERAL_ENDPOINTS_MEMORY_NANOS
+                    || singleEndpointAnswers.get() < SINGLE_ENDPOINT_ANSWERS;
+        }
+        return singleEndpointAnswers.get() < SINGLE_ENDPOINT_ANSWERS;
     }
 
     public void recordEndpointCount(int count)
@@ -57,8 +64,11 @@ public class ArrowFlightClient
         if (count > 1) {
             lastSeveralEndpointsNanos.set(nowNanos);
             sawSeveralEndpoints.set(true);
+            singleEndpointAnswers.set(0);
         }
-        sawFlightInfo.set(true);
+        else if (count == 1) {
+            singleEndpointAnswers.incrementAndGet();
+        }
     }
 
     @PreDestroy
