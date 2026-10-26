@@ -16,8 +16,8 @@ on:
         description: 'Flight servers: 1, 3 (cluster + failover checks) or both'
         default: 'both'
       server-build:
-        description: 'Flight server build from e2e-assets: int7, or a server CI build id such as 7fbe2d75827c (int4-int6 were removed)'
-        default: '7fbe2d75827c'
+        description: 'Flight server build from e2e-assets: int7, or a server CI build id such as 57d252b1437f (int4-int6 were removed)'
+        default: '57d252b1437f'
       iceberg-warehouse:
         description: 'Iceberg warehouse for int5+ (local directory or s3 = the rclone bucket, written through s3a)'
         default: 'local'
@@ -60,7 +60,7 @@ jobs:
       SERVERS: ${{ matrix.servers }}
       TRINO_VERSION: ${{ inputs.trino || '455' }}
       RESULT_MODE: ${{ inputs.result-mode || 'partial' }}
-      SERVER_BUILD: ${{ inputs.server-build || '7fbe2d75827c' }}
+      SERVER_BUILD: ${{ inputs.server-build || '57d252b1437f' }}
       ICEBERG_WAREHOUSE: ${{ inputs.iceberg-warehouse || 'local' }}
       ICEBERG_CORE_SITE: ${{ inputs.iceberg-core-site }}
       HEAP_PROBE: ${{ inputs.heap-probe || '0' }}
