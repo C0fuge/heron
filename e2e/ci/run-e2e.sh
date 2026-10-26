@@ -420,6 +420,59 @@ for setting in $PAR_SETTINGS; do
     | tee -a "$OUT/splits-summary.tsv"
 done
 
+# Concurrent scans (stand 2026-10-26: 8 concurrent partial-mode scans on 3 nodes gave CANCELLED streams and a dead node;
+# server 57d252b1437f shares one outbound byte budget across streams). CONC_QUERIES run at the same time ('scan' = the full
+# lineitem checksum, the most bytes per query); every answer must be exact (the scan = the projection check's answer) and
+# every server must still run afterwards. Wall time of the whole batch to times.tsv.
+CONC_QUERIES="${CONC_QUERIES:-scan scan scan scan q01 q06 q12 q14}"
+log "concurrent: $CONC_QUERIES"
+mkdir -p "$OUT/concurrent"
+start=$(date +%s.%N); i=0; pids=()
+for q in $CONC_QUERIES; do
+  i=$((i + 1))
+  if [ "$q" = scan ]; then
+    ( docker exec trino trino --catalog flight --schema tpch --output-format TSV --execute "$SCAN_SQL" \
+        > "$OUT/concurrent/scan$i.tsv" 2> "$OUT/concurrent/scan$i.err" || rm -f "$OUT/concurrent/scan$i.tsv" ) &
+  else
+    ( docker exec trino trino --catalog flight --schema tpch --output-format TSV -f "/queries/$q.sql" \
+        > "$OUT/concurrent/$q.tsv" 2> "$OUT/concurrent/$q.err" || rm -f "$OUT/concurrent/$q.tsv" ) &
+  fi
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait "$p" || true; done
+printf 'concurrent\tall\t%.2f\n' "$(echo "$(date +%s.%N) - $start" | bc)" >> "$OUT/times.tsv"
+printf 'query\tresult\tdetail\n' > "$OUT/concurrent-summary.tsv"
+i=0; conc_tpch=()
+for q in $CONC_QUERIES; do
+  i=$((i + 1))
+  if [ "$q" != scan ]; then conc_tpch+=("$q"); continue; fi
+  if [ -s "$OUT/concurrent/scan$i.tsv" ] && cmp -s "$OUT/projection/row.tsv" "$OUT/concurrent/scan$i.tsv"; then
+    printf 'scan%s\tOK\t%s\n' "$i" "$(tr '\t' ' ' < "$OUT/concurrent/scan$i.tsv")"
+  else
+    status=1
+    printf 'scan%s\tFAIL\t%s\n' "$i" "$(cat "$OUT/concurrent/scan$i.tsv" "$OUT/concurrent/scan$i.err" 2>/dev/null | tr '\t\n' '  ' | head -c 300)"
+  fi >> "$OUT/concurrent-summary.tsv"
+done
+conc_ok=()
+for q in "${conc_tpch[@]}"; do
+  if [ -f "$OUT/concurrent/$q.tsv" ]; then conc_ok+=("$q"); continue; fi
+  status=1; printf '%s\tFAIL\terror: %s\n' "$q" "$(grep -m1 -E 'Query .* failed|ERROR' "$OUT/concurrent/$q.err" | cut -c1-200)" \
+    >> "$OUT/concurrent-summary.tsv"
+done
+if [ ${#conc_ok[@]} -gt 0 ]; then
+  "${COMPARE[@]}" "$OUT/concurrent" "$QUERIES" "$OUT/concurrent/compare.tsv" "${conc_ok[*]}" || status=1
+  tail -n +2 "$OUT/concurrent/compare.tsv" >> "$OUT/concurrent-summary.tsv"
+fi
+for c in ${HOSTS//,/ }; do
+  if docker ps -q -f name="^$c\$" -f status=running | grep -q .; then
+    printf '%s\tOK\tstill running\n' "$c"
+  else
+    status=1; printf '%s\tFAIL\tnot running after the concurrent queries\n' "$c"
+  fi >> "$OUT/concurrent-summary.tsv"
+done
+cat "$OUT/concurrent-summary.tsv"
+save_logs
+
 if [ -n "$TYPES" ]; then
   log "types: SELECT * per table vs DuckDB on the same Parquet"
   python3 -m venv "$WORK/venv"
