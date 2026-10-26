@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `7fbe2d75827c` since session 57, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `57d252b1437f` since session 61, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
@@ -61,6 +61,17 @@ Kept up to date after every work session so work can be resumed from this reposi
 > `SHA256SUMS` in this repo's assets release) = 4d707e2aedfc + one outbound byte budget shared by all Flight streams
 > (the stand saw CANCELLED streams and a dead node under 8 concurrent partial-mode scans on a 3-node cluster). Run the
 > suite once on it (failover and concurrent-scan items especially) and make it the CI default if green.
+>
+> **Done (session 61): green, now the e2e default** (`e2e.yml`, `run-e2e.sh`; 7fbe2d75827c, 4d707e2aedfc and older stay
+> selectable). Trino 455, local Iceberg, server started unchanged: partial 1+3 servers run 40310816951, complete 3 servers run
+> 40310820425 — TPC-H 22/22, types, Iceberg incl. time travel, heap checks (`1 1G` 436 MB, `1/eps4 1G` 335 MB, `3 1G` 281 / 446 MB
+> peak), failover: mid-stream kill hit after data on attempt 1 (`tx8M@5.3` partial, `tx8M@2.7` complete), `restarted` exact after
+> 18.2 / 14.4 s with 0 backup reads, two down, coordinator-down 14.2 / 13.6 s. Job wall time 1 server 13.4 min, 3 servers partial
+> 18.2 / complete 14.0 min. **New e2e check `concurrent`** (every run, 1 and 3 servers; `CONC_QUERIES`, default 4 full `lineitem`
+> checksum scans + q01 q06 q12 q14 at the same time): every answer exact and every server still running afterwards. Green on
+> 7fbe2d75827c too (push run 40311008965, 1+3 servers), i.e. CI does not reproduce the stand's CANCELLED streams / dead node with
+> 8 concurrent queries (SF1, 4-vCPU runner); on 57d252b1437f: push run 40313494859 (see Log). **Stand:** rerun the 8-concurrent-scan
+> case on the 3-node cluster with 57d252b1437f.
 
 
 > **Stand finding 2026-10-26 (local coordinator, perf campaign): plugin memory with several endpoints.** TPC-H SF10
@@ -433,7 +444,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Open questions
 - **Server build 4d707e2aedfc (session 59):** uploaded to `e2e-assets` with no note in STATUS. What does it change vs 7fbe2d75827c,
-  and should it become the e2e default? The CI suite is green on it in both modes (runs 40295372006, 40295376402).
+  and should it become the e2e default? (Session 61: superseded as default by 57d252b1437f = 4d707e2aedfc + shared outbound byte
+  budget; only the 4d707e2aedfc delta itself is still undocumented.) The CI suite is green on it in both modes (runs 40295372006, 40295376402).
 - **CI e2e on 60e888bc26ec is ~40 % slower (session 54)** (duckDbThreads default 4; 1 server 8.8 → 12.4 min, 3 servers 13.7 →
   19.0 min): CI runs up to 3 servers + Trino on 4 vCPUs. Should the e2e start its servers with `-DduckDbThreads=1` (the old
   default; keeps CI minutes and the mid-stream kill timing stable) or keep the production default 4 so CI tests what production
