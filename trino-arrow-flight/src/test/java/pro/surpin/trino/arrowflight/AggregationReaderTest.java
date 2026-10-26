@@ -94,6 +94,23 @@ class AggregationReaderTest
     }
 
     @Test
+    void reportsTheHeapOfTheStreamsCurrentPages()
+    {
+        List<Object[]> rows = new ArrayList<>();
+        for (long k = 0; k < 50; k++) {
+            rows.add(row(k, 1L, k, k));
+        }
+        AggregationReader.SortedMerger merger = reader(AGGREGATION).sortedMerger(List.of(stream(rows), stream(rows)), 10);
+        assertEquals(0, merger.retainedBytes());
+        merger.nextPage();
+        assertTrue(merger.retainedBytes() > 2 * 50 * 4 * Long.BYTES, "bytes " + merger.retainedBytes());
+        while (merger.nextPage() != null) {
+            // drain
+        }
+        assertEquals(0, merger.retainedBytes());
+    }
+
+    @Test
     void streamOutOfOrderFailsInsteadOfReturningAGroupTwice()
     {
         TestStream unsorted = stream(batch(row(5L, 1L, 1L, 1L), row(2L, 1L, 1L, 1L)));

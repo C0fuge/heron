@@ -299,6 +299,8 @@ public abstract class AbstractArrowFlightPageSource
         return new AggregationReader.PageStream()
         {
             private FlightDataStream stream;
+            private VectorSchemaRoot root;
+            private int offset;
             private boolean done;
 
             @Override
@@ -310,11 +312,21 @@ public abstract class AbstractArrowFlightPageSource
                 if (stream == null) {
                     stream = openStream(endpoint);
                 }
-                while (stream.next()) {
-                    VectorSchemaRoot root = stream.getRoot();
-                    if (root.getRowCount() > 0) {
-                        return aggregationReader.rawPage(root);
+                // A server batch can hold millions of groups; every endpoint keeps its current page while the merge
+                // runs, so convert the batch (it stays in Arrow memory) in slices to keep the heap per endpoint small.
+                while (root == null || offset >= root.getRowCount()) {
+                    if (!stream.next()) {
+                        root = null;
+                        break;
                     }
+                    root = stream.getRoot();
+                    offset = 0;
+                }
+                if (root != null) {
+                    int positions = Math.min(SORTED_MERGE_PAGE_ROWS, root.getRowCount() - offset);
+                    Page page = aggregationReader.rawPage(root, offset, positions);
+                    offset += positions;
+                    return page;
                 }
                 done = true;
                 stream.close();
@@ -444,6 +456,9 @@ public abstract class AbstractArrowFlightPageSource
     @Override
     public long getMemoryUsage()
     {
+        if (sortedMerger != null) {
+            return sortedMerger.retainedBytes();
+        }
         return hashMerger == null ? 0 : hashMerger.estimatedBytes();
     }
 

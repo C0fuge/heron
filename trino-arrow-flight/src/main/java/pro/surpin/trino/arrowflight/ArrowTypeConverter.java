@@ -123,13 +123,19 @@ public class ArrowTypeConverter
     /** Converts the first {@code positions} values of {@code vector} into a block of {@code type}. */
     public Block toBlock(FieldVector vector, Type type, int positions)
     {
-        boolean[] isNull = nulls(vector, positions);
+        return toBlock(vector, type, 0, positions);
+    }
+
+    /** Converts {@code positions} values of {@code vector} from index {@code offset} into a block of {@code type}. */
+    public Block toBlock(FieldVector vector, Type type, int offset, int positions)
+    {
+        boolean[] isNull = nulls(vector, offset, positions);
 
         if (type.equals(BIGINT) && vector instanceof BigIntVector v) {
             ArrowBuf data = v.getDataBuffer();
             long[] values = new long[positions];
             for (int i = 0; i < positions; i++) {
-                values[i] = data.getLong((long) i * 8);
+                values[i] = data.getLong((long) (offset + i) * 8);
             }
             return Blocks.longs(positions, isNull, values);
         }
@@ -138,7 +144,7 @@ public class ArrowTypeConverter
             ArrowBuf data = vector.getDataBuffer();
             int[] values = new int[positions];
             for (int i = 0; i < positions; i++) {
-                values[i] = data.getInt((long) i * 4);
+                values[i] = data.getInt((long) (offset + i) * 4);
             }
             return Blocks.ints(positions, isNull, values);
         }
@@ -146,7 +152,7 @@ public class ArrowTypeConverter
             ArrowBuf data = v.getDataBuffer();
             short[] values = new short[positions];
             for (int i = 0; i < positions; i++) {
-                values[i] = data.getShort((long) i * 2);
+                values[i] = data.getShort((long) (offset + i) * 2);
             }
             return Blocks.shorts(positions, isNull, values);
         }
@@ -154,7 +160,7 @@ public class ArrowTypeConverter
             ArrowBuf data = v.getDataBuffer();
             byte[] values = new byte[positions];
             for (int i = 0; i < positions; i++) {
-                values[i] = data.getByte(i);
+                values[i] = data.getByte(offset + i);
             }
             return Blocks.bytes(positions, isNull, values);
         }
@@ -162,7 +168,7 @@ public class ArrowTypeConverter
             ArrowBuf data = v.getDataBuffer();
             long[] values = new long[positions];
             for (int i = 0; i < positions; i++) {
-                values[i] = Double.doubleToLongBits(data.getDouble((long) i * 8));
+                values[i] = Double.doubleToLongBits(data.getDouble((long) (offset + i) * 8));
             }
             return Blocks.longs(positions, isNull, values);
         }
@@ -170,14 +176,14 @@ public class ArrowTypeConverter
             ArrowBuf data = vector.getDataBuffer();
             long[] values = new long[positions];
             for (int i = 0; i < positions; i++) {
-                values[i] = data.getLong((long) i * 8);
+                values[i] = data.getLong((long) (offset + i) * 8);
             }
             return Blocks.longs(positions, isNull, values);
         }
         if (type.equals(BOOLEAN) && vector instanceof BitVector v) {
             byte[] values = new byte[positions];
             for (int i = 0; i < positions; i++) {
-                values[i] = (byte) (v.isNull(i) ? 0 : v.get(i));
+                values[i] = (byte) (v.isNull(offset + i) ? 0 : v.get(offset + i));
             }
             return Blocks.bytes(positions, isNull, values);
         }
@@ -186,8 +192,8 @@ public class ArrowTypeConverter
             if (decimal.isShort()) {
                 long[] values = new long[positions];
                 for (int i = 0; i < positions; i++) {
-                    long low = data.getLong((long) i * 16);
-                    long high = data.getLong((long) i * 16 + 8);
+                    long low = data.getLong((long) (offset + i) * 16);
+                    long high = data.getLong((long) (offset + i) * 16 + 8);
                     if (high != (low >> 63) && (isNull == null || !isNull[i])) {
                         throw new TrinoException(NUMERIC_VALUE_OUT_OF_RANGE, "Decimal value does not fit " + type);
                     }
@@ -197,17 +203,17 @@ public class ArrowTypeConverter
             }
             long[] values = new long[positions * 2];
             for (int i = 0; i < positions; i++) {
-                values[2 * i] = data.getLong((long) i * 16 + 8);
-                values[2 * i + 1] = data.getLong((long) i * 16);
+                values[2 * i] = data.getLong((long) (offset + i) * 16 + 8);
+                values[2 * i + 1] = data.getLong((long) (offset + i) * 16);
             }
             return Blocks.int128s(positions, isNull, values);
         }
         if ((type instanceof VarcharType && vector instanceof VarCharVector) || (type.equals(VARBINARY) && vector instanceof VarBinaryVector)) {
             ArrowBuf offsetsBuffer = vector.getOffsetBuffer();
             int[] offsets = new int[positions + 1];
-            int base = offsetsBuffer.getInt(0);
+            int base = offsetsBuffer.getInt((long) offset * 4);
             for (int i = 0; i <= positions; i++) {
-                offsets[i] = offsetsBuffer.getInt((long) i * 4) - base;
+                offsets[i] = offsetsBuffer.getInt((long) (offset + i) * 4) - base;
             }
             byte[] bytes = new byte[offsets[positions]];
             vector.getDataBuffer().getBytes(base, bytes);
@@ -216,7 +222,7 @@ public class ArrowTypeConverter
 
         BlockBuilder builder = type.createBlockBuilder(null, positions);
         for (int i = 0; i < positions; i++) {
-            writeNativeValue(type, builder, vector.isNull(i) ? null : readNative(vector, type, i));
+            writeNativeValue(type, builder, vector.isNull(offset + i) ? null : readNative(vector, type, offset + i));
         }
         return builder.build();
     }
@@ -231,14 +237,14 @@ public class ArrowTypeConverter
         return builder.build();
     }
 
-    private static boolean[] nulls(FieldVector vector, int positions)
+    private static boolean[] nulls(FieldVector vector, int offset, int positions)
     {
         if (vector.getNullCount() == 0) {
             return null;
         }
         boolean[] isNull = new boolean[positions];
         for (int i = 0; i < positions; i++) {
-            isNull[i] = vector.isNull(i);
+            isNull[i] = vector.isNull(offset + i);
         }
         return isNull;
     }

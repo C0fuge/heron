@@ -89,12 +89,17 @@ final class AggregationReader
     /** One server batch -> page of raw columns. */
     Page rawPage(VectorSchemaRoot root)
     {
-        int positions = root.getRowCount();
+        return rawPage(root, 0, root.getRowCount());
+    }
+
+    /** Raw page of the rows {@code offset .. offset + positions - 1} of {@code root}. */
+    Page rawPage(VectorSchemaRoot root, int offset, int positions)
+    {
         Block[] blocks = new Block[raws.size()];
         for (int i = 0; i < raws.size(); i++) {
             Raw raw = raws.get(i);
             FieldVector vector = root.getVector(raw.name());
-            blocks[i] = vector == null ? converter.nullBlock(raw.type(), positions) : converter.toBlock(vector, raw.type(), positions);
+            blocks[i] = vector == null ? converter.nullBlock(raw.type(), positions) : converter.toBlock(vector, raw.type(), offset, positions);
         }
         return new Page(positions, blocks);
     }
@@ -386,6 +391,18 @@ final class AggregationReader
                 blocks[i] = builder.build();
             }
             return new Page(out.size(), blocks);
+        }
+
+        /** Heap held by the streams' current pages (one per endpoint, at most one slice of a server batch each). */
+        long retainedBytes()
+        {
+            long bytes = 0;
+            for (Cursor cursor : heads) {
+                if (cursor.page != null) {
+                    bytes += cursor.page.getRetainedSizeInBytes();
+                }
+            }
+            return bytes;
         }
 
         void close()
