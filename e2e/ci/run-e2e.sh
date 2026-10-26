@@ -111,7 +111,7 @@ start_server() {  # name
     java -Xmx$SERVER_HEAP --add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true \
          -DdataDir=s3://lake/parquet -Ds3Endpoint=http://s3:9000 -Ds3UrlStyle=path -Ds3Region=us-east-1 \
          -Darrowflight.plugins.dir=/app/plugins -Darrowflight.duckdb.extensionDir=/ext/duckdb-home/extensions \
-         -DresultMode="$RESULT_MODE" "${SERVER_EXTRA[@]}" \
+         -DresultMode="$RESULT_MODE" "${SERVER_EXTRA[@]}" ${SERVER_ENDPOINTS:+-Darrowflight.cluster.endpointsPerServer=$SERVER_ENDPOINTS} \
          -cp "${SERVER_CP_EXTRA:-}/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
          --port 32010 --localhost "$1" --hosts "$HOSTS" >/dev/null
 }
@@ -202,6 +202,19 @@ if [ "$HEAP_PROBE" = 1 ]; then
   heap_probe
 else
   HEAP_PROBE_XMX="${HEAP_CHECK_XMX:-1G}" HEAP_PROBE_SETTINGS=default HEAP_PROBE_FAIL=1 heap_probe
+fi
+# The same with one server answering every table with HEAP_CHECK_ENDPOINTS endpoints (server option
+# arrowflight.cluster.endpointsPerServer; the stand failed q18 with 2/4/8). 'hash' only reports: its "merged in memory"
+# INFO line shows the endpoint count. flight1 (and Trino, whose pooled connections it held) are restarted plainly after.
+HEAP_CHECK_ENDPOINTS="${HEAP_CHECK_ENDPOINTS:-4}"
+if [ "$SERVERS" = 1 ] && [ "$HEAP_CHECK_ENDPOINTS" -gt 1 ]; then
+  docker logs flight1 > "$OUT/flight1-run0.log" 2>&1 || true
+  docker rm -f flight1 >/dev/null; SERVER_ENDPOINTS=$HEAP_CHECK_ENDPOINTS start_server flight1; wait_server flight1
+  HEAP_PROBE_TAG="eps$HEAP_CHECK_ENDPOINTS" HEAP_PROBE_XMX="${HEAP_CHECK_XMX:-1G}" HEAP_PROBE_SETTINGS="default hash" \
+    HEAP_PROBE_FAIL=1 heap_probe
+  docker logs flight1 > "$OUT/flight1-eps$HEAP_CHECK_ENDPOINTS.log" 2>&1 || true
+  docker rm -f flight1 >/dev/null; start_server flight1; wait_server flight1
+  start_trino 3G
 fi
 
 # A projection the plugin cannot push (ROW constructor over every column) must plan and run: Trino hands

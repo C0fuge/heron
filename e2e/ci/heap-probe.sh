@@ -10,7 +10,8 @@
 #   nopush    flight.aggregation_pushdown_enabled=false (Trino aggregates the plain scan itself)
 # While a query runs, the live heap is sampled every HEAP_PROBE_SAMPLE seconds (jcmd GC.class_histogram = live objects
 # after a full GC); the largest sample's total and top classes go to heap-probe/<heap>-<setting>-<query>.histo.
-# Results (answer vs the reference, error, seconds, peak live MB) go to heap-probe.tsv. HEAP_PROBE_FAIL=1 makes a wrong
+# Results (answer vs the reference, error, seconds, peak live MB) are appended to heap-probe.tsv; HEAP_PROBE_TAG (e.g. eps4)
+# prefixes the run directories and is added to the servers column. HEAP_PROBE_FAIL=1 makes a wrong
 # answer or an error in a 'default' run fail the job (the regression check); otherwise the probe only reports.
 # Trino is restarted with the normal heap afterwards.
 
@@ -48,15 +49,16 @@ heap_sampler() {  # stop-file histo-file
 
 heap_probe() {
   local xmx setting q dir sess stop histo t0 secs result detail peak
-  log "heap probe: Trino -Xmx $HEAP_PROBE_XMX x settings $HEAP_PROBE_SETTINGS x $HEAP_PROBE_QUERIES ($SERVERS server(s))"
+  log "heap probe: Trino -Xmx $HEAP_PROBE_XMX x settings $HEAP_PROBE_SETTINGS x $HEAP_PROBE_QUERIES ($SERVERS server(s)${HEAP_PROBE_TAG:+, $HEAP_PROBE_TAG})"
   mkdir -p "$OUT/heap-probe"
-  printf 'servers\txmx\tsetting\tquery\tresult\tseconds\tpeak_live_mb\tdetail\n' > "$OUT/heap-probe.tsv"
+  [ -f "$OUT/heap-probe.tsv" ] ||
+    printf 'servers\txmx\tsetting\tquery\tresult\tseconds\tpeak_live_mb\tdetail\n' > "$OUT/heap-probe.tsv"
   for xmx in $HEAP_PROBE_XMX; do
     for setting in $HEAP_PROBE_SETTINGS; do
       for q in $HEAP_PROBE_QUERIES; do
         # a fresh JVM per run: a heap error can leave the old one in any state
         start_trino "$xmx" probe
-        dir="$OUT/heap-probe/$xmx-$setting"; mkdir -p "$dir"
+        dir="$OUT/heap-probe/${HEAP_PROBE_TAG:+$HEAP_PROBE_TAG-}$xmx-$setting"; mkdir -p "$dir"
         stop="$dir/$q.stop"; histo="$dir/$q.histo"; rm -f "$stop"
         heap_sampler "$stop" "$histo" &
         local sampler=$!
@@ -81,7 +83,7 @@ heap_probe() {
           docker logs trino 2>&1 | grep -m3 -E 'OutOfMemoryError|heap space' | cut -c1-300 >> "$dir/$q.err" || true
         fi
         if [ "$setting" = default ] && [ "$result" != OK ] && [ "$HEAP_PROBE_FAIL" = 1 ]; then status=1; fi
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$SERVERS" "$xmx" "$setting" "$q" "$result" "$secs" "${peak:-?}" "$detail" \
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$SERVERS${HEAP_PROBE_TAG:+/$HEAP_PROBE_TAG}" "$xmx" "$setting" "$q" "$result" "$secs" "${peak:-?}" "$detail" \
           | tee -a "$OUT/heap-probe.tsv"
         echo "--- live heap peak $xmx $setting $q:"; head -14 "$histo" 2>/dev/null || true
         [ -f "$dir/$q.err" ] && head -c 600 "$dir/$q.err"
