@@ -89,6 +89,17 @@ Kept up to date after every work session so work can be resumed from this reposi
 > (`default` must be exact; `hash` only reports). Push run 40295577297: `1/eps4 1G default q18 OK` (peak live heap 402 MB vs 179 MB
 > with one endpoint), `hash` = Trino's "exceeded per-node memory limit" with the INFO line "Grouped aggregation from 4 endpoints
 > merged in memory (sorted merge disabled)" = 4 endpoints confirmed. Adds ~1.5 min to the 1-server job. SF10 stays a stand check.
+>
+> **Session 60:** the sorted merge kept, per endpoint, the whole server batch converted to Trino blocks (all rows of an
+> endpoint's partial groups if the server sends them in one batch). Now the batch stays in Arrow memory and is converted 8192 rows
+> at a time (`ArrowTypeConverter.toBlock(vector, type, offset, positions)`, `AggregationReader.rawPage(root, offset, n)`); the held
+> pages are reported in `getMemoryUsage()` (`SortedMerger.retainedBytes()`). Unit tests: `ArrowTypeConverterSliceTest` (every
+> slice of 9 vector kinds incl. nulls/decimals/varchar = the same rows of the whole batch), `AggregationReaderTest` (+1). Build run
+> 40303409490 green; e2e run 40303631295 (workflow_dispatch, 1+3 servers, partial) green: 22/22, aggmerge sorted = hash, failover
+> OK, heap checks `1 1G default q18 OK` (peak 332 MB), `1/eps4 1G default OK` (363 MB), `3 1G default OK` (204 MB). **The CI heap
+> numbers did not move**: eps4 `[J` 169 MB (session 59: 175 MB), and the 1-endpoint peak itself varied 179 → 332 MB between runs,
+> so the remaining `long[]` is not the merge's (likely Trino's own operators; the histogram is one sample near the peak). The
+> change bounds what the plugin can hold per endpoint regardless; whether it matters at SF10 is for the stand (same check as above).
 
 > **Server build `server-1.0.0-4d707e2aedfc` appeared in `e2e-assets`** (uploaded 2026-10-26 08:28 UTC, sums in `SHA256SUMS`: jar
 > 69cd8a1e…2a585) **without a coordinator note** (what changed vs 7fbe2d75827c?). Session 59 ran the suite on it unchanged
@@ -764,3 +775,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   40295577297 green (eps4 default q18 OK at 1G, 4 endpoints confirmed by the hash run's INFO line). Unannounced server build
   4d707e2aedfc: e2e partial 1+3 servers run 40295372006 and complete 3 servers run 40295376402 green; not made the default (Open
   question). ~85 Actions minutes. Invariants hold (failover checks exact or clean errors).
+- 2026-10-26 (cloud session 60): sorted aggregation merge converts server batches in 8192-row slices and reports its held pages
+  in `getMemoryUsage()`; Arrow off-heap flags for the plugin's test JVM. Build run 40303409490 green (40303169371 failed only on
+  the missing test-JVM flags); e2e run 40303631295 green (push runs 40303169395 / 40303409359 cancelled: concurrency group).
+  CI heap peaks unchanged within noise. ~60 Actions minutes. Invariants hold (failover exact or clean errors, server errors surface).
