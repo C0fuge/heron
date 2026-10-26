@@ -651,5 +651,5 @@ Kept up to date after every work session so work can be resumed from this reposi
   c3b276054cc3 in `e2e-assets`, no new maintainer answer); lock taken and released, no CI runs.
 - 2026-10-26 (cloud session 54): e2e on new server build 20b887839edf (Trino 455): partial 1+3 servers run 40246658737, complete
   3 servers run 40246660859 — all green incl. Iceberg time travel (`time-travel` OK in all three jobs; the server bug of
-  c3b276054cc3 is fixed). Made 20b887839edf the e2e default (`e2e.yml`, `run-e2e.sh`; push e2e run on that commit). ~75 Actions
+  c3b276054cc3 is fixed). Made 20b887839edf the e2e default (`e2e.yml`, `run-e2e.sh`; push e2e run 40248099474 on that commit green, 1+3 servers). ~75 Actions
   minutes. Invariants hold (failover/kill checks exact or clean errors).
