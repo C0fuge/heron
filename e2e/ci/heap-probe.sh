@@ -85,6 +85,7 @@ heap_probe() {
           | tee -a "$OUT/heap-probe.tsv"
         echo "--- live heap peak $xmx $setting $q:"; head -14 "$histo" 2>/dev/null || true
         [ -f "$dir/$q.err" ] && head -c 600 "$dir/$q.err"
+        docker logs trino 2>&1 | grep -m3 'merged in memory' | cut -c1-300 || true
       done
     done
   done

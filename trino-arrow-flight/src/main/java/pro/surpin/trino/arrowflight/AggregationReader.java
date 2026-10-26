@@ -14,6 +14,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,9 @@ final class AggregationReader
     }
 
     record Raw(String name, Type type, Role role) {}
+
+    private static final long BYTES_PER_GROUP = 128;
+    private static final long BYTES_PER_RAW_VALUE = 40;
 
     private final Aggregation aggregation;
     private final List<Raw> raws;
@@ -233,12 +237,49 @@ final class AggregationReader
 
         Page result()
         {
-            int positions = groups.size();
+            return toPage(new ArrayList<>(groups.values()));
+        }
+
+        /**
+         * Next page of at most {@code maxRows} merged rows, removed from the merger as they are emitted (the groups
+         * leave memory page by page); null once every group was emitted.
+         */
+        Page nextPage(int maxRows)
+        {
+            if (groups.isEmpty()) {
+                return null;
+            }
+            List<Object[]> out = new ArrayList<>(Math.min(maxRows, groups.size()));
+            Iterator<Object[]> iterator = groups.values().iterator();
+            while (iterator.hasNext() && out.size() < maxRows) {
+                out.add(iterator.next());
+                iterator.remove();
+            }
+            return toPage(out);
+        }
+
+        int groupCount()
+        {
+            return groups.size();
+        }
+
+        /**
+         * Rough heap held by the groups: per group a map entry, the key list, the value array and one boxed value
+         * per raw column (measured ~210 bytes per group for GROUP BY bigint + one decimal sum, TPC-H q18).
+         */
+        long estimatedBytes()
+        {
+            return groups.size() * (BYTES_PER_GROUP + BYTES_PER_RAW_VALUE * raws.size());
+        }
+
+        private Page toPage(List<Object[]> rows)
+        {
+            int positions = rows.size();
             Block[] blocks = new Block[raws.size()];
             for (int i = 0; i < raws.size(); i++) {
                 Type type = raws.get(i).type();
                 BlockBuilder builder = type.createBlockBuilder(null, positions);
-                for (Object[] values : groups.values()) {
+                for (Object[] values : rows) {
                     writeNativeValue(type, builder, values[i]);
                 }
                 blocks[i] = builder.build();

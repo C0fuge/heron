@@ -146,6 +146,27 @@ class AggregationReaderTest
     }
 
     @Test
+    void hashMergeEmitsPagesAndReleasesGroups()
+    {
+        AggregationReader.Merger merger = reader(AGGREGATION).merger();
+        assertEquals(0, merger.estimatedBytes());
+        merger.add(page(RAW_TYPES, List.of(row(1L, 1L, 10L, 10L), row(2L, 1L, 20L, 20L), row(3L, 1L, 30L, 30L))));
+        merger.add(page(RAW_TYPES, List.of(row(2L, 2L, 5L, 1L), row(null, 1L, 7L, 7L))));
+        assertEquals(4, merger.groupCount());
+        long full = merger.estimatedBytes();
+        assertTrue(full >= 4 * 200, "estimate " + full);
+
+        List<Object[]> out = new ArrayList<>(rows(merger.nextPage(3)));
+        assertEquals(3, out.size());
+        assertEquals(1, merger.groupCount());
+        assertTrue(merger.estimatedBytes() < full);
+        out.addAll(rows(merger.nextPage(3)));
+        assertNull(merger.nextPage(3));
+        assertEquals(0, merger.estimatedBytes());
+        assertRows(List.of(row(1L, 1L, 10L, 10L), row(2L, 3L, 25L, 1L), row(3L, 1L, 30L, 30L), row(null, 1L, 7L, 7L)), out);
+    }
+
+    @Test
     void sortedMergeOnlyForGroupedAggregationsOnServerOrderedTypes()
     {
         assertTrue(reader(AGGREGATION).canMergeSorted());

@@ -70,6 +70,9 @@ public abstract class AbstractArrowFlightPageSource
     private FlightDataStream stream;
     private ParallelStreamReader parallelReader;
     private AggregationReader.SortedMerger sortedMerger;
+    // Hash merge of several endpoints' partial groups: filled one batch per readNextPage(), then drained page by page.
+    private AggregationReader.Merger hashMerger;
+    private boolean hashMergeRead;
     private boolean finished;
     private long remainingRows;
     private long completedBytes;
@@ -166,6 +169,9 @@ public abstract class AbstractArrowFlightPageSource
                 if (parallelReader != null && !parallelReader.isFinished()) {
                     return null;   // no stream has a batch ready yet: see isBlocked()
                 }
+                if (hashMerger != null && !hashMergeRead) {
+                    return null;   // still collecting groups; Trino sees them in getMemoryUsage() meanwhile
+                }
                 finished = true;
                 closeStream();
                 return null;
@@ -236,6 +242,12 @@ public abstract class AbstractArrowFlightPageSource
         FlightInfo info = client.getFlightInfo(sql);
         endpoints = info.getEndpoints();
         client.recordEndpointCount(endpoints.size());
+        if (aggregationReader != null && !sortedGroups && endpoints.size() > 1) {
+            log.info("Grouped aggregation from %s endpoints merged in memory (%s): %s", endpoints.size(),
+                    !sortedAggregationMerge ? "sorted merge disabled"
+                            : !aggregationReader.canMergeSorted() ? "GROUP BY types the server cannot order like Trino"
+                            : "sorted merge not requested, a single endpoint was expected", sql);
+        }
         if (sortedGroups && endpoints.size() > 1) {
             List<AggregationReader.PageStream> streams = new ArrayList<>();
             for (FlightEndpoint endpoint : endpoints) {
@@ -412,23 +424,27 @@ public abstract class AbstractArrowFlightPageSource
             VectorSchemaRoot root = nextBatch();
             return root == null ? null : aggregationReader.finish(aggregationReader.rawPage(root), columns);
         }
-        if (nextEndpoint > 0 && stream == null && nextEndpoint >= endpoints.size()) {
-            return null;
+        // Several Flight nodes each aggregated their own files: merge the partial groups. One batch per call, so that
+        // Trino accounts the growing merger (getMemoryUsage) and can stop the query at its memory limit.
+        if (hashMerger == null) {
+            hashMerger = aggregationReader.merger();
         }
-        // Several Flight nodes each aggregated their own files: merge the partial groups.
-        AggregationReader.Merger merger = aggregationReader.merger();
-        VectorSchemaRoot root;
-        while ((root = nextBatch()) != null) {
-            merger.add(aggregationReader.rawPage(root));
+        if (!hashMergeRead) {
+            VectorSchemaRoot root = nextBatch();
+            if (root != null) {
+                hashMerger.add(aggregationReader.rawPage(root));
+                return null;
+            }
+            hashMergeRead = true;
         }
-        nextEndpoint = endpoints.size();
-        return aggregationReader.finish(merger.result(), columns);
+        Page raw = hashMerger.nextPage(SORTED_MERGE_PAGE_ROWS);
+        return raw == null ? null : aggregationReader.finish(raw, columns);
     }
 
     @Override
     public long getMemoryUsage()
     {
-        return 0;
+        return hashMerger == null ? 0 : hashMerger.estimatedBytes();
     }
 
     private void closeStream()
@@ -439,6 +455,7 @@ public abstract class AbstractArrowFlightPageSource
         if (sortedMerger != null) {
             sortedMerger.close();
         }
+        hashMerger = null;
         if (stream != null) {
             stream.close();
             stream = null;

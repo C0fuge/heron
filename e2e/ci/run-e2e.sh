@@ -181,7 +181,8 @@ save_logs() { for c in trino ${HOSTS//,/ }; do docker logs "$c" > "$OUT/$c.log" 
 COMPARE=(python3 "$REPO/e2e/ci/compare.py" "$REPO/e2e/ci/reference/sf1")
 QUERIES="$REPO/e2e/ci/queries"
 
-# HEAP_PROBE=only: just the heap probe (heap-probe.sh), then stop; HEAP_PROBE=1: the probe after the TPC-H suite.
+# HEAP_PROBE=only: just the heap probe (heap-probe.sh), then stop; HEAP_PROBE=1: the probe after the TPC-H suite
+# (otherwise a heap check with HEAP_CHECK_XMX, default 1G, runs there).
 HEAP_PROBE="${HEAP_PROBE:-0}"
 status=0
 if [ "$HEAP_PROBE" = only ]; then
@@ -195,7 +196,13 @@ mkdir -p "$OUT/sf1"
 for q in "$QUERIES"/q*.sql; do run_query "$(basename "$q" .sql)" "$OUT/sf1"; done
 save_logs
 "${COMPARE[@]}" "$OUT/sf1" "$QUERIES" "$OUT/sf1-summary.tsv" || status=1
-if [ "$HEAP_PROBE" = 1 ]; then heap_probe; fi
+# Heap check (every run): q18 with a small Trino heap must stay exact; on 3 servers every table has 3 endpoints, whose
+# grouped aggregation the plugin merges (STATUS stand finding 2026-10-26). HEAP_PROBE=1: the full probe instead.
+if [ "$HEAP_PROBE" = 1 ]; then
+  heap_probe
+else
+  HEAP_PROBE_XMX="${HEAP_CHECK_XMX:-1G}" HEAP_PROBE_SETTINGS=default HEAP_PROBE_FAIL=1 heap_probe
+fi
 
 # A projection the plugin cannot push (ROW constructor over every column) must plan and run: Trino hands
 # applyProjection the columns in no stable order, which looped the optimizer until it hit its time limit
