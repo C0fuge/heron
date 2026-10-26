@@ -83,6 +83,18 @@ Kept up to date after every work session so work can be resumed from this reposi
 > Trino's "exceeded per-node memory limit" (ScanFilterAndProject 130-210 MB = the accounted merger). Every e2e run now has a heap
 > check: q18 with Trino -Xmx1G must be exact (`HEAP_CHECK_XMX`). **Stand:** rerun q18 SF10 with a 6 GB (and 4 GB) Trino heap on
 > the 3-node cluster and with `endpointsPerServer` 2/4/8 with this plugin; grep the Trino log for "merged in memory".
+>
+> **Session 59:** the 1-server e2e job now also covers the single-server case: flight1 is restarted with
+> `-Darrowflight.cluster.endpointsPerServer=4` (`HEAP_CHECK_ENDPOINTS`, default 4; 0/1 = off) and q18 runs at Trino -Xmx1G again
+> (`default` must be exact; `hash` only reports). Push run 40295577297: `1/eps4 1G default q18 OK` (peak live heap 402 MB vs 179 MB
+> with one endpoint), `hash` = Trino's "exceeded per-node memory limit" with the INFO line "Grouped aggregation from 4 endpoints
+> merged in memory (sorted merge disabled)" = 4 endpoints confirmed. Adds ~1.5 min to the 1-server job. SF10 stays a stand check.
+
+> **Server build `server-1.0.0-4d707e2aedfc` appeared in `e2e-assets`** (uploaded 2026-10-26 08:28 UTC, sums in `SHA256SUMS`: jar
+> 69cd8a1e…2a585) **without a coordinator note** (what changed vs 7fbe2d75827c?). Session 59 ran the suite on it unchanged
+> (Trino 455, local Iceberg, scripts of 44d9328): partial 1+3 servers run 40295372006 and complete 3 servers run 40295376402 green
+> (job wall time 1 server 12.9 min, 3 servers partial 18.9 / complete 19.1 min). **Not made the e2e default** — waiting for the
+> coordinator's note (see Open questions); if it says "make it the default", change `e2e.yml` + `run-e2e.sh` (7fbe2d75827c stays selectable).
 
 > **New server build `server-1.0.0-7fbe2d75827c`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release) = 60e888bc26ec + planning no longer waits for the cluster to settle after
@@ -403,6 +415,8 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **Server build 4d707e2aedfc (session 59):** uploaded to `e2e-assets` with no note in STATUS. What does it change vs 7fbe2d75827c,
+  and should it become the e2e default? The CI suite is green on it in both modes (runs 40295372006, 40295376402).
 - **CI e2e on 60e888bc26ec is ~40 % slower (session 54)** (duckDbThreads default 4; 1 server 8.8 → 12.4 min, 3 servers 13.7 →
   19.0 min): CI runs up to 3 servers + Trino on 4 vCPUs. Should the e2e start its servers with `-DduckDbThreads=1` (the old
   default; keeps CI minutes and the mid-stream kill timing stable) or keep the production default 4 so CI tests what production
@@ -746,4 +760,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   connection (gRPC UNKNOWN "channel closed", ClosedChannelException) counts as unreachable before any data — it failed
   `FlightSqlSessionFailoverTest` in build run 40290807373. Build runs 40291029063, 40291834596 green; push e2e run 40291834562
   green (1+3 servers, full suite incl. the new 1G heap check, failover, aggmerge sorted = hash). ~75 Actions minutes. Invariants: failover still only before data; server errors still surface.
-
+- 2026-10-26 (cloud session 59): q18 heap check extended to one server with `endpointsPerServer=4` (1-server e2e job): push e2e run
+  40295577297 green (eps4 default q18 OK at 1G, 4 endpoints confirmed by the hash run's INFO line). Unannounced server build
+  4d707e2aedfc: e2e partial 1+3 servers run 40295372006 and complete 3 servers run 40295376402 green; not made the default (Open
+  question). ~85 Actions minutes. Invariants hold (failover checks exact or clean errors).
