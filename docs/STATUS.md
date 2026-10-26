@@ -57,6 +57,12 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **New server build `server-1.0.0-60e888bc26ec`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
+> `SHA256SUMS` in this repo's assets release) = 20b887839edf + **`duckDbThreads` default 4** (was 1 in code; maintainer
+> decision after the perf campaign: SF10 ~1.8x, SF1 ~1.3x faster, small queries unchanged). No protocol change. Run the
+> suite once on it and make it the CI default if green; note timings if they change noticeably.
+
+
 > **New server build `server-1.0.0-20b887839edf`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` attached to this repo's assets release). = c3b276054cc3 + **Iceberg time travel** (`FOR VERSION AS OF` /
 > `FOR TIMESTAMP AS OF`; c3b276054cc3 did **not** contain it — that earlier note was wrong, which is why the forwarded
