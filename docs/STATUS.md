@@ -57,6 +57,12 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **New server build `server-1.0.0-57d252b1437f`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
+> `SHA256SUMS` in this repo's assets release) = 4d707e2aedfc + one outbound byte budget shared by all Flight streams
+> (the stand saw CANCELLED streams and a dead node under 8 concurrent partial-mode scans on a 3-node cluster). Run the
+> suite once on it (failover and concurrent-scan items especially) and make it the CI default if green.
+
+
 > **Stand finding 2026-10-26 (local coordinator, perf campaign): plugin memory with several endpoints.** TPC-H SF10
 > q18 fails `Java heap space` with a 6 GB Trino heap whenever a query has more than one endpoint per table - 3-node
 > cluster in partial mode (servers 4eaab052deaf / c3b276054cc3, 1 and 8 DuckDB threads alike) and a single server
