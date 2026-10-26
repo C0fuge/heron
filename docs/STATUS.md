@@ -447,6 +447,9 @@ Kept up to date after every work session so work can be resumed from this reposi
 - **Server build 4d707e2aedfc (session 59):** uploaded to `e2e-assets` with no note in STATUS. What does it change vs 7fbe2d75827c,
   and should it become the e2e default? (Session 61: superseded as default by 57d252b1437f = 4d707e2aedfc + shared outbound byte
   budget; only the 4d707e2aedfc delta itself is still undocumented.) The CI suite is green on it in both modes (runs 40295372006, 40295376402).
+  *Coordinator, 2026-10-26:* 4d707e2aedfc = 7fbe2d75827c + DuckDB retries S3 connect errors for ~6 s (the stand saw
+  every complete-mode query fail with "Could not establish connection" on S3 at `duckDbThreads=8`); the note was skipped
+  because this repo was locked at upload time. No protocol change.
 - **CI e2e on 60e888bc26ec is ~40 % slower (session 54)** (duckDbThreads default 4; 1 server 8.8 → 12.4 min, 3 servers 13.7 →
   19.0 min): CI runs up to 3 servers + Trino on 4 vCPUs. Should the e2e start its servers with `-DduckDbThreads=1` (the old
   default; keeps CI minutes and the mid-stream kill timing stable) or keep the production default 4 so CI tests what production
