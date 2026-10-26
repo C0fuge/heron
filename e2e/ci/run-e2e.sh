@@ -35,6 +35,8 @@ case "$SERVER_BUILD" in int4) ICEBERG="${ICEBERG:-0}" ;; *) ICEBERG="${ICEBERG:-
 mkdir -p "$OUT" "$WORK" "$WORK/wh"
 # shellcheck source=e2e/ci/iceberg.sh
 . "$REPO/e2e/ci/iceberg.sh"
+# shellcheck source=e2e/ci/heap-probe.sh
+. "$REPO/e2e/ci/heap-probe.sh"
 
 S3_KEY="ci$(openssl rand -hex 8)"; S3_SECRET="$(openssl rand -hex 24)"; TOKEN="$(openssl rand -hex 24)"
 
@@ -140,27 +142,29 @@ arrow-flight.hosts=flight1,flight2:32010,flight3
 arrow-flight.port=32010
 arrow-flight.bearer-token=$TOKEN
 CAT
-cat > "$WORK/etc/jvm.config" <<JVM
--server
--Xmx3G
--XX:+UseG1GC
--XX:+ExitOnOutOfMemoryError
--Djdk.attach.allowAttachSelf=true
---add-opens=java.base/java.nio=ALL-UNNAMED
--Darrow.enable_unsafe_memory_access=true
-JVM
-docker run -d --name trino --network $NET -p 127.0.0.1:8080:8080 \
-  -v "$WORK/plugin":/usr/lib/trino/plugin/arrow-flight:ro \
-  -v "$WORK/etc/catalog/flight.properties":/etc/trino/catalog/flight.properties:ro \
-  -v "$WORK/etc/catalog/flighth.properties":/etc/trino/catalog/flighth.properties:ro \
-  -v "$WORK/etc/jvm.config":/etc/trino/jvm.config:ro \
-  -v "$REPO/e2e/ci/queries":/queries:ro \
-  "trinodb/trino:$TRINO_VERSION" >/dev/null
-for i in $(seq 1 90); do
-  docker exec trino trino --execute 'SELECT 1' >/dev/null 2>&1 && break
-  docker ps -q -f name=trino -f status=running | grep -q . || break
-  sleep 2
-done
+# start_trino <xmx> [probe]: (re)starts the Trino container; 'probe' (heap-probe.sh) drops ExitOnOutOfMemoryError so a
+# heap error fails the query instead of ending the JVM.
+start_trino() {
+  docker rm -f trino >/dev/null 2>&1 || true
+  {
+    printf '%s\n' -server "-Xmx$1" -XX:+UseG1GC
+    [ "${2:-}" = probe ] || echo -XX:+ExitOnOutOfMemoryError
+    printf '%s\n' -Djdk.attach.allowAttachSelf=true --add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true
+  } > "$WORK/etc/jvm.config"
+  docker run -d --name trino --network $NET -p 127.0.0.1:8080:8080 \
+    -v "$WORK/plugin":/usr/lib/trino/plugin/arrow-flight:ro \
+    -v "$WORK/etc/catalog/flight.properties":/etc/trino/catalog/flight.properties:ro \
+    -v "$WORK/etc/catalog/flighth.properties":/etc/trino/catalog/flighth.properties:ro \
+    -v "$WORK/etc/jvm.config":/etc/trino/jvm.config:ro \
+    -v "$REPO/e2e/ci/queries":/queries:ro \
+    "trinodb/trino:$TRINO_VERSION" >/dev/null
+  for i in $(seq 1 90); do
+    docker exec trino trino --execute 'SELECT 1' >/dev/null 2>&1 && break
+    docker ps -q -f name=trino -f status=running | grep -q . || break
+    sleep 2
+  done
+}
+start_trino 3G
 docker exec trino trino --execute 'SHOW SCHEMAS FROM flight' | tee "$OUT/schemas.txt"
 
 run_query() {  # query-name out-dir
@@ -177,12 +181,21 @@ save_logs() { for c in trino ${HOSTS//,/ }; do docker logs "$c" > "$OUT/$c.log" 
 COMPARE=(python3 "$REPO/e2e/ci/compare.py" "$REPO/e2e/ci/reference/sf1")
 QUERIES="$REPO/e2e/ci/queries"
 
+# HEAP_PROBE=only: just the heap probe (heap-probe.sh), then stop; HEAP_PROBE=1: the probe after the TPC-H suite.
+HEAP_PROBE="${HEAP_PROBE:-0}"
+status=0
+if [ "$HEAP_PROBE" = only ]; then
+  heap_probe
+  save_logs
+  exit $status
+fi
+
 log "TPC-H SF1 ($SERVERS server(s))"
 mkdir -p "$OUT/sf1"
 for q in "$QUERIES"/q*.sql; do run_query "$(basename "$q" .sql)" "$OUT/sf1"; done
 save_logs
-status=0
 "${COMPARE[@]}" "$OUT/sf1" "$QUERIES" "$OUT/sf1-summary.tsv" || status=1
+if [ "$HEAP_PROBE" = 1 ]; then heap_probe; fi
 
 # A projection the plugin cannot push (ROW constructor over every column) must plan and run: Trino hands
 # applyProjection the columns in no stable order, which looped the optimizer until it hit its time limit

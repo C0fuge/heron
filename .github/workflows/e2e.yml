@@ -24,6 +24,12 @@ on:
       iceberg-core-site:
         description: 'Put core-site.xml (fs.file.impl=LocalFileSystem) on the server classpath: 1, 0, or empty = 1 for int5/int6 only'
         default: ''
+      heap-probe:
+        description: 'Trino heap probe (e2e/ci/heap-probe.sh): 0, 1 (after the TPC-H suite) or only'
+        default: '0'
+      heap-probe-xmx:
+        description: 'Trino heaps for the probe, space-separated'
+        default: '640M 1G 1536M'
   push:
     branches: [main, 'claude/**']
     paths:
@@ -35,7 +41,7 @@ on:
       - '.github/workflows/e2e.yml'
 
 concurrency:
-  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}-${{ inputs.iceberg-core-site }}
+  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}-${{ inputs.iceberg-core-site }}-${{ inputs.heap-probe }}
   cancel-in-progress: true
 
 # e2e-assets is a published pre-release, so a read token can list and download its assets.
@@ -57,6 +63,8 @@ jobs:
       SERVER_BUILD: ${{ inputs.server-build || '7fbe2d75827c' }}
       ICEBERG_WAREHOUSE: ${{ inputs.iceberg-warehouse || 'local' }}
       ICEBERG_CORE_SITE: ${{ inputs.iceberg-core-site }}
+      HEAP_PROBE: ${{ inputs.heap-probe || '0' }}
+      HEAP_PROBE_XMX: ${{ inputs.heap-probe-xmx || '640M 1G 1536M' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
