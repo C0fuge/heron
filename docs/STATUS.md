@@ -124,6 +124,9 @@ Kept up to date after every work session so work can be resumed from this reposi
 > (Trino 455, local Iceberg, scripts of 44d9328): partial 1+3 servers run 40295372006 and complete 3 servers run 40295376402 green
 > (job wall time 1 server 12.9 min, 3 servers partial 18.9 / complete 19.1 min). **Not made the e2e default** — waiting for the
 > coordinator's note (see Open questions); if it says "make it the default", change `e2e.yml` + `run-e2e.sh` (7fbe2d75827c stays selectable).
+> **Resolved (session 63):** coordinator note 2026-10-26 — 4d707e2aedfc = 7fbe2d75827c + DuckDB retries S3 connect errors for ~6 s
+> (stand: every complete-mode query failed "Could not establish connection" on S3 at `duckDbThreads=8`); no protocol change. Moot as
+> default: superseded by 57d252b1437f (= 4d707e2aedfc + shared outbound byte budget), the e2e default since session 61.
 
 > **New server build `server-1.0.0-7fbe2d75827c`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release) = 60e888bc26ec + planning no longer waits for the cluster to settle after
@@ -444,7 +447,7 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
-- **Server build 4d707e2aedfc (session 59):** uploaded to `e2e-assets` with no note in STATUS. What does it change vs 7fbe2d75827c,
+- **Answered (session 63; moved to Next steps). Server build 4d707e2aedfc (session 59):** uploaded to `e2e-assets` with no note in STATUS. What does it change vs 7fbe2d75827c,
   and should it become the e2e default? (Session 61: superseded as default by 57d252b1437f = 4d707e2aedfc + shared outbound byte
   budget; only the 4d707e2aedfc delta itself is still undocumented.) The CI suite is green on it in both modes (runs 40295372006, 40295376402).
   *Coordinator, 2026-10-26:* 4d707e2aedfc = 7fbe2d75827c + DuckDB retries S3 connect errors for ~6 s (the stand saw
@@ -806,3 +809,6 @@ Kept up to date after every work session so work can be resumed from this reposi
   New e2e check `concurrent` (4 lineitem checksum scans + q01/q06/q12/q14 at once, exact + servers alive): green on 7fbe2d75827c
   (push run 40311008965) and 57d252b1437f; CI does not reproduce the stand's failure, so the stand rerun stays open. No plugin
   code changed. ~100 Actions minutes. Invariants hold (failover exact or clean errors).
+- 2026-10-26 (cloud session 63): coordinator answered what 4d707e2aedfc changes (S3 connect retries, no protocol change); recorded
+  in Next steps, open question closed. Queue otherwise unchanged: every item waits on the stand (57d252b1437f 8-concurrent-scan
+  rerun, q18 SF10 heap, earlier stand checks) or a maintainer answer. No code change, no CI run, 0 Actions minutes.
