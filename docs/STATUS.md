@@ -70,7 +70,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 > 18.2 / complete 14.0 min. **New e2e check `concurrent`** (every run, 1 and 3 servers; `CONC_QUERIES`, default 4 full `lineitem`
 > checksum scans + q01 q06 q12 q14 at the same time): every answer exact and every server still running afterwards. Green on
 > 7fbe2d75827c too (push run 40311008965, 1+3 servers), i.e. CI does not reproduce the stand's CANCELLED streams / dead node with
-> 8 concurrent queries (SF1, 4-vCPU runner); on 57d252b1437f: push run 40313494859 (see Log). **Stand:** rerun the 8-concurrent-scan
+> 8 concurrent queries (SF1, 4-vCPU runner); on 57d252b1437f green as well (push run 40313494859, 1+3 servers; 3-server
+> mid-stream kill `tx8M@5.8`, restarted 18.4 s, coordinator-down 14.6 s). **Stand:** rerun the 8-concurrent-scan
 > case on the 3-node cluster with 57d252b1437f.
 
 
@@ -797,3 +798,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   in `getMemoryUsage()`; Arrow off-heap flags for the plugin's test JVM. Build run 40303409490 green (40303169371 failed only on
   the missing test-JVM flags); e2e run 40303631295 green (push runs 40303169395 / 40303409359 cancelled: concurrency group).
   CI heap peaks unchanged within noise. ~60 Actions minutes. Invariants hold (failover exact or clean errors, server errors surface).
+- 2026-10-26 (cloud session 61): server build 57d252b1437f (shared outbound byte budget) green in both modes — dispatch runs
+  40310816951 (partial, 1+3 servers) and 40310820425 (complete, 3 servers) — and made the e2e default (push run 40313494859 green).
+  New e2e check `concurrent` (4 lineitem checksum scans + q01/q06/q12/q14 at once, exact + servers alive): green on 7fbe2d75827c
+  (push run 40311008965) and 57d252b1437f; CI does not reproduce the stand's failure, so the stand rerun stays open. No plugin
+  code changed. ~100 Actions minutes. Invariants hold (failover exact or clean errors).
