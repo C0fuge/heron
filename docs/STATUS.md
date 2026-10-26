@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `60e888bc26ec` since session 54 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `7fbe2d75827c` since session 57, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
@@ -61,6 +61,14 @@ Kept up to date after every work session so work can be resumed from this reposi
 > `SHA256SUMS` in this repo's assets release) = 60e888bc26ec + planning no longer waits for the cluster to settle after
 > a node left (fixes the intermittent GetFlightInfo TIMED_OUT with a stopped member) + `s3a://`/`s3n://` catalog roots +
 > the deployment's HDFS short-circuit setting is kept. Run the suite once on it and make it the CI default if green.
+>
+> **Done (session 57): green, now the e2e default** (`e2e.yml`, `run-e2e.sh`; 60e888bc26ec, 20b887839edf, 4eaab052deaf,
+> c3b276054cc3, int7 stay selectable). Trino 455, local Iceberg, server started unchanged: partial 1+3 servers run 40282449340,
+> complete 3 servers run 40282451851 — all checks OK: TPC-H 22/22, types, Iceberg, failover (node lost before planning, kill during a
+> read on tpch/ice = clean error or backup reads, mid-stream kill hit after data on attempt 1 in partial (`tx8M@4.8`), `restarted`
+> exact after 18.3 s with 0 backup reads, two down, coordinator-down 14.1 s in both modes). No GetFlightInfo TIMED_OUT seen (it was
+> intermittent; one run proves little). Job wall time 1 server 12.3 min, 3 servers partial 17.8 / complete 15.6 min (similar to
+> 60e888bc26ec). `s3a://` roots and the HDFS short-circuit setting are not exercised in CI (rclone S3 via `s3://`, no HDFS).
 
 
 > **Queue empty again (session 55, 2026-10-26).** Every item below is done or waits on the stand / a maintainer answer
@@ -701,3 +709,6 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-10-26 (cloud session 56): nothing to do — Next steps queue empty (rest waits on the stand / Open questions), no new
   server build in `e2e-assets` since 60e888bc26ec, last runs (40258066925, 40258071118, 40257236337) green. Stopped early;
   0 Actions minutes.
+- 2026-10-26 (cloud session 57): new server build 7fbe2d75827c (planning with a node down, s3a roots): e2e partial 1+3 servers
+  run 40282449340 and complete 3 servers run 40282451851 green; made it the e2e default (the push of that change starts a push
+  e2e run — next session: confirm it). ~46 Actions minutes. Invariants hold.
