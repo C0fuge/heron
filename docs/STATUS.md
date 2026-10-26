@@ -671,6 +671,6 @@ Kept up to date after every work session so work can be resumed from this reposi
   minutes. Invariants hold (failover/kill checks exact or clean errors).
 - 2026-10-26 (cloud session 54, cont.): coordinator added server build 60e888bc26ec (duckDbThreads 4) during the session; lock
   re-taken. e2e partial 1+3 servers run 40249518015 (3-server job failed once on the mid-stream kill timing only, exact answers;
-  re-run attempt 2 green), complete 3 servers run 40249520307 green. Made 60e888bc26ec the e2e default (no push e2e run for it:
-  only the default id changed, the dispatch runs used the same scripts). CI wall time up ~40 % (Open question). ~70 more
+  re-run attempt 2 green), complete 3 servers run 40249520307 green. Made 60e888bc26ec the e2e default (push e2e run 40252652443
+  started on that commit; its result was not checked in this session — next session: confirm it). CI wall time up ~40 % (Open question). ~70 more
   Actions minutes.
