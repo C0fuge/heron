@@ -577,6 +577,9 @@ class FlightSqlSessionFailoverTest
         assertTrue(FlightDataStream.isUnreachable(CallStatus.UNAVAILABLE.toRuntimeException()));
         assertTrue(FlightDataStream.isUnreachable(new RuntimeException(new java.net.ConnectException("refused"))));
         assertTrue(FlightDataStream.isUnreachable(new RuntimeException(new java.net.UnknownHostException("n3"))));
+        // a closed pooled connection, reported by gRPC as UNKNOWN "channel closed"
+        assertTrue(FlightDataStream.isUnreachable(CallStatus.UNKNOWN.withDescription("channel closed")
+                .withCause(new java.nio.channels.ClosedChannelException()).toRuntimeException()));
         assertFalse(FlightDataStream.isUnreachable(CallStatus.INTERNAL.toRuntimeException()));
         assertFalse(FlightDataStream.isUnreachable(CallStatus.UNAUTHENTICATED.toRuntimeException()));
         assertFalse(FlightDataStream.isUnreachable(CallStatus.CANCELLED.toRuntimeException()));

@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import java.net.ConnectException;
 import java.net.NoRouteToHostException;
 import java.net.UnknownHostException;
+import java.nio.channels.ClosedChannelException;
 import java.nio.channels.UnresolvedAddressException;
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -189,8 +190,10 @@ public final class FlightDataStream
             if (t instanceof FlightRuntimeException f && f.status().code() == FlightStatusCode.UNAVAILABLE) {
                 return true;
             }
-            if (t instanceof ConnectException || t instanceof NoRouteToHostException
-                    || t instanceof UnknownHostException || t instanceof UnresolvedAddressException) {
+            // ClosedChannelException: gRPC reports a pooled connection the peer closed as UNKNOWN "channel closed" when
+            // the call's first write races the close (seen in FlightSqlSessionFailoverTest, build run 40290807373)
+            if (t instanceof ConnectException || t instanceof NoRouteToHostException || t instanceof UnknownHostException
+                    || t instanceof UnresolvedAddressException || t instanceof ClosedChannelException) {
                 return true;
             }
             if (t.getCause() == t) {
