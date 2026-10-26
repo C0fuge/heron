@@ -521,6 +521,23 @@ if [ "$SERVERS" -ge 3 ]; then
     if docker exec trino trino --catalog flight --schema tpch --output-format TSV --execute "$STREAM_SQL" \
          > "$1/stream.tsv" 2> "$1/stream.err"; then rm -f "$1/stream.err"; else rm -f "$1/stream.tsv"; fi
   }
+  flight3_tx() {  # bytes flight3 has sent on its non-loopback interfaces
+    local pid
+    pid=$(docker inspect -f '{{.State.Pid}}' flight3)
+    { cat "/proc/$pid/net/dev" 2>/dev/null || sudo -n cat "/proc/$pid/net/dev"; } \
+      | awk 'NR > 2 { sub(/^ +/, ""); split($0, f, /[: ]+/); if (f[1] != "lo") s += f[10] } END { print s + 0 }'
+  }
+  kill_after_tx() {  # bytes max-seconds: kill flight3 once it has sent that much since the call (or at the cap); prints when
+    local start t0 now
+    start=$(date +%s.%N); t0=$(flight3_tx)
+    while :; do
+      now=$(date +%s.%N)
+      if [ "$(( $(flight3_tx) - t0 ))" -ge "$1" ] || [ "$(echo "$now - $start >= $2" | bc)" = 1 ]; then break; fi
+      sleep 0.1
+    done
+    docker kill flight3 >/dev/null
+    printf 'tx%dM@%.1f' "$(( $1 / 1048576 ))" "$(echo "$now - $start" | bc)"
+  }
   kill_mid_stream() {
     local dir="$OUT/killed-mid-stream" attempt=0 hit=no wrong=0 delay delays base_s adir result evidence start
     log "failover: flight3 killed in the middle of a stream"
@@ -550,6 +567,11 @@ if [ "$SERVERS" -ge 3 ]; then
     else
       delays=$(awk -v b="$base_s" 'BEGIN { printf "%.1f %.1f %.1f %.1f", b*0.8, b*0.7, b*0.9, b*0.6 }')
     fi
+    # Timed kills keep missing when flight3's streams start late (60e888bc26ec, 4 DuckDB threads per server on the
+    # 4-vCPU runner: 4/4 "before any data" at 60-90 % of the baseline, runs 40249518015, 40256341545). So attempt 1
+    # kills flight3 once it has sent KILL_STREAM_TX_MB (8) MB since the query started -- its streams are delivering
+    # then -- capped at 95 % of the baseline; the timed delays follow as further attempts.
+    [ -n "${KILL_STREAM_DELAYS:-}" ] || delays="tx $delays"
     log "mid-stream kill delays: $delays"
     for delay in $delays; do
       attempt=$((attempt + 1))
@@ -557,8 +579,12 @@ if [ "$SERVERS" -ge 3 ]; then
       [ "$attempt" -gt 1 ] && restart_lost
       mark_log
       stream_query "$adir" &
-      sleep "$delay"
-      docker kill flight3 >/dev/null
+      if [ "$delay" = tx ]; then
+        delay=$(kill_after_tx $(( ${KILL_STREAM_TX_MB:-8} * 1048576 )) "$(echo "$base_s * 0.95" | bc)")
+      else
+        sleep "$delay"
+        docker kill flight3 >/dev/null
+      fi
       wait
       if [ -f "$adir/stream.tsv" ]; then
         if cmp -s "$dir/base/stream.tsv" "$adir/stream.tsv"; then result=exact; else result=WRONG; wrong=1; cat "$adir/stream.tsv"; fi

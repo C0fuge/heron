@@ -99,7 +99,7 @@ jobs:
           e2e/ci/run-e2e.sh
       - name: Results
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: e2e-${{ env.TRINO_VERSION }}-${{ env.SERVER_BUILD }}-${{ env.RESULT_MODE }}-${{ matrix.servers }}srv
           path: ${{ runner.temp }}/out/
