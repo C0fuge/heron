@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `20b887839edf` since session 54, before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
@@ -63,6 +63,18 @@ Kept up to date after every work session so work can be resumed from this reposi
 > clause was rejected) + fix for parameterized prepared statements with `duckDbStatementCacheSize` 0/1 + Hive metastore
 > Kerberos client + local catalog roots under a non-local `fs.defaultFS`. Run the suite once on it, retry the
 > time-travel item, and make it the CI default if green. Server bugs → the server repo's Next steps via the coordinator.
+>
+> **Done (session 54): green, time travel works, now the e2e default.** Trino 455, local Iceberg warehouse, server started unchanged:
+> partial 1+3 servers run 40246658737 and complete 3 servers run 40246660859 all green — TPC-H 22/22, types 2/2, projection, TopN,
+> aggmerge, dynfilter, splits, Iceberg (copies, `orders_del` deletes, rename, TPC-H 8/8, commit), failover (node lost before, kill
+> during a read on `tpch` and `ice`, mid-stream kill hit after data = clean error on attempt 3 (partial) / 4 (complete), `restarted`
+> exact with 0 backup reads (14.2 / 16.7 s restart), two nodes down, `coordinator-down` 7.9 / 13.7 s). **`time-travel` OK in all
+> three jobs:** `FOR VERSION AS OF` first/last snapshot of `ice.commits` = 5000/6000 rows, `FOR TIMESTAMP AS OF` the first commit
+> time = 5000, versioned scan = Parquet rows (4900); the clause on a Parquet table fails cleanly (server: "Time travel (FOR
+> VERSION/TIMESTAMP AS OF) is not …"). No regression against 4eaab052deaf/c3b276054cc3. The push/dispatch default `server-build`
+> is now `20b887839edf` (`e2e.yml`, `run-e2e.sh`); 4eaab052deaf, c3b276054cc3 and int7 stay selectable. Still warned: the
+> `START-NOTES.md` asset does not match `SHA256SUMS` (jar/tarballs verified). **Stand:** Iceberg time travel through Trino
+> (`SELECT … FROM flight.<ns>.<t> FOR VERSION AS OF <snapshot>` / `FOR TIMESTAMP AS OF TIMESTAMP '… UTC'`) on 20b887839edf.
 
 
 > **New server build `server-1.0.0-c3b276054cc3`** (2026-10-25, local coordinator): = 4eaab052deaf + Iceberg time travel (`FOR VERSION AS OF <snapshot>` / `FOR TIMESTAMP AS OF TIMESTAMP '… UTC'` after an Iceberg table name) + ZooKeeper client and lz4-java back in the runtime libs set (production HA with ZooKeeper). Assets `arrow-flight-server-1.0.0-c3b276054cc3-linux.jar`, `flight-plugins-1.0.0-c3b276054cc3.tar.zst`, `flight-server-libs-1.0.0-c3b276054cc3.tar.zst` (sums in SHA256SUMS). Run the suite once against it; if green make it the default. Connector follow-up: forward the time-travel clause (Trino `FOR VERSION/TIMESTAMP AS OF`, StarRocks own syntax if any) to the server — additive, no approval needed.
@@ -320,7 +332,7 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
-- **Server c3b276054cc3: Iceberg time travel unusable (server bug, session 50).** Every statement with `FOR VERSION AS OF <id>` or
+- **Resolved in 20b887839edf (session 54: time travel OK in CI, now the e2e default); the START-NOTES.md mismatch remains.** **Server c3b276054cc3: Iceberg time travel unusable (server bug, session 50).** Every statement with `FOR VERSION AS OF <id>` or
   `FOR TIMESTAMP AS OF TIMESTAMP '… UTC'` after an Iceberg table name fails in the server's `ParquetQueryParser.parseChecked`
   (jOOQ OSS parser): `org.jooq.impl.ParserException: Feature only supported in pro edition: [1:31] SELECT * FROM ice.commits FOR
   [*]VERSION AS OF 5871184891042262909` — on `getExecuteSchema` and on GetFlightInfo/prepare (direct ADBC probe, run 40226815637);
@@ -631,3 +643,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   ~110 Actions minutes. Invariants hold (unversioned queries unchanged; time-travel errors are clean server errors).
 - 2026-10-25 (cloud sessions 51, 52, 53): first Next-steps item (time travel) still blocked on the server (no build newer than
   c3b276054cc3 in `e2e-assets`, no new maintainer answer); lock taken and released, no CI runs.
+- 2026-10-26 (cloud session 54): e2e on new server build 20b887839edf (Trino 455): partial 1+3 servers run 40246658737, complete
+  3 servers run 40246660859 — all green incl. Iceberg time travel (`time-travel` OK in all three jobs; the server bug of
+  c3b276054cc3 is fixed). Made 20b887839edf the e2e default (`e2e.yml`, `run-e2e.sh`; push e2e run on that commit). ~75 Actions
+  minutes. Invariants hold (failover/kill checks exact or clean errors).
