@@ -29,16 +29,16 @@ heap_session() {  # setting -> trino CLI --session args
   esac
 }
 
-trino_pid() { docker exec trino jcmd -l 2>/dev/null | awk '/TrinoServer/ { print $1; exit }'; }
+trino_pid() { { docker exec trino jcmd -l 2>&1 || true; } | awk '/TrinoServer/ { print $1; exit }'; }
 
 # Samples the live heap until $1 (a file) exists; keeps the largest histogram in $2.
 heap_sampler() {  # stop-file histo-file
   local pid best=0 total
   pid=$(trino_pid)
-  [ -n "$pid" ] || { echo "no TrinoServer pid (jcmd missing?)" > "$2"; return; }
+  [ -n "$pid" ] || { echo "no TrinoServer pid: $(docker exec trino jcmd -l 2>&1 | head -3 | tr '\n' ' ')" > "$2"; return; }
   while [ ! -f "$1" ]; do
-    if timeout 30 docker exec trino jcmd "$pid" GC.class_histogram > "$2.tmp" 2>/dev/null; then
-      total=$(awk '/^Total/ { print $3 }' "$2.tmp")
+    if timeout 30 docker exec trino jcmd "$pid" GC.class_histogram > "$2.tmp" 2>&1; then
+      total=$(awk '/^Total/ { print $3 }' "$2.tmp" || true)
       if [ -n "$total" ] && [ "$total" -gt "$best" ]; then best=$total; head -25 "$2.tmp" > "$2"; echo "Total $total" >> "$2"; fi
     fi
     sleep "$HEAP_PROBE_SAMPLE"
@@ -71,7 +71,7 @@ heap_probe() {
         fi
         secs=$(printf '%.1f' "$(echo "$(date +%s.%N) - $t0" | bc)")
         touch "$stop"; wait "$sampler" || true
-        peak=$(awk '/^Total/ { printf "%.0f", $2 / 1048576 }' "$histo" 2>/dev/null)
+        peak=$(awk '/^Total/ { printf "%.0f", $2 / 1048576 }' "$histo" 2>/dev/null || true)
         if [ -f "$dir/$q.tsv" ] && "${COMPARE[@]}" "$dir" "$QUERIES" "$dir/compare-$q.tsv" "$q" >/dev/null; then
           result=OK; detail=""
         elif [ -f "$dir/$q.tsv" ]; then
@@ -84,6 +84,7 @@ heap_probe() {
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$SERVERS" "$xmx" "$setting" "$q" "$result" "$secs" "${peak:-?}" "$detail" \
           | tee -a "$OUT/heap-probe.tsv"
         echo "--- live heap peak $xmx $setting $q:"; head -14 "$histo" 2>/dev/null || true
+        [ -f "$dir/$q.err" ] && head -c 600 "$dir/$q.err"
       done
     done
   done
