@@ -57,6 +57,18 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Queue empty again (session 55, 2026-10-26).** Every item below is done or waits on the stand / a maintainer answer
+> (Open questions). Done this session: push e2e run 40252652443 on the 60e888bc26ec default confirmed green; CI actions moved
+> off Node 20 (`checkout@v5`, `setup-java@v5`, `upload-artifact@v6`; build runs 40256341543, 40257236337); **mid-stream kill
+> made deterministic**: on 60e888bc26ec the timed kills (60-90 % of the baseline) missed 4/4 again in push run 40256341545
+> (3 servers, partial; answers exact, flight3's streams had not delivered yet), the second such miss in three runs. Attempt 1
+> of `kill_mid_stream` now kills flight3 once it has sent `KILL_STREAM_TX_MB` (8) MB since the query started (its
+> `/proc/<pid>/net/dev` tx bytes, polled every 0.1 s, capped at 95 % of the baseline); the timed delays follow as attempts
+> 2-5 (`KILL_STREAM_DELAYS` still overrides all). Hit after data on attempt 1 in partial (push run 40258066925, `tx8M@5.0`)
+> **and complete mode** (run 40258071118, `tx8M@5.4`; complete mode had needed attempts 3-4 or missed before) = clean
+> errors, 0 wrong answers. Complete mode still reports a miss as INFO; could become FAIL there too after a few more green
+> runs. Not covered: GitHub's `ubuntu-latest` → Ubuntu 26 label migration (announced from 2026-10-19; runs still green).
+
 > **New server build `server-1.0.0-60e888bc26ec`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release) = 20b887839edf + **`duckDbThreads` default 4** (was 1 in code; maintainer
 > decision after the perf campaign: SF10 ~1.8x, SF1 ~1.3x faster, small queries unchanged). No protocol change. Run the
@@ -353,7 +365,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 - **CI e2e on 60e888bc26ec is ~40 % slower (session 54)** (duckDbThreads default 4; 1 server 8.8 → 12.4 min, 3 servers 13.7 →
   19.0 min): CI runs up to 3 servers + Trino on 4 vCPUs. Should the e2e start its servers with `-DduckDbThreads=1` (the old
   default; keeps CI minutes and the mid-stream kill timing stable) or keep the production default 4 so CI tests what production
-  runs? Kept the default 4 for now.
+  runs? Kept the default 4 for now. (Session 55: the mid-stream kill no longer depends on timing, so only CI minutes are at
+  stake.)
 - **Resolved in 20b887839edf (session 54: time travel OK in CI, now the e2e default); the START-NOTES.md mismatch remains.** **Server c3b276054cc3: Iceberg time travel unusable (server bug, session 50).** Every statement with `FOR VERSION AS OF <id>` or
   `FOR TIMESTAMP AS OF TIMESTAMP '… UTC'` after an Iceberg table name fails in the server's `ParquetQueryParser.parseChecked`
   (jOOQ OSS parser): `org.jooq.impl.ParserException: Feature only supported in pro edition: [1:31] SELECT * FROM ice.commits FOR
@@ -672,5 +685,10 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-10-26 (cloud session 54, cont.): coordinator added server build 60e888bc26ec (duckDbThreads 4) during the session; lock
   re-taken. e2e partial 1+3 servers run 40249518015 (3-server job failed once on the mid-stream kill timing only, exact answers;
   re-run attempt 2 green), complete 3 servers run 40249520307 green. Made 60e888bc26ec the e2e default (push e2e run 40252652443
-  started on that commit; its result was not checked in this session — next session: confirm it). CI wall time up ~40 % (Open question). ~70 more
+  started on that commit; green, 1 server 9.4 min, 3 servers 18.9 min — confirmed in session 55). CI wall time up ~40 % (Open question). ~70 more
   Actions minutes.
+- 2026-10-26 (cloud session 55): confirmed push e2e run 40252652443 green. Actions off Node 20 (checkout/setup-java v5,
+  upload-artifact v6): build runs 40256341543, 40257236337 green; e2e push run 40256341545 failed only on the mid-stream kill
+  timing (4/4 misses, exact answers). `kill_mid_stream` attempt 1 now triggered by flight3's sent bytes (8 MB): push e2e run
+  40258066925 (partial 1+3 servers) and complete 3 servers run 40258071118 green, hit after data on attempt 1 in both.
+  ~95 Actions minutes. Invariants hold (failover checks exact or clean errors).
