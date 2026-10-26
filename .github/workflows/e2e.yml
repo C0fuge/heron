@@ -58,8 +58,8 @@ jobs:
       ICEBERG_WAREHOUSE: ${{ inputs.iceberg-warehouse || 'local' }}
       ICEBERG_CORE_SITE: ${{ inputs.iceberg-core-site }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'
@@ -99,7 +99,7 @@ jobs:
           e2e/ci/run-e2e.sh
       - name: Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: e2e-${{ env.TRINO_VERSION }}-${{ env.SERVER_BUILD }}-${{ env.RESULT_MODE }}-${{ matrix.servers }}srv
           path: ${{ runner.temp }}/out/

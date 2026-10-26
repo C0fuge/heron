@@ -29,9 +29,9 @@ jobs:
       matrix:
         trino: ${{ fromJSON(inputs.all-versions && '["455","477","483"]' || '["455"]') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # JDK 25: the trino-maven-plugin (packaging 'trino-plugin') is compiled for Java 25.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'
@@ -42,14 +42,14 @@ jobs:
         run: trino-arrow-flight/bundle/check-bundle.sh trino-arrow-flight/target/trino-arrow-flight-*.zip trino-arrow-flight/bundle/trino-${{ matrix.trino }}.txt
       - name: Upload plugin zip
         if: matrix.trino == '455'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: trino-arrow-flight-${{ matrix.trino }}
           path: trino-arrow-flight/target/trino-arrow-flight-*.zip
           retention-days: 5
       - name: Test reports on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: surefire-${{ matrix.trino }}
           path: '**/target/surefire-reports/'
