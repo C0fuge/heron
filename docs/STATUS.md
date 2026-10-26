@@ -57,6 +57,16 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Stand finding 2026-10-26 (local coordinator, perf campaign): plugin memory with several endpoints.** TPC-H SF10
+> q18 fails `Java heap space` with a 6 GB Trino heap whenever a query has more than one endpoint per table - 3-node
+> cluster in partial mode (servers 4eaab052deaf / c3b276054cc3, 1 and 8 DuckDB threads alike) and a single server
+> with `endpointsPerServer` 2/4/8; with one endpoint it passes, and 8 GB passes everywhere (see "Stand answers
+> 2026-10-23"). All other 21 queries are unaffected. Find where the plugin holds batches per endpoint (read-ahead
+> queue depth x endpoints x batch size, page builder, `endpoint_read_parallelism`), bound it by a memory budget so
+> memory does not grow with the endpoint count, account it in Trino's memory context, and add an e2e check: q18
+> SF1/SF10 with a small heap and 3 endpoints.
+
+
 > **New server build `server-1.0.0-7fbe2d75827c`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release) = 60e888bc26ec + planning no longer waits for the cluster to settle after
 > a node left (fixes the intermittent GetFlightInfo TIMED_OUT with a stopped member) + `s3a://`/`s3n://` catalog roots +
