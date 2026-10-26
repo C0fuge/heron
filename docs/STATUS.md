@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `20b887839edf` since session 54, before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `60e888bc26ec` since session 54 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
@@ -61,6 +61,18 @@ Kept up to date after every work session so work can be resumed from this reposi
 > `SHA256SUMS` in this repo's assets release) = 20b887839edf + **`duckDbThreads` default 4** (was 1 in code; maintainer
 > decision after the perf campaign: SF10 ~1.8x, SF1 ~1.3x faster, small queries unchanged). No protocol change. Run the
 > suite once on it and make it the CI default if green; note timings if they change noticeably.
+>
+> **Done (session 54): green, now the e2e default** (`e2e.yml`, `run-e2e.sh`; 20b887839edf, 4eaab052deaf, c3b276054cc3, int7 stay
+> selectable). Trino 455, local Iceberg, server started unchanged: partial 1+3 servers run 40249518015, complete 3 servers run
+> 40249520307 — TPC-H 22/22, types, projection, TopN, aggmerge, dynfilter, splits, Iceberg incl. deletes/commit/**time travel OK**,
+> failover (before, during a read on tpch/ice, restarted exact with 0 backup reads, two down, coordinator-down 13.9 / 14.5 s). The
+> partial 3-server job failed once only on the mid-stream kill **timing** (4/4 kills landed before flight3 had sent data; answers
+> exact, all clean failovers to a backup = the known miss of session 50); its re-run (attempt 2) hit on attempt 3 (clean error
+> after data) and is green. **Timings got slower on the CI runner, not faster:** job wall time 1 server 12.4 min (20b887839edf:
+> 8.8), 3 servers partial 13.7 → 19.0 min, complete 16.6 → 17.9 min; mid-stream baseline (lineitem checksum scan, 3 servers)
+> 7.8 / 11.2 s vs 6.5 s. Likely CPU oversubscription: the 4-vCPU runner hosts up to 3 servers × 4 DuckDB threads + Trino;
+> not a stand concern (one server per node). If CI time matters, start the CI servers with `-DduckDbThreads=1` (or 2) — see
+> Open questions.
 
 
 > **New server build `server-1.0.0-20b887839edf`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
@@ -338,6 +350,10 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **CI e2e on 60e888bc26ec is ~40 % slower (session 54)** (duckDbThreads default 4; 1 server 8.8 → 12.4 min, 3 servers 13.7 →
+  19.0 min): CI runs up to 3 servers + Trino on 4 vCPUs. Should the e2e start its servers with `-DduckDbThreads=1` (the old
+  default; keeps CI minutes and the mid-stream kill timing stable) or keep the production default 4 so CI tests what production
+  runs? Kept the default 4 for now.
 - **Resolved in 20b887839edf (session 54: time travel OK in CI, now the e2e default); the START-NOTES.md mismatch remains.** **Server c3b276054cc3: Iceberg time travel unusable (server bug, session 50).** Every statement with `FOR VERSION AS OF <id>` or
   `FOR TIMESTAMP AS OF TIMESTAMP '… UTC'` after an Iceberg table name fails in the server's `ParquetQueryParser.parseChecked`
   (jOOQ OSS parser): `org.jooq.impl.ParserException: Feature only supported in pro edition: [1:31] SELECT * FROM ice.commits FOR
@@ -653,3 +669,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   3 servers run 40246660859 — all green incl. Iceberg time travel (`time-travel` OK in all three jobs; the server bug of
   c3b276054cc3 is fixed). Made 20b887839edf the e2e default (`e2e.yml`, `run-e2e.sh`; push e2e run 40248099474 on that commit green, 1+3 servers). ~75 Actions
   minutes. Invariants hold (failover/kill checks exact or clean errors).
+- 2026-10-26 (cloud session 54, cont.): coordinator added server build 60e888bc26ec (duckDbThreads 4) during the session; lock
+  re-taken. e2e partial 1+3 servers run 40249518015 (3-server job failed once on the mid-stream kill timing only, exact answers;
+  re-run attempt 2 green), complete 3 servers run 40249520307 green. Made 60e888bc26ec the e2e default (no push e2e run for it:
+  only the default id changed, the dispatch runs used the same scripts). CI wall time up ~40 % (Open question). ~70 more
+  Actions minutes.
