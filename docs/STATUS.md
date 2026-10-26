@@ -65,7 +65,24 @@ Kept up to date after every work session so work can be resumed from this reposi
 > queue depth x endpoints x batch size, page builder, `endpoint_read_parallelism`), bound it by a memory budget so
 > memory does not grow with the endpoint count, account it in Trino's memory context, and add an e2e check: q18
 > SF1/SF10 with a small heap and 3 endpoints.
-
+>
+> **Done in CI (session 58), stand check pending.** Cause found with a new e2e heap probe (`e2e/ci/heap-probe.sh`, workflow input
+> `heap-probe=only|1`: q18 at Trino -Xmx 640M/1G/1536M x settings default / hash merge / no aggregation pushdown, live-heap
+> histograms via `jcmd GC.class_histogram`). On 3 servers the heap held ~1.5M `LinkedHashMap$Entry` + `Int128` + `Long` +
+> `ArrayList` (~300 MB at SF1, so ~3 GB at SF10, invisible to Trino) = the plugin's **in-memory merge of all `GROUP BY l_orderkey`
+> groups** of q18's `IN` subquery, although the sorted merge is on (run 40289618273; 1 server: none of it). The "several endpoints
+> expected" hint followed the *last* FlightInfo, and a cluster answers some scans with one endpoint (a key range on one node's
+> files; also as the very first query of a fresh JVM), so the next aggregation skipped the server sort (new INFO line: "merged in
+> memory (sorted merge not requested, a single endpoint was expected)", run 40290830857). Read-ahead / page builder / parallelism
+> were not the cause (no Arrow or page objects in the histograms). Fix: (1) the hint stays on for an hour after any FlightInfo
+> with several endpoints and turns off only after 100 single-endpoint answers in a row (single node); (2) the hash merge (sort
+> off or GROUP BY types the server cannot order) is filled one batch per `getNextPage`, reported in `getMemoryUsage()` (~128 +
+> 40 B per raw value per group) and drained in 8192-row pages, so Trino's memory limit stops it instead of `Java heap space`;
+> (3) an INFO line whenever several endpoints are merged in memory, with the reason. Probe after the fix (run 40291859743,
+> 3 servers): default q18 OK at 1G and 1536M with no merge objects in the heap (before: ERROR at 1G); hash mode now fails with
+> Trino's "exceeded per-node memory limit" (ScanFilterAndProject 130-210 MB = the accounted merger). Every e2e run now has a heap
+> check: q18 with Trino -Xmx1G must be exact (`HEAP_CHECK_XMX`). **Stand:** rerun q18 SF10 with a 6 GB (and 4 GB) Trino heap on
+> the 3-node cluster and with `endpointsPerServer` 2/4/8 with this plugin; grep the Trino log for "merged in memory".
 
 > **New server build `server-1.0.0-7fbe2d75827c`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release) = 60e888bc26ec + planning no longer waits for the cluster to settle after
@@ -722,3 +739,11 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-10-26 (cloud session 57): new server build 7fbe2d75827c (planning with a node down, s3a roots): e2e partial 1+3 servers
   run 40282449340 and complete 3 servers run 40282451851 green; made it the e2e default (the push of that change starts a push
   e2e run — next session: confirm it). ~46 Actions minutes. Invariants hold.
+- 2026-10-26 (cloud session 58): stand finding "q18 heap with several endpoints" fixed in CI. New e2e heap probe (input
+  `heap-probe`); probe runs 40288988533 (script bug), 40289618273 (cause: plugin hash merge of all groups on 3 servers),
+  40290830857 (first fix: NPE + diagnosis "single endpoint was expected"), 40291859743 (green: default q18 OK at 1G on 3 servers).
+  Plugin: sturdier several-endpoints hint, accounted incremental hash merge, INFO line; arrow-flight-common: a closed pooled
+  connection (gRPC UNKNOWN "channel closed", ClosedChannelException) counts as unreachable before any data — it failed
+  `FlightSqlSessionFailoverTest` in build run 40290807373. Build runs 40291029063, 40291834596 green; push e2e run 40291834562
+  green (1+3 servers, full suite incl. the new 1G heap check, failover, aggmerge sorted = hash). ~75 Actions minutes. Invariants: failover still only before data; server errors still surface.
+
