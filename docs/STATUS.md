@@ -57,6 +57,12 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **New server build `server-1.0.0-7fbe2d75827c`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
+> `SHA256SUMS` in this repo's assets release) = 60e888bc26ec + planning no longer waits for the cluster to settle after
+> a node left (fixes the intermittent GetFlightInfo TIMED_OUT with a stopped member) + `s3a://`/`s3n://` catalog roots +
+> the deployment's HDFS short-circuit setting is kept. Run the suite once on it and make it the CI default if green.
+
+
 > **Queue empty again (session 55, 2026-10-26).** Every item below is done or waits on the stand / a maintainer answer
 > (Open questions). Done this session: push e2e run 40252652443 on the 60e888bc26ec default confirmed green; CI actions moved
 > off Node 20 (`checkout@v5`, `setup-java@v5`, `upload-artifact@v6`; build runs 40256341543, 40257236337); **mid-stream kill
