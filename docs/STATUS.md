@@ -57,6 +57,15 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **New server build `server-1.0.0-27f583adccd7`** (2026-10-27, local coordinator; jar, plugins tar, libs tar + merged
+> `SHA256SUMS` in this repo's assets release) = 57d252b1437f + **DuckDB 1.5.6** (was 1.4.5; upstream comparison: about half of
+> the small-query latency gap) + HDFS Kerberos ticket cache from a keytab + cluster crashed-member wait documented. **It needs
+> the DuckDB 1.5.6 extension set** (the server checks extension versions at startup): `duckdb-extensions-v1.5.6.tar.zst`
+> (httpfs, iceberg, avro, hadoopfs `51b7220-afc3`, layout `extensions/v1.5.6/linux_amd64/`) and
+> `hadoopfs-v1.5.6-afc3.duckdb_extension` are in the server repo's `ci-assets` release (sha256 in its SHA256SUMS); official
+> httpfs/iceberg/avro 1.5.6 builds also work. Run the suite once on it (note small-query timings) and make it the CI default if green.
+
+
 > **Stage 2, approved by the maintainer 2026-10-26 - plugin throughput (take first).** On the stand, Trino TPC-H SF10 takes
 > ~32-38 s whatever the server settings (1-16 DuckDB threads, HDFS), while the same queries through JDBC complete mode take
 > 7.7-11 s on the same server: the time is spent in the plugin/Trino path. Upstream's own connector is 17 % faster on SF1.
