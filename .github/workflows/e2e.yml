@@ -30,6 +30,12 @@ on:
       heap-probe-xmx:
         description: 'Trino heaps for the probe, space-separated'
         default: '640M 1G 1536M'
+      profile:
+        description: 'Throughput profile (e2e/ci/profile.sh: TPC-H times, query stats, JFR CPU samples): 0 or only'
+        default: '0'
+      profile-settings:
+        description: 'Profile settings: default and/or comma-separated session settings, space-separated'
+        default: 'default flight.split_count=16'
   push:
     branches: [main, 'claude/**']
     paths:
@@ -41,7 +47,7 @@ on:
       - '.github/workflows/e2e.yml'
 
 concurrency:
-  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}-${{ inputs.iceberg-core-site }}-${{ inputs.heap-probe }}
+  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}-${{ inputs.iceberg-core-site }}-${{ inputs.heap-probe }}-${{ inputs.profile }}
   cancel-in-progress: true
 
 # e2e-assets is a published pre-release, so a read token can list and download its assets.
@@ -65,6 +71,8 @@ jobs:
       ICEBERG_CORE_SITE: ${{ inputs.iceberg-core-site }}
       HEAP_PROBE: ${{ inputs.heap-probe || '0' }}
       HEAP_PROBE_XMX: ${{ inputs.heap-probe-xmx || '640M 1G 1536M' }}
+      PROFILE: ${{ inputs.profile || '0' }}
+      PROFILE_SETTINGS: ${{ inputs.profile-settings || 'default flight.split_count=16' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5

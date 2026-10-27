@@ -37,6 +37,8 @@ mkdir -p "$OUT" "$WORK" "$WORK/wh"
 . "$REPO/e2e/ci/iceberg.sh"
 # shellcheck source=e2e/ci/heap-probe.sh
 . "$REPO/e2e/ci/heap-probe.sh"
+# shellcheck source=e2e/ci/profile.sh
+. "$REPO/e2e/ci/profile.sh"
 
 S3_KEY="ci$(openssl rand -hex 8)"; S3_SECRET="$(openssl rand -hex 24)"; TOKEN="$(openssl rand -hex 24)"
 
@@ -187,6 +189,12 @@ HEAP_PROBE="${HEAP_PROBE:-0}"
 status=0
 if [ "$HEAP_PROBE" = only ]; then
   heap_probe
+  save_logs
+  exit $status
+fi
+# PROFILE=only: just the throughput profile (profile.sh), then stop.
+if [ "${PROFILE:-0}" = only ]; then
+  profile_run
   save_logs
   exit $status
 fi
