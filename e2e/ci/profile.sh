@@ -19,7 +19,7 @@
 PROFILE_SETTINGS="${PROFILE_SETTINGS:-default flight.split_count=16}"
 PROFILE_REPEAT="${PROFILE_REPEAT:-2}"
 
-profile_query() {  # setting-dir query session-args... -> seconds; Trino query info to <dir>/<q>.json
+profile_query() {  # setting-dir query session-args... -> Trino elapsed seconds; Trino query info to <dir>/<q>.json
   local dir=$1 q=$2 t0 t id; shift 2
   t0=$(date +%s.%N)
   if docker exec trino trino --catalog flight --schema tpch --source "prof-$q" "$@" --output-format TSV \
@@ -32,7 +32,18 @@ profile_query() {  # setting-dir query session-args... -> seconds; Trino query i
   id=$(curl -fsS -H 'X-Trino-User: e2e' http://127.0.0.1:8080/v1/query \
     | jq -r --arg s "prof-$q" '[.[] | select(.session.source == $s)] | sort_by(.queryStats.createTime) | last | .queryId // empty')
   [ -z "$id" ] || curl -fsS -H 'X-Trino-User: e2e' "http://127.0.0.1:8080/v1/query/$id" > "$dir/$q.json" || true
+  # Trino's own elapsed time; the wall time above also counts the CLI's JVM start (~1.4 s on the runner)
+  [ -n "$id" ] && [ -s "$dir/$q.json" ] && t=$(trino_seconds "$(jq -r '.queryStats.elapsedTime // empty' "$dir/$q.json")" "$t")
   printf '%.2f' "$t"
+}
+
+trino_seconds() {  # Trino duration ("2.37s", "980.00ms", "1.20m") [fallback] -> seconds
+  local v=$1 n u
+  n=${v%%[a-z]*}; u=${v#"$n"}
+  case "$u" in
+    ns) echo "$n / 1000000000" | bc -l ;; us) echo "$n / 1000000" | bc -l ;; ms) echo "$n / 1000" | bc -l ;;
+    s) echo "$n" ;; m) echo "$n * 60" | bc -l ;; h) echo "$n * 3600" | bc -l ;; *) echo "$2" ;;
+  esac
 }
 
 read_bench() {
@@ -48,7 +59,7 @@ read_bench() {
       python:3.12-slim sh -c 'pip install -q --disable-pip-version-check adbc-driver-flightsql pyarrow >/dev/null 2>&1 &&
         python /probe/flight_scan_time.py grpc://flight1:32010 tpch "$1" /probe/profile-queries/scan-direct.sql 1 2 4' probe "$PROFILE_REPEAT" \
       || echo "adbc bench failed"
-    echo "# Trino (scan.sql, aggregation pushdown off): split_count best_s, then Trino's stats of that pass"
+    echo "# Trino (scan.sql, aggregation pushdown off): split_count best Trino-elapsed s, then Trino's stats of that pass"
     mkdir -p "$OUT/profile/bench"
     for n in 1 2 4; do
       best=""
