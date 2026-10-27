@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `45fc0a9e6e02` since session 70, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `4e77c6bda59a` since session 77, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
@@ -65,6 +65,21 @@ Kept up to date after every work session so work can be resumed from this reposi
 > build 40477030899 green. e2e TopN check +3 VARCHAR queries (q4 `o_comment`, q5 `s_comment DESC` mixed case, q6 `c_mktsegment
 > DESC, c_name`): push run 40477030751 green on 1 and 3 servers (full suite), on = off exactly, TopN in the scan; rows read on 3
 > servers 1,500,000 → 150 / 10,000 → 30 / 150,000 → 25. **Stand:** nothing new needed beyond the TopN default question.
+
+> **New server build `server-1.0.0-4e77c6bda59a`** (uploaded 2026-10-27 20:51-20:53 UTC to `e2e-assets`, jar, plugins tar, libs
+> tar + `SHA256SUMS`; no change note came with it - the maintainer may want to add one). Plugins tar +60 KB vs 45fc0a9e6e02.
+>
+> **Done (session 77): green, now the e2e default** (`e2e.yml`, `run-e2e.sh`; 45fc0a9e6e02 and older stay selectable; same DuckDB
+> 1.5.6 extension set, server started unchanged). Partial 1+3 servers run 40582176690, complete 3 servers run 40582181234: full
+> suite green (TPC-H 22/22, types, Iceberg, TopN, splits, failover incl. two down 5/5 + 3/3, coordinator-down 13.6 s on 3 servers
+> partial). Job wall time 1 server 15.7 min, 3 servers 18.9 / 17.3 min. **Timings** (profile run 40582216959, settings
+> `default flight.split_count=1 flight.endpoint_splits_enabled=true`, Trino elapsed, best of 2, SF1; session 70's run 40469761749
+> on 45fc0a9e6e02 in brackets): 3 servers **26.0 / 22.0 / 20.3 s** (37.9 / 29.8 / 30.3); 1 server **27.6 / 23.8 / 25.8 s**
+> (42.7 / 31.1 / 36.9, slow runner). Small queries 3 servers q01 / q04 / q06 0.58 / 0.81 / 0.68 default (1.00 / 0.97 / 0.92),
+> 0.57 / 0.73 / 0.67 split 1 (0.70 / 0.93 / 0.81). Raw reads did not change much (3 servers: Java client 1 stream 1.45 s, ADBC
+> 1.42 s, Trino split 1 / 4 1.67 / 1.81 s), so the gain is per-query overhead - the largest drop seen on CI since the DuckDB
+> 1.5.6 build. Not yet repeated back to back with 45fc0a9e6e02 on the same runner type; the stand (SF10) should confirm.
+
 
 > **New server build `server-1.0.0-45fc0a9e6e02`** (2026-10-27, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release) = 27f583adccd7 + per-query overhead cuts (stage 2 item 15: describe once per views
@@ -1091,3 +1106,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   (07:09 UTC), no new maintainer/stand answers; every Next steps item waits on the stand or an Open question. 0 Actions minutes.
 - 2026-10-27 (cloud sessions 75-76): nothing actionable, same as sessions 72-74 — no new `e2e-assets` upload since 45fc0a9e6e02
   (07:09 UTC), no new maintainer/stand answers; every Next steps item waits on the stand or an Open question. 0 Actions minutes.
+- 2026-10-27 (cloud session 77): new server build 4e77c6bda59a appeared in `e2e-assets` at 20:53 UTC (no change note). Full suite
+  green: partial 1+3 servers 40582176690, complete 3 servers 40582181234; profile run 40582216959: TPC-H SF1 sums 3 servers
+  26.0 / 22.0 / 20.3 s (was 37.9 / 29.8 / 30.3 on 45fc0a9e6e02), 1 server 27.6 / 23.8 / 25.8 s. Made 4e77c6bda59a the e2e
+  default (`[skip ci]`, no plugin code changed). ~75 Actions minutes. Invariants untouched (failover checks exact or clean errors).
