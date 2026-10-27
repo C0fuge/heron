@@ -64,6 +64,44 @@ Kept up to date after every work session so work can be resumed from this reposi
 > attack the biggest share: zero-copy or fewer-copy Arrow->Block for fixed-width types, parallel endpoint reads by default
 > where safe, bigger/fewer splits if split overhead dominates, q18 with a 6 GB heap on several endpoints. Report before/after
 > SF1/SF10 times from CI; the coordinator re-measures on the stand.
+>
+> **Session 64 (CI profile + two low-risk changes; stand measurement pending).** New e2e mode `profile=only`
+> (`e2e/ci/profile.sh`, `profile_report.py`, `flight_time.py`; workflow inputs `profile`, `profile-settings`): TPC-H SF1 q01-q22
+> + a raw `lineitem` scan (8 columns, aggregation pushdown off) per setting, Trino query stats per query (elapsed, CPU, plugin
+> read time = Flight read + Arrow->Block, scan blocked time), JFR CPU samples of the Trino JVM grouped by category, and the same
+> SQL straight to flight1 over ADBC. Findings (4-vCPU runner, SF1, server 57d252b1437f; runs 40435218497 baseline, 40436253774,
+> 40437349225, 40438299101):
+> - **The plugin is not CPU-bound.** JFR: Arrow->Block conversion 0.5-1.4 % of CPU samples, Arrow IPC/gRPC < 1 %, Trino
+>   operators 73-76 % (join hash build/probe, group-by hash, exchange). Trino CPU is 9-21 s per 22 queries against 29-46 s
+>   elapsed, i.e. Trino is waiting, not computing.
+> - **Scans wait for the server streams.** Without read-ahead 83-87 % of all operator wall time is the scan drivers inside the
+>   plugin's synchronous `next()`. Raw scan 6.0M rows / 543 MB: Trino CPU 0.15-0.25 s but elapsed 2.4-4.4 s (1 server, 4 range
+>   splits) and 2.4-2.6 s (3 servers), while **one direct ADBC stream of the whole table takes 1.84 s** on the same server. So the
+>   plugin's Flight path (4 range-split queries x endpoints) delivers rows no faster than one plain client stream: per-stream
+>   rate on the server/gRPC side (range-predicate re-scans, Java Flight client flow control, the server's shared outbound byte
+>   budget) is the suspect, not Trino. Not resolvable on a 4-vCPU runner where DuckDB, the servers and Trino share the cores.
+> - Direct server baseline exists only for single-table SQL (the server refuses joins/subqueries: "Can only select from ONE
+>   table"): q01 1.43 / q04 0.88 / q06 0.95 s direct vs Trino elapsed 1.3-2.2 / 0.7-1.7 / 0.8-1.5 s (pushed down: same work).
+> - `split_count` 16 vs 4 and read-ahead on vs off: totals within run-to-run noise on CI (e.g. 1 server elapsed sums 36.6-43.6 s
+>   default vs 32.0-36.7 s read-ahead off vs 41.7-44.2 s split 16 in run 40438299101; earlier runs the other way round).
+>
+> Changes (commit "Plugin throughput: bulk Arrow->Block copies, read-ahead of the next batch"): (1) `ArrowTypeConverter` copies
+> fixed-width values, decimal pairs and varchar offsets in bulk (little-endian NIO views) and reads nulls from the validity bitmap;
+> (2) **read-ahead** (`arrow-flight.read-ahead.enabled` / session `read_ahead_enabled`, default **on**): every plain scan goes
+> through `ParallelStreamReader`, and once a batch is converted `release()` lets the stream fetch/decode the next batch in the
+> background while Trino processes the page; the driver yields (`isBlocked`) instead of sitting in `next()`. Same streams, same
+> failover rules, no extra batch held. Unit tests 49 green (build 40435458428; slice test now also checks the bulk paths against
+> the value-by-value reader for 13 vector kinds; `ParallelStreamReaderTest.releaseStartsTheNextReadBeforeTheNextPoll`); full e2e
+> push run 40435458521 green on 1 and 3 servers (22/22, types, Iceberg, failover, heap and concurrent checks). CI shows no
+> speed-up from either change (expected given the profile); they remove per-row work and stop holding a driver thread during
+> network waits, which can matter with many drivers on the stand.
+>
+> **Stand (next):** on SF10, one Trino node, single server and 3-node cluster: (a) the raw scan through Trino
+> (`SELECT max(l_orderkey), …, max(l_comment) FROM lineitem` with `SET SESSION flight.aggregation_pushdown_enabled=false`, file
+> `e2e/ci/profile-queries/scan.sql`) vs the same 8 columns fetched by one plain Flight client (`scan-direct.sql`, e.g.
+> `flight_time.py`); (b) TPC-H SF10 with `flight.split_count` 4 / 16 / 32 and `flight.read_ahead_enabled` true / false; (c) the
+> query JSON (`/v1/query/<id>`) of q17/q21 (scan blocked vs plugin read time). If (a) shows the plugin path much slower than one
+> plain stream, the next CI step is a plugin-only Flight read benchmark (no Trino) to separate the Java client from the server.
 
 
 > **New server build `server-1.0.0-57d252b1437f`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
@@ -821,3 +859,11 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-10-26 (cloud session 63): coordinator answered what 4d707e2aedfc changes (S3 connect retries, no protocol change); recorded
   in Next steps, open question closed. Queue otherwise unchanged: every item waits on the stand (57d252b1437f 8-concurrent-scan
   rerun, q18 SF10 heap, earlier stand checks) or a maintainer answer. No code change, no CI run, 0 Actions minutes.
+- 2026-10-27 (cloud session 64): Stage 2 (plugin throughput). CI profile mode `profile=only` (TPC-H + raw scan per setting,
+  Trino query stats, JFR CPU samples, direct ADBC times): plugin CPU is negligible (conversion <= 1.4 % of samples, Trino operators
+  ~75 %), scans wait on the server streams; raw 6M-row scan through Trino 2.4-4.4 s vs 1.84 s for one direct ADBC stream. Plugin:
+  bulk Arrow->Block copies + read-ahead of the next batch (`read_ahead_enabled`, default on); no CI speed-up measurable. Build run
+  40435458428 green (49 tests); e2e push run 40435458521 green (1+3 servers); profile runs 40435218497 (baseline), 40436253774
+  (1 srv; its 3-srv job cancelled by the next dispatch's concurrency group), 40437349225, 40438299101 (1+3 srv) — the first two
+  later ones "failed" only on the new scan check (missing `;` in scan.sql, fixed). ~75 Actions minutes. Invariants hold
+  (failover checks exact or clean errors, server errors surface; read-ahead keeps each stream's failover rules).
