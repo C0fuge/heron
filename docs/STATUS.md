@@ -57,6 +57,15 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Stage 2, approved by the maintainer 2026-10-26 - plugin throughput (take first).** On the stand, Trino TPC-H SF10 takes
+> ~32-38 s whatever the server settings (1-16 DuckDB threads, HDFS), while the same queries through JDBC complete mode take
+> 7.7-11 s on the same server: the time is spent in the plugin/Trino path. Upstream's own connector is 17 % faster on SF1.
+> Profile one SF10 run (where the worker time goes: Arrow->Block conversion, page building, endpoint read waits, merging) and
+> attack the biggest share: zero-copy or fewer-copy Arrow->Block for fixed-width types, parallel endpoint reads by default
+> where safe, bigger/fewer splits if split overhead dominates, q18 with a 6 GB heap on several endpoints. Report before/after
+> SF1/SF10 times from CI; the coordinator re-measures on the stand.
+
+
 > **New server build `server-1.0.0-57d252b1437f`** (2026-10-26, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release) = 4d707e2aedfc + one outbound byte budget shared by all Flight streams
 > (the stand saw CANCELLED streams and a dead node under 8 concurrent partial-mode scans on a 3-node cluster). Run the
