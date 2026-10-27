@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `27f583adccd7` (DuckDB 1.5.6 extensions) since session 66, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `775100bf923f` since session 68, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
@@ -61,6 +61,29 @@ Kept up to date after every work session so work can be resumed from this reposi
 > `SHA256SUMS` in this repo's assets release) = 27f583adccd7 + complete mode describes a query once per catalog-views snapshot
 > (per-query overhead, stage 2 item 15 step 1). Needs the DuckDB 1.5.6 extension set (server repo `ci-assets`). Run the suite
 > once on it (note small-query timings) and make it the CI default if green.
+>
+> **Done (session 68): green, now the e2e default** (`e2e.yml`, `run-e2e.sh`; 27f583adccd7 and older stay selectable; same
+> DuckDB 1.5.6 extension set, server started unchanged). Partial 1+3 servers run 40457717079, complete 3 servers run 40457720101:
+> TPC-H 22/22, types 2/2, Iceberg 8/8 incl. time travel, concurrent 4/4, splits block 5/5 + checksum = reference (3 servers
+> full scan s1p1 8.03 / s4p1 5.00 / ep1 4.92 s), heap `1 1G default q18 OK` 297 MB, `1/eps4` 298 MB, `3 1G` 416 / 473 MB,
+> failover: kill during read clean, mid-stream kill hit after data `tx8M@2.4` (partial) / `tx8M@3.2` (complete), 0 wrong answers,
+> restarted exact after 14.3 / 16.4 s with 0 backup reads, two down 5/5 + 3/3, coordinator-down 8.1 / 13.6 s. Job wall time
+> 1 server 16.4 min, 3 servers 14.7 / 19.8 min. **Timings** (profile run 40457722482, settings `default flight.split_count=1`,
+> Trino elapsed, best of 2 passes, SF1; compare the 27f583adccd7 table below):
+>
+> | | 1 server 27f583adccd7 → 775100bf923f | 3 servers 27f583adccd7 → 775100bf923f |
+> |---|---|---|
+> | 22 queries + scan, default (split 4) | 36.1 → 36.6 s | 28.9 → 35.7 s (run 40452517908 on the old build: 36.3-36.9 s) |
+> | same, `split_count=1` | 27.7 → 27.8 s | 24.5 → 28.1 s (run 40452517908: 28.5-29.6 s) |
+> | q01 / q04 / q06 | 0.80 / 0.75 / 0.85 → 0.68 / 0.76 / 0.83 | 0.68 / 0.78 / 0.90 → 0.68 / 0.96 / 0.79 |
+> | other small (q02 q11 q13 q16 q22) | 0.68 0.45 0.69 0.53 0.37 → 0.78 0.46 0.84 0.43 0.39 | 0.64 0.35 0.64 0.45 0.28 → 0.73 0.69 0.71 0.59 0.41 |
+> | raw scan, Trino split 1 / 4 | 1.93 / 2.35 → 1.98 / 2.55 | 1.74 / 1.81 → 2.08 / 2.37 |
+> | plugin Java client, 1 stmt / 4 range splits | 1.78 / 2.40 → 1.93 / 2.56 | 1.71 / 1.88 → 1.90 / 2.40 |
+>
+> **No measurable change on CI.** The small queries are within run noise (the 3-server sums of the 27f583adccd7 build itself
+> varied 28.9 → 36.3 s between runs 40448316888 and 40452517908); the per-query describe saving of 775100bf923f is below what
+> a 4-vCPU runner resolves at SF1. Direct ADBC q01 0.80 s (1 server) / 0.65 s (3 servers). The stand (SF10, dedicated cores) is
+> where the per-query overhead should show; see also the direct-ADBC q04 note in Open questions.
 
 
 > **New server build `server-1.0.0-27f583adccd7`** (2026-10-27, local coordinator; jar, plugins tar, libs tar + merged
@@ -583,6 +606,12 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **Server (not the plugin path): direct ADBC q04 fails on a 3-node cluster (seen session 68, also on 27f583adccd7).** The
+  profile's direct baseline (`flight_time.py`, plain ADBC to flight1, no partial-mode header) gets for TPC-H q04 (`EXISTS`
+  subquery on `lineitem`) `all 2 DoGet location(s) failed: DoGet("grpc+tcp://flight2|flight3:32010") ... Catalog Error: Table
+  with name "tpch.lineitem" does not exist because schema "tpch" does not exist` (jobs 122004793999, 122018291122,
+  122034850840); on 1 server it answers. Through Trino q04 is exact (the plugin sends single-table scans). Looks like a
+  non-coordinator member running a statement whose subquery table it never registered. Worth a look on the server side?
 - **`flight.split_count` default 4 vs 1 (session 65).** In CI (SF1, 4 vCPUs) one split is ~27 % faster on TPC-H (Trino
   elapsed 30-35 s vs 42-56 s, 1 and 3 servers) because every range split re-reads the Parquet files on the server (4 range
   statements in sequence = 1.5x the work of one); the plugin and its Flight client add almost nothing. The stand's 2026-10-23
@@ -986,3 +1015,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   the new `ep1` splits setting exact. Profile run 40452517908 (3 servers): TPC-H SF1 endpoint splits 30.1 s vs split 1 29.5 s vs
   default 36.9 s, CPU-heavy checksum scan 7.80 s (= split 4, vs split 1 13.38 s). Default unchanged; stand check + Open question.
   ~35 Actions minutes. Invariants untouched (off by default; same per-endpoint failover; missing column = error, not NULLs).
+- 2026-10-27 (cloud session 68): first Next step (server build 775100bf923f). Suite green on it: partial 1+3 servers run
+  40457717079, complete 3 servers run 40457720101 (22/22, types, Iceberg, failover, heap, concurrent, splits incl. ep1);
+  profile run 40457722482: TPC-H SF1 sums and small queries unchanged within CI noise (1 server 36.6 / 27.8 s default /
+  split 1). Made 775100bf923f the e2e default (`e2e.yml`, `run-e2e.sh`; commit `[skip ci]`, no plugin code changed and the
+  same build was just run green). New Open question: direct-ADBC q04 catalog error on cluster members (server side,
+  pre-existing). ~47 Actions minutes. Invariants untouched.
