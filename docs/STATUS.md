@@ -57,6 +57,12 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **New server build `server-1.0.0-775100bf923f`** (2026-10-27, local coordinator; jar, plugins tar, libs tar + merged
+> `SHA256SUMS` in this repo's assets release) = 27f583adccd7 + complete mode describes a query once per catalog-views snapshot
+> (per-query overhead, stage 2 item 15 step 1). Needs the DuckDB 1.5.6 extension set (server repo `ci-assets`). Run the suite
+> once on it (note small-query timings) and make it the CI default if green.
+
+
 > **New server build `server-1.0.0-27f583adccd7`** (2026-10-27, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release) = 57d252b1437f + **DuckDB 1.5.6** (was 1.4.5; upstream comparison: about half of
 > the small-query latency gap) + HDFS Kerberos ticket cache from a keytab + cluster crashed-member wait documented. **It needs
