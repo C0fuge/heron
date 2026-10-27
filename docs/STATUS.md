@@ -57,6 +57,15 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Session 71 (TopN pushes VARCHAR sort keys).** Every item below is done or waits on the stand / a maintainer answer, so this
+> session took the stand's 2026-10-23 collation finding (server compares strings by UTF-8 bytes = Trino's order): with TopN
+> pushdown on (still **off by default**), `VARCHAR` sort keys are now pushed too (`SqlQueryBuilder.isTopNSortable`; CHAR, DOUBLE,
+> REAL still not). The sorted aggregation merge keeps its old rule (fixed-width keys only, new `isServerOrderedFixedWidth`).
+> Unit test `ArrowFlightMetadataTopNTest.varcharSortKeysArePushedBecauseTheServerComparesUtf8Bytes` (+ CHAR refused); 58 tests,
+> build 40477030899 green. e2e TopN check +3 VARCHAR queries (q4 `o_comment`, q5 `s_comment DESC` mixed case, q6 `c_mktsegment
+> DESC, c_name`): push run 40477030751 green on 1 and 3 servers (full suite), on = off exactly, TopN in the scan; rows read on 3
+> servers 1,500,000 → 150 / 10,000 → 30 / 150,000 → 25. **Stand:** nothing new needed beyond the TopN default question.
+
 > **New server build `server-1.0.0-45fc0a9e6e02`** (2026-10-27, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release) = 27f583adccd7 + per-query overhead cuts (stage 2 item 15: describe once per views
 > snapshot, parse check once per node, partial-mode sample-file cache, executionPath log line written asynchronously). Needs
@@ -740,6 +749,8 @@ Kept up to date after every work session so work can be resumed from this reposi
     chr(8364) gives `A|B|Z|_|a|a |aa|b|e|~|DEL|È|ä|é|€` on the server, **identical** to Trino's order of the same
     values (code point / UTF-8 byte order). So VARCHAR sort keys could be pushed in TopN (code change + unit test; holds
     while the server keeps lockdown on).
+    **Done (session 71):** VARCHAR keys are pushed in TopN now; this relies on the server keeping no collation and
+    lockdown on — tell us if a deployment could ever set `default_collation`.
 - **Dependency ceiling from Arrow 18.1** (session 20): gRPC cannot go past 1.78.x (and so Netty stays 4.1, protobuf 3.25)
   until Arrow Java is upgraded (Arrow 19.0.0 uses gRPC 1.79, Netty 4.2.9, protobuf 4.33). Upgrade Arrow (bigger change:
   memory/Flight API, e2e on all versions), or stay on 18.1 with the current pins? Also: the zip bundles
@@ -1067,3 +1078,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   (default / split 1 / endpoint splits), unchanged; the 1-server profile looked ~5 s slower but its runner streamed raw scans at
   half speed, and back-to-back bench runs 40472082623 (new) / 40472093615 (old) show equal read speed. Made 45fc0a9e6e02 the e2e
   default (`[skip ci]`, no plugin code changed). ~75 Actions minutes. Invariants untouched (failover checks exact or clean errors).
+- 2026-10-27 (cloud session 71): queue had nothing CI-actionable except the stand's collation finding; TopN pushdown now pushes
+  VARCHAR sort keys (off by default as before; aggregation sorted merge unchanged). First push failed build 40476803699
+  (AggregationReaderTest: the merge shared the predicate; e2e 40476803533 cancelled), fixed: build 40477030899 green, e2e push run
+  40477030751 green on 1+3 servers incl. 3 new VARCHAR TopN checks (on = off, rows 1.5M → 150). ~45 Actions minutes. Invariants
+  untouched (TopN off by default; answers compared on vs off).
