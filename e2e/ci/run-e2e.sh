@@ -387,17 +387,20 @@ done
 PAR_QUERIES="${PAR_QUERIES:-q03 q12 q14 q18 q19}"
 PAR_PARALLELISM="${PAR_PARALLELISM:-3}"
 PAR_REPEAT="${PAR_REPEAT:-2}"
-PAR_SETTINGS="s1p1 s1p$PAR_PARALLELISM s4p1 s4p$PAR_PARALLELISM"
+# Setting "ep1": flight.endpoint_splits_enabled (one split per endpoint of one coordinator-planned statement; 1 server =
+# one endpoint = one split, 3 servers = 3 splits).
+PAR_SETTINGS="s1p1 s1p$PAR_PARALLELISM s4p1 s4p$PAR_PARALLELISM ep1"
 SCAN_SQL='SELECT count(*), checksum(ROW(l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment)) FROM lineitem'
 log "splits: $PAR_SETTINGS on $PAR_QUERIES + full lineitem scan"
 par_run() {  # setting name out-file (-f file | --execute sql)
   local setting=$1 name=$2 outf=$3; shift 3
-  local splits=${setting#s}; splits=${splits%p*}
+  local splits=${setting#s}; splits=${splits%p*} endpoint=false
   local par=${setting#*p} best="" i t0 t
+  if [ "${setting%%p*}" = e ]; then splits=4; endpoint=true; fi
   for i in $(seq 1 "$PAR_REPEAT"); do
     t0=$(date +%s.%N)
     docker exec trino trino --catalog flight --schema tpch --session "flight.split_count=$splits" \
-      --session "flight.endpoint_read_parallelism=$par" --output-format TSV "$@" > "$outf" 2> "${outf%.tsv}.err" \
+      --session "flight.endpoint_read_parallelism=$par" --session "flight.endpoint_splits_enabled=$endpoint" --output-format TSV "$@" > "$outf" 2> "${outf%.tsv}.err" \
       || { rm -f "$outf"; break; }
     t=$(echo "$(date +%s.%N) - $t0" | bc)
     best=$(awk -v a="$best" -v b="$t" 'BEGIN { if (a == "" || b + 0 < a + 0) printf "%.2f", b; else print a }')

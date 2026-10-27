@@ -8,6 +8,8 @@ import io.trino.spi.connector.ConnectorSplitSource;
 import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.FixedSplitSource;
 import io.trino.spi.type.Type;
+import org.apache.arrow.flight.FlightEndpoint;
+import org.apache.arrow.flight.FlightInfo;
 
 import java.util.HashMap;
 import java.util.List;
@@ -30,6 +32,12 @@ import static java.util.Objects.requireNonNull;
  * ({@code col >= a AND col < b}); each range is its own split, read and processed in parallel.
  * Parquet row-group statistics let the server skip row groups outside a range.
  * <p>
+ * With {@code endpoint_splits_enabled} a plain scan is instead planned here, on the coordinator, as one
+ * statement, and each endpoint of its FlightInfo (one per Flight node, or {@code endpointsPerServer} per
+ * server) becomes a split: Trino still reads the parts in parallel, but the server runs the scan once
+ * rather than once per key range. Join dynamic filters (applied on the worker) are then not used, so the
+ * mode stays off while {@code dynamic_filtering_enabled} is on.
+ * <p>
  * The {@code getSplits} signature differs between Trino SPI lines, so the concrete
  * {@code ArrowFlightSplitManager} lives in a per-SPI source root and calls {@link #planSplits}.
  */
@@ -38,12 +46,14 @@ public abstract class AbstractArrowFlightSplitManager
 {
     private static final Logger log = Logger.get(AbstractArrowFlightSplitManager.class);
 
+    private final ArrowFlightClient client;
     private final ArrowFlightStatistics statistics;
     private final long minRowsPerSplit;
     private final Map<String, String> splitColumns;
 
-    protected AbstractArrowFlightSplitManager(ArrowFlightStatistics statistics, ArrowFlightConfig config)
+    protected AbstractArrowFlightSplitManager(ArrowFlightClient client, ArrowFlightStatistics statistics, ArrowFlightConfig config)
     {
+        this.client = requireNonNull(client, "client is null");
         this.statistics = requireNonNull(statistics, "statistics is null");
         this.minRowsPerSplit = config.getSplitMinRows();
         this.splitColumns = parseSplitColumns(config.getSplitColumns());
@@ -52,10 +62,40 @@ public abstract class AbstractArrowFlightSplitManager
     protected ConnectorSplitSource planSplits(ConnectorSession session, ConnectorTableHandle table)
     {
         ArrowFlightTableHandle handle = (ArrowFlightTableHandle) table;
+        if (useEndpointSplits(session, handle)) {
+            List<ArrowFlightSplit> splits = endpointSplits(handle);
+            log.debug("%s: %s endpoint split(s)", handle, splits.size());
+            return new FixedSplitSource(splits);
+        }
         List<ArrowFlightSplit> splits = rangeSplits(session, handle)
                 .orElseGet(() -> List.of(new ArrowFlightSplit(Optional.empty())));
         log.debug("%s: %s split(s)", handle, splits.size());
         return new FixedSplitSource(splits);
+    }
+
+    static boolean useEndpointSplits(ConnectorSession session, ArrowFlightTableHandle handle)
+    {
+        return ArrowFlightSessionProperties.isEndpointSplitsEnabled(session)
+                && !ArrowFlightSessionProperties.isDynamicFilteringEnabled(session)
+                && handle.getAggregation().isEmpty()
+                && handle.getLimit().isEmpty();
+    }
+
+    /** One split per endpoint of the scan's FlightInfo; none if the server answers with no endpoint. */
+    List<ArrowFlightSplit> endpointSplits(ArrowFlightTableHandle handle)
+    {
+        List<ArrowFlightColumnHandle> columns = SqlQueryBuilder.baseColumns(handle, handle.effectiveColumns());
+        String sql = SqlQueryBuilder.buildScanSql(handle, columns, List.of());
+        log.debug("Flight query (endpoint splits): %s", sql);
+        FlightInfo info = client.getFlightInfo(sql);
+        client.recordEndpointCount(info.getEndpoints().size());
+        List<String> names = columns.stream().map(ArrowFlightColumnHandle::getColumnName).toList();
+        ImmutableList.Builder<ArrowFlightSplit> splits = ImmutableList.builder();
+        for (FlightEndpoint endpoint : info.getEndpoints()) {
+            List<String> uris = endpoint.getLocations().stream().map(l -> l.getUri().toString()).toList();
+            splits.add(ArrowFlightSplit.forEndpoint(endpoint.getTicket().getBytes(), uris, names));
+        }
+        return splits.build();
     }
 
     private Optional<List<ArrowFlightSplit>> rangeSplits(ConnectorSession session, ArrowFlightTableHandle handle)

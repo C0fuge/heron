@@ -37,5 +37,7 @@ arrow-flight.bearer-token=test-token
 # arrow-flight.endpoint-read-parallelism=1
 # Fetch and decode the next batch of a scan in the background while Trino processes the current page.
 # arrow-flight.read-ahead.enabled=true
+# Experimental: one split per Flight endpoint of one coordinator-planned scan instead of key-range splits
+# arrow-flight.endpoint-splits.enabled=false
 # Merge the partial groups of several Flight nodes as streams sorted by the server (ORDER BY the GROUP BY columns).
 # arrow-flight.aggregation-sorted-merge.enabled=true

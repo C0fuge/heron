@@ -17,9 +17,9 @@ public final class ArrowFlightSplitManager
         extends AbstractArrowFlightSplitManager
 {
     @Inject
-    public ArrowFlightSplitManager(ArrowFlightStatistics statistics, ArrowFlightConfig config)
+    public ArrowFlightSplitManager(ArrowFlightClient client, ArrowFlightStatistics statistics, ArrowFlightConfig config)
     {
-        super(statistics, config);
+        super(client, statistics, config);
     }
 
     @Override

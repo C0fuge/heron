@@ -12,10 +12,13 @@ import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.type.Type;
 import org.apache.arrow.flight.FlightEndpoint;
 import org.apache.arrow.flight.FlightInfo;
+import org.apache.arrow.flight.Location;
+import org.apache.arrow.flight.Ticket;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import pro.surpin.arrowflight.common.FlightDataStream;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -213,6 +216,9 @@ public abstract class AbstractArrowFlightPageSource
     /** Builds the SQL and asks the server for endpoints. False if no row can qualify. */
     private boolean plan()
     {
+        if (split.getTicket().isPresent()) {
+            return planEndpoint();
+        }
         List<String> extra = new ArrayList<>();
         split.getRangePredicate().ifPresent(extra::add);
 
@@ -259,6 +265,31 @@ public abstract class AbstractArrowFlightPageSource
             }
             sortedMerger = aggregationReader.sortedMerger(streams, SORTED_MERGE_PAGE_ROWS);
         }
+        startScanReader();
+        return true;
+    }
+
+    /**
+     * The coordinator planned the scan and gave this split one of its endpoints (endpoint_splits_enabled). Its query
+     * must return every column this page source needs: a missing column would otherwise read as NULLs.
+     */
+    private boolean planEndpoint()
+    {
+        Set<String> planned = Set.copyOf(split.getPlannedColumns());
+        for (ArrowFlightColumnHandle column : serverColumns) {
+            if (!planned.contains(column.getColumnName())) {
+                throw new TrinoException(GENERIC_INTERNAL_ERROR, "Endpoint split of " + table + " was planned without column "
+                        + column.getColumnName() + " (planned: " + split.getPlannedColumns() + "); disable endpoint_splits_enabled");
+            }
+        }
+        Location[] locations = split.getLocations().stream().map(uri -> new Location(URI.create(uri))).toArray(Location[]::new);
+        endpoints = List.of(new FlightEndpoint(new Ticket(split.ticketBytes().orElseThrow()), locations));
+        startScanReader();
+        return true;
+    }
+
+    private void startScanReader()
+    {
         // Read-ahead: even one endpoint at a time is read through the reader, whose background thread fetches and
         // decodes the next batch while Trino processes the page just converted (see nextScanPage).
         boolean parallel = endpointParallelism > 1 && endpoints.size() > 1;
@@ -269,7 +300,6 @@ public abstract class AbstractArrowFlightPageSource
             }
             parallelReader = new ParallelStreamReader(streams, parallel ? endpointParallelism : 1);
         }
-        return true;
     }
 
     /** Next non-empty batch over all endpoints, or null at the end. */

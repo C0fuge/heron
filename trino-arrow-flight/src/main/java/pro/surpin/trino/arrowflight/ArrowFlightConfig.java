@@ -63,6 +63,7 @@ public class ArrowFlightConfig
     private int endpointReadParallelism = 1;
     private boolean aggregationSortedMergeEnabled = true;
     private boolean readAheadEnabled = true;
+    private boolean endpointSplitsEnabled;
     // Off by default: every query's filter values differ, and the server keeps a prepared
     // statement per distinct SQL text forever (DuckDbAdapter.stmtCache), i.e. leaks memory.
     private boolean dynamicFilteringEnabled;
@@ -528,6 +529,20 @@ public class ArrowFlightConfig
     public ArrowFlightConfig setReadAheadEnabled(boolean readAheadEnabled)
     {
         this.readAheadEnabled = readAheadEnabled;
+        return this;
+    }
+
+    public boolean isEndpointSplitsEnabled()
+    {
+        return endpointSplitsEnabled;
+    }
+
+    @Config("arrow-flight.endpoint-splits.enabled")
+    @ConfigDescription("Plan a plain scan on the coordinator and make each Flight endpoint (one per node, or "
+            + "endpointsPerServer per server) its own split, instead of key-range splits that each query the server")
+    public ArrowFlightConfig setEndpointSplitsEnabled(boolean endpointSplitsEnabled)
+    {
+        this.endpointSplitsEnabled = endpointSplitsEnabled;
         return this;
     }
 
