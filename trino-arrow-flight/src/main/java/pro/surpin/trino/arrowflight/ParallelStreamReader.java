@@ -135,6 +135,18 @@ final class ParallelStreamReader
         return null;
     }
 
+    /**
+     * The caller is done with the batch {@link #poll()} returned: its stream starts loading the next one now (in the
+     * background) instead of at the next {@code poll()}. Optional; the root must not be used afterwards.
+     */
+    void release()
+    {
+        if (handedOut != null && !closed) {
+            handedOut.requestNext();
+            handedOut = null;
+        }
+    }
+
     boolean isFinished()
     {
         return closed || (active.isEmpty() && pending.isEmpty());

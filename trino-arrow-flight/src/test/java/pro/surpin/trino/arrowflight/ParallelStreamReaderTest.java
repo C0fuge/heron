@@ -171,6 +171,40 @@ class ParallelStreamReaderTest
     }
 
     @Test
+    void releaseStartsTheNextReadBeforeTheNextPoll()
+            throws Exception
+    {
+        // Read-ahead: once the caller has converted a batch, the stream loads the next one while the caller is busy.
+        CountDownLatch secondRead = new CountDownLatch(2);
+        FakeStream stream = new FakeStream(3, 4, 5)
+        {
+            @Override
+            public boolean next()
+            {
+                secondRead.countDown();
+                return super.next();
+            }
+        };
+        ParallelStreamReader reader = reader(1, stream);
+        VectorSchemaRoot first = null;
+        while (first == null) {
+            first = reader.poll();
+            if (first == null) {
+                reader.isBlocked().get(10, TimeUnit.SECONDS);
+            }
+        }
+        assertEquals(3, first.getRowCount());
+        assertEquals(1, secondRead.getCount(), "no read ahead before release()");
+        reader.release();
+        assertTrue(secondRead.await(10, TimeUnit.SECONDS), "release() did not start the next read");
+        reader.release();  // nothing handed out: no-op
+        assertEquals(9, drain(reader));
+        assertFalse(stream.overlapped);
+        assertTrue(stream.closed);
+        reader.close();
+    }
+
+    @Test
     void streamsAreReadAtTheSameTime()
             throws Exception
     {

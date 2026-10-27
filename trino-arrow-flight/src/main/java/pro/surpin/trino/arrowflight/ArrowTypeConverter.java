@@ -15,7 +15,9 @@ import io.trino.spi.type.TimestampWithTimeZoneType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
 import org.apache.arrow.memory.ArrowBuf;
+import org.apache.arrow.vector.BaseFixedWidthVector;
 import org.apache.arrow.vector.BaseIntVector;
+import org.apache.arrow.vector.BaseVariableWidthVector;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.BitVector;
 import org.apache.arrow.vector.DateDayVector;
@@ -49,6 +51,8 @@ import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.math.RoundingMode;
 
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
@@ -71,7 +75,7 @@ import static io.trino.spi.type.VarbinaryType.VARBINARY;
  * Maps the Arrow schema/vectors returned by the Flight server onto Trino types and blocks.
  * <p>
  * Common vector/type pairs are converted a whole vector at a time straight from the Arrow
- * buffers into flat Trino arrays. Everything else (and mismatches between the type the
+ * buffers into flat Trino arrays (fixed-width values and offsets as bulk little-endian copies). Everything else (and mismatches between the type the
  * server declares and the vector it actually sends, e.g. sum(decimal) declared DOUBLE but
  * streamed as DECIMAL(38,s)) goes through {@link #readNative} value by value.
  */
@@ -131,54 +135,31 @@ public class ArrowTypeConverter
     {
         boolean[] isNull = nulls(vector, offset, positions);
 
-        if (type.equals(BIGINT) && vector instanceof BigIntVector v) {
-            ArrowBuf data = v.getDataBuffer();
-            long[] values = new long[positions];
-            for (int i = 0; i < positions; i++) {
-                values[i] = data.getLong((long) (offset + i) * 8);
-            }
-            return Blocks.longs(positions, isNull, values);
+        if (type.equals(BIGINT) && vector instanceof BigIntVector) {
+            return Blocks.longs(positions, isNull, longs(vector.getDataBuffer(), offset, positions));
         }
         if ((type.equals(INTEGER) && vector instanceof IntVector) || (type.equals(DATE) && vector instanceof DateDayVector)
                 || (type.equals(REAL) && vector instanceof Float4Vector)) {
-            ArrowBuf data = vector.getDataBuffer();
             int[] values = new int[positions];
-            for (int i = 0; i < positions; i++) {
-                values[i] = data.getInt((long) (offset + i) * 4);
-            }
+            littleEndian(vector.getDataBuffer(), (long) offset * 4, positions * 4).asIntBuffer().get(values);
             return Blocks.ints(positions, isNull, values);
         }
-        if (type.equals(SMALLINT) && vector instanceof SmallIntVector v) {
-            ArrowBuf data = v.getDataBuffer();
+        if (type.equals(SMALLINT) && vector instanceof SmallIntVector) {
             short[] values = new short[positions];
-            for (int i = 0; i < positions; i++) {
-                values[i] = data.getShort((long) (offset + i) * 2);
-            }
+            littleEndian(vector.getDataBuffer(), (long) offset * 2, positions * 2).asShortBuffer().get(values);
             return Blocks.shorts(positions, isNull, values);
         }
-        if (type.equals(TINYINT) && vector instanceof TinyIntVector v) {
-            ArrowBuf data = v.getDataBuffer();
+        if (type.equals(TINYINT) && vector instanceof TinyIntVector) {
             byte[] values = new byte[positions];
-            for (int i = 0; i < positions; i++) {
-                values[i] = data.getByte(offset + i);
-            }
+            vector.getDataBuffer().getBytes(offset, values);
             return Blocks.bytes(positions, isNull, values);
         }
-        if (type.equals(DOUBLE) && vector instanceof Float8Vector v) {
-            ArrowBuf data = v.getDataBuffer();
-            long[] values = new long[positions];
-            for (int i = 0; i < positions; i++) {
-                values[i] = Double.doubleToLongBits(data.getDouble((long) (offset + i) * 8));
-            }
-            return Blocks.longs(positions, isNull, values);
+        if (type.equals(DOUBLE) && vector instanceof Float8Vector) {
+            // Trino keeps a DOUBLE as its IEEE bits in a long, which is what the Arrow buffer holds.
+            return Blocks.longs(positions, isNull, longs(vector.getDataBuffer(), offset, positions));
         }
         if (type.equals(TIMESTAMP_MICROS) && (vector instanceof TimeStampMicroVector || vector instanceof TimeStampMicroTZVector)) {
-            ArrowBuf data = vector.getDataBuffer();
-            long[] values = new long[positions];
-            for (int i = 0; i < positions; i++) {
-                values[i] = data.getLong((long) (offset + i) * 8);
-            }
-            return Blocks.longs(positions, isNull, values);
+            return Blocks.longs(positions, isNull, longs(vector.getDataBuffer(), offset, positions));
         }
         if (type.equals(BOOLEAN) && vector instanceof BitVector v) {
             byte[] values = new byte[positions];
@@ -188,32 +169,34 @@ public class ArrowTypeConverter
             return Blocks.bytes(positions, isNull, values);
         }
         if (type instanceof DecimalType decimal && vector instanceof DecimalVector v && v.getScale() == decimal.getScale()) {
-            ArrowBuf data = v.getDataBuffer();
+            // (low, high) little-endian pairs in Arrow; Trino's Int128ArrayBlock wants (high, low).
+            long[] pairs = longs(v.getDataBuffer(), offset * 2, positions * 2);
             if (decimal.isShort()) {
                 long[] values = new long[positions];
                 for (int i = 0; i < positions; i++) {
-                    long low = data.getLong((long) (offset + i) * 16);
-                    long high = data.getLong((long) (offset + i) * 16 + 8);
-                    if (high != (low >> 63) && (isNull == null || !isNull[i])) {
+                    long low = pairs[2 * i];
+                    if (pairs[2 * i + 1] != (low >> 63) && (isNull == null || !isNull[i])) {
                         throw new TrinoException(NUMERIC_VALUE_OUT_OF_RANGE, "Decimal value does not fit " + type);
                     }
                     values[i] = low;
                 }
                 return Blocks.longs(positions, isNull, values);
             }
-            long[] values = new long[positions * 2];
             for (int i = 0; i < positions; i++) {
-                values[2 * i] = data.getLong((long) (offset + i) * 16 + 8);
-                values[2 * i + 1] = data.getLong((long) (offset + i) * 16);
+                long low = pairs[2 * i];
+                pairs[2 * i] = pairs[2 * i + 1];
+                pairs[2 * i + 1] = low;
             }
-            return Blocks.int128s(positions, isNull, values);
+            return Blocks.int128s(positions, isNull, pairs);
         }
         if ((type instanceof VarcharType && vector instanceof VarCharVector) || (type.equals(VARBINARY) && vector instanceof VarBinaryVector)) {
-            ArrowBuf offsetsBuffer = vector.getOffsetBuffer();
             int[] offsets = new int[positions + 1];
-            int base = offsetsBuffer.getInt((long) offset * 4);
-            for (int i = 0; i <= positions; i++) {
-                offsets[i] = offsetsBuffer.getInt((long) (offset + i) * 4) - base;
+            littleEndian(vector.getOffsetBuffer(), (long) offset * 4, (positions + 1) * 4).asIntBuffer().get(offsets);
+            int base = offsets[0];
+            if (base != 0) {
+                for (int i = 0; i <= positions; i++) {
+                    offsets[i] -= base;
+                }
             }
             byte[] bytes = new byte[offsets[positions]];
             vector.getDataBuffer().getBytes(base, bytes);
@@ -243,10 +226,35 @@ public class ArrowTypeConverter
             return null;
         }
         boolean[] isNull = new boolean[positions];
+        if (vector instanceof BaseFixedWidthVector || vector instanceof BaseVariableWidthVector) {
+            // straight from the validity bitmap (bit set = value present)
+            ArrowBuf validity = vector.getValidityBuffer();
+            for (int i = 0; i < positions; i++) {
+                int index = offset + i;
+                isNull[i] = (validity.getByte(index >>> 3) & (1 << (index & 7))) == 0;
+            }
+            return isNull;
+        }
         for (int i = 0; i < positions; i++) {
             isNull[i] = vector.isNull(offset + i);
         }
         return isNull;
+    }
+
+    /** {@code count} little-endian longs from long index {@code first} of {@code data}, copied in bulk. */
+    private static long[] longs(ArrowBuf data, int first, int count)
+    {
+        long[] values = new long[count];
+        littleEndian(data, (long) first * 8, count * 8).asLongBuffer().get(values);
+        return values;
+    }
+
+    private static ByteBuffer littleEndian(ArrowBuf data, long index, int length)
+    {
+        if (length == 0) {
+            return ByteBuffer.allocate(0);
+        }
+        return data.nioBuffer(index, length).order(ByteOrder.LITTLE_ENDIAN);
     }
 
     /**

@@ -62,6 +62,7 @@ public class ArrowFlightConfig
     private int dynamicFilteringMaxValues = 1000;
     private int endpointReadParallelism = 1;
     private boolean aggregationSortedMergeEnabled = true;
+    private boolean readAheadEnabled = true;
     // Off by default: every query's filter values differ, and the server keeps a prepared
     // statement per distinct SQL text forever (DuckDbAdapter.stmtCache), i.e. leaks memory.
     private boolean dynamicFilteringEnabled;
@@ -513,6 +514,20 @@ public class ArrowFlightConfig
     public ArrowFlightConfig setAggregationSortedMergeEnabled(boolean aggregationSortedMergeEnabled)
     {
         this.aggregationSortedMergeEnabled = aggregationSortedMergeEnabled;
+        return this;
+    }
+
+    public boolean isReadAheadEnabled()
+    {
+        return readAheadEnabled;
+    }
+
+    @Config("arrow-flight.read-ahead.enabled")
+    @ConfigDescription("Read and decode the next Arrow batch of a scan on a background thread while Trino processes "
+            + "the current page")
+    public ArrowFlightConfig setReadAheadEnabled(boolean readAheadEnabled)
+    {
+        this.readAheadEnabled = readAheadEnabled;
         return this;
     }
 

@@ -27,6 +27,7 @@ public final class ArrowFlightSessionProperties
     public static final String DYNAMIC_FILTERING_MAX_VALUES = "dynamic_filtering_max_values";
     public static final String ENDPOINT_READ_PARALLELISM = "endpoint_read_parallelism";
     public static final String AGGREGATION_SORTED_MERGE_ENABLED = "aggregation_sorted_merge_enabled";
+    public static final String READ_AHEAD_ENABLED = "read_ahead_enabled";
 
     private final List<PropertyMetadata<?>> properties;
 
@@ -55,7 +56,9 @@ public final class ArrowFlightSessionProperties
                 integerProperty(ENDPOINT_READ_PARALLELISM,
                         "Endpoints (Flight nodes) of one split read at the same time", config.getEndpointReadParallelism(), false),
                 booleanProperty(AGGREGATION_SORTED_MERGE_ENABLED,
-                        "Merge the groups of several Flight nodes as streams sorted by the server", config.isAggregationSortedMergeEnabled(), false));
+                        "Merge the groups of several Flight nodes as streams sorted by the server", config.isAggregationSortedMergeEnabled(), false),
+                booleanProperty(READ_AHEAD_ENABLED,
+                        "Read the next Arrow batch of a scan while Trino processes the current page", config.isReadAheadEnabled(), false));
     }
 
     public List<PropertyMetadata<?>> getSessionProperties()
@@ -110,6 +113,11 @@ public final class ArrowFlightSessionProperties
     public static boolean isAggregationSortedMergeEnabled(ConnectorSession session)
     {
         return session.getProperty(AGGREGATION_SORTED_MERGE_ENABLED, Boolean.class);
+    }
+
+    public static boolean isReadAheadEnabled(ConnectorSession session)
+    {
+        return session.getProperty(READ_AHEAD_ENABLED, Boolean.class);
     }
 
     public static boolean isDynamicFilteringEnabled(ConnectorSession session)

@@ -48,6 +48,7 @@ public abstract class AbstractArrowFlightPageSourceProvider
                 ArrowFlightSessionProperties.getDynamicFilteringWaitMillis(session),
                 ArrowFlightSessionProperties.getDynamicFilteringMaxValues(session),
                 ArrowFlightSessionProperties.getEndpointReadParallelism(session),
-                ArrowFlightSessionProperties.isAggregationSortedMergeEnabled(session));
+                ArrowFlightSessionProperties.isAggregationSortedMergeEnabled(session),
+                ArrowFlightSessionProperties.isReadAheadEnabled(session));
     }
 }

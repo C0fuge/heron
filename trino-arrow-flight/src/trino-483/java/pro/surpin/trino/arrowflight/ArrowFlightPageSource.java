@@ -22,10 +22,11 @@ public final class ArrowFlightPageSource
             int dynamicFilterWaitMillis,
             int dynamicFilterMaxValues,
             int endpointParallelism,
-            boolean sortedAggregationMerge)
+            boolean sortedAggregationMerge,
+            boolean readAhead)
     {
         super(client, typeConverter, table, split, columns, dynamicFilter, dynamicFilterWaitMillis, dynamicFilterMaxValues,
-                endpointParallelism, sortedAggregationMerge);
+                endpointParallelism, sortedAggregationMerge, readAhead);
     }
 
     @Override

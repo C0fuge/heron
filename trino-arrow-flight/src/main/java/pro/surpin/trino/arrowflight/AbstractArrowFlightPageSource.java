@@ -37,7 +37,8 @@ import static java.util.Objects.requireNonNull;
  * that can match. Up to {@code dynamic_filtering_wait_timeout_ms} is spent waiting for them.
  * <p>
  * The endpoints (one per Flight node) of a plain scan are read one after another, or up to
- * {@code endpoint_read_parallelism} at a time (see {@link ParallelStreamReader}).
+ * {@code endpoint_read_parallelism} at a time (see {@link ParallelStreamReader}); with {@code read_ahead_enabled}
+ * (default) the next batch is fetched and decoded in the background while Trino processes the current page.
  * <p>
  * The engine-facing "next page" method differs between Trino SPI lines
  * ({@code getNextPage()} up to 455-ish, {@code getNextSourcePage()} from 477 on), so the
@@ -60,6 +61,7 @@ public abstract class AbstractArrowFlightPageSource
     private final int dynamicFilterMaxValues;
     private final int endpointParallelism;
     private final boolean sortedAggregationMerge;
+    private final boolean readAhead;
 
     /** Plain scans: table columns fetched from the server (expressions are computed here). */
     private final List<ArrowFlightColumnHandle> serverColumns;
@@ -89,7 +91,8 @@ public abstract class AbstractArrowFlightPageSource
             int dynamicFilterWaitMillis,
             int dynamicFilterMaxValues,
             int endpointParallelism,
-            boolean sortedAggregationMerge)
+            boolean sortedAggregationMerge,
+            boolean readAhead)
     {
         this.client = requireNonNull(client, "client is null");
         this.converter = requireNonNull(converter, "converter is null");
@@ -101,6 +104,7 @@ public abstract class AbstractArrowFlightPageSource
         this.dynamicFilterMaxValues = dynamicFilterMaxValues;
         this.endpointParallelism = endpointParallelism;
         this.sortedAggregationMerge = sortedAggregationMerge;
+        this.readAhead = readAhead;
         this.remainingRows = table.getLimit().orElse(Long.MAX_VALUE);
         this.aggregationReader = table.getAggregation().map(a -> new AggregationReader(a, converter)).orElse(null);
         this.serverColumns = aggregationReader == null ? SqlQueryBuilder.baseColumns(table, columns) : List.of();
@@ -255,12 +259,15 @@ public abstract class AbstractArrowFlightPageSource
             }
             sortedMerger = aggregationReader.sortedMerger(streams, SORTED_MERGE_PAGE_ROWS);
         }
-        if (aggregationReader == null && endpointParallelism > 1 && endpoints.size() > 1) {
+        // Read-ahead: even one endpoint at a time is read through the reader, whose background thread fetches and
+        // decodes the next batch while Trino processes the page just converted (see nextScanPage).
+        boolean parallel = endpointParallelism > 1 && endpoints.size() > 1;
+        if (aggregationReader == null && !endpoints.isEmpty() && (parallel || readAhead)) {
             List<Supplier<ParallelStreamReader.BatchStream>> streams = new ArrayList<>();
             for (FlightEndpoint endpoint : endpoints) {
                 streams.add(() -> batchStream(openStream(endpoint)));
             }
-            parallelReader = new ParallelStreamReader(streams, endpointParallelism);
+            parallelReader = new ParallelStreamReader(streams, parallel ? endpointParallelism : 1);
         }
         return true;
     }
@@ -400,6 +407,10 @@ public abstract class AbstractArrowFlightPageSource
             blocks[channel] = column.getExpression().isPresent()
                     ? evaluate(column, base, positions)
                     : base.get(column.getColumnName());
+        }
+        if (parallelReader != null) {
+            // The blocks are copies: the stream may load its next batch into the root while Trino works on this page.
+            parallelReader.release();
         }
         return new Page(positions, blocks);
     }
