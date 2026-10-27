@@ -157,6 +157,27 @@ Kept up to date after every work session so work can be resumed from this reposi
 >   full scan (`checksum(ROW(16 cols))` s1 43.05 vs s4 13.71 s) and q03/q18 better with 4; CI shares 4 vCPUs between DuckDB
 >   and Trino, so it cannot decide the default. See Open questions (split_count default) and the stand item below (b).
 >
+> **Session 67 (opt-in endpoint splits; stand measurement wanted).** New `arrow-flight.endpoint-splits.enabled` / session
+> `flight.endpoint_splits_enabled` (default **false**, so nothing changes unless it is set): a plain scan is planned once on the
+> coordinator (one `GetFlightInfo`) and every endpoint of that FlightInfo becomes its own Trino split, which carries the ticket,
+> the locations and the planned column names. Trino gets one driver per endpoint (3 on a 3-node cluster, `endpointsPerServer`
+> on one server), and the server runs the scan once instead of once per key range. Same read path and failover rules per
+> endpoint (`openStream` over the endpoint's locations). Not used while dynamic filtering is on (it needs the query planned on the worker), and not for pushed
+> aggregations or LIMIT. A page source refuses (clear error, never NULLs) an endpoint split planned without a column it needs.
+> Risk to check on the stand: tickets are read when Trino schedules the split, so they must stay valid on the server for
+> as long as the scan runs. Unit tests `EndpointSplitsTest` (3; 52 in total): build 40452390354, all versions 40452515733
+> (455/477/483 green). The e2e `splits` block has a new setting `ep1`: push run 40452390252, 1 and 3 servers, all green (5/5 +
+> full-scan checksum = reference; TPC-H 22/22, failover, Iceberg, concurrent all OK). **CI timings, 3 servers:**
+> - Trino-CPU-heavy full scan (`checksum(ROW(16 cols))`, e2e splits block, best of 2): s1p1 13.38 / s4p1 7.93 / **ep1 7.80 s**.
+>   On 1 server ep1 = one endpoint = s1 (11.70 vs s1 12.85 / s4 7.66).
+> - Profile run 40452517908 (TPC-H SF1 22 + raw scan, Trino elapsed, 2 passes): default (split 4) 36.9 s, `split_count=1`
+>   29.5-29.6 s, **endpoint splits 30.1-31.0 s**; raw scan 2.64 / 1.86 / 1.86-1.90 s.
+>
+> So on a cluster endpoint splits get split 4's speed on the CPU-heavy scan (the stand's 2026-10-23 case for keeping 4) and
+> split 1's speed on TPC-H, without range re-scans. **Stand:** on the 3-node cluster, SF10 TPC-H and the checksum scan with
+> `SET SESSION flight.endpoint_splits_enabled=true` vs the default and `split_count=1` (watch for expired-ticket errors on long
+> scans); on one server the same with `endpointsPerServer` 4. If it wins there, the default could change (Open question).
+
 > **Stand (next):** on SF10, one Trino node, single server and 3-node cluster: (a) the raw scan through Trino
 > (`SELECT max(l_orderkey), …, max(l_comment) FROM lineitem` with `SET SESSION flight.aggregation_pushdown_enabled=false`, file
 > `e2e/ci/profile-queries/scan.sql`) vs the same 8 columns fetched by one plain Flight client (`scan-direct.sql`, e.g.
@@ -564,6 +585,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   Needs the stand's SF10 split_count 1/4 run first (Next steps, Stage 2 stand item (b)).
   Session 66: with server 27f583adccd7 (DuckDB 1.5.6) the gap is smaller in CI (1 server 27.7 vs 36.1 s, 3 servers 24.5 vs
   28.9 s; 4 range splits now ~1.35x one statement on the server, was 1.7x); run the stand comparison on that build.
+  Session 67: option (c) exists now as opt-in `endpoint_splits_enabled` (one split per endpoint of one coordinator-planned
+  statement). On 3 servers in CI it is as fast as split 1 on TPC-H and as fast as split 4 on the CPU-heavy checksum scan. Make it
+  the default for clusters once the stand confirms it (and that tickets stay valid for long SF10 scans)?
 - **Answered (session 63; moved to Next steps). Server build 4d707e2aedfc (session 59):** uploaded to `e2e-assets` with no note in STATUS. What does it change vs 7fbe2d75827c,
   and should it become the e2e default? (Session 61: superseded as default by 57d252b1437f = 4d707e2aedfc + shared outbound byte
   budget; only the 4d707e2aedfc delta itself is still undocumented.) The CI suite is green on it in both modes (runs 40295372006, 40295376402).
@@ -950,3 +974,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   TPC-H SF1 sum 1 server 41.5 → 36.1 s, 3 servers 45.5 → 28.9 s; small queries 0.1-0.7 s faster; range splits much cheaper on the
   server. No plugin code changed (`[skip ci]` pushes). ~60 Actions minutes. Invariants untouched (failover checks exact or
   clean errors).
+- 2026-10-27 (cloud session 67): Stage 2. Opt-in endpoint splits (`arrow-flight.endpoint-splits.enabled`, session
+  `endpoint_splits_enabled`, default off): a coordinator-planned scan with one split per Flight endpoint, so there are no range re-scans.
+  Unit tests 52 green (build 40452390354; 455/477/483 run 40452515733). e2e push run 40452390252 green on 1 and 3 servers with
+  the new `ep1` splits setting exact. Profile run 40452517908 (3 servers): TPC-H SF1 endpoint splits 30.1 s vs split 1 29.5 s vs
+  default 36.9 s, CPU-heavy checksum scan 7.80 s (= split 4, vs split 1 13.38 s). Default unchanged; stand check + Open question.
+  ~35 Actions minutes. Invariants untouched (off by default; same per-endpoint failover; missing column = error, not NULLs).
