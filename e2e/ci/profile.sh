@@ -48,16 +48,18 @@ read_bench() {
       python:3.12-slim sh -c 'pip install -q --disable-pip-version-check adbc-driver-flightsql pyarrow >/dev/null 2>&1 &&
         python /probe/flight_scan_time.py grpc://flight1:32010 tpch "$1" /probe/profile-queries/scan-direct.sql 1 2 4' probe "$PROFILE_REPEAT" \
       || echo "adbc bench failed"
-    echo "# Trino (scan.sql, aggregation pushdown off): split_count best_s"
+    echo "# Trino (scan.sql, aggregation pushdown off): split_count best_s, then Trino's stats of that pass"
     mkdir -p "$OUT/profile/bench"
     for n in 1 2 4; do
       best=""
       for pass in $(seq 0 "$PROFILE_REPEAT"); do  # pass 0 warms up
         t=$(profile_query "$OUT/profile/bench" scan --session flight.aggregation_pushdown_enabled=false --session "flight.split_count=$n")
-        [ "$pass" = 0 ] || best=$(printf '%s\n%s\n' "$best" "$t" | grep . | sort -n | head -1)
+        st=$(jq -r '.queryStats | "elapsed=\(.elapsedTime) queued=\(.queuedTime) analysis=\(.analysisTime) planning=\(.planningTime) execution=\(.executionTime) cpu=\(.totalCpuTime) scheduled=\(.totalScheduledTime) blocked=\(.totalBlockedTime)"' \
+          "$OUT/profile/bench/scan.json" 2>/dev/null || echo "no stats")
+        if [ "$pass" != 0 ] && { [ -z "$best" ] || [ "$(echo "$t < $best" | bc)" = 1 ]; }; then best=$t; beststats=$st; fi
       done
       [ -f "$OUT/profile/bench/scan.tsv" ] || best="ERROR $(head -c 300 "$OUT/profile/bench/scan.err" 2>/dev/null)"
-      printf 'trino-split%s\t%s\n' "$n" "$best"
+      printf 'trino-split%s\t%s\t%s\n' "$n" "$best" "$beststats"
     done
   } > "$OUT/profile-bench.tsv"
   echo "--- profile: read benchmark (lineitem scan: Java client, ADBC, Trino)"; cat "$OUT/profile-bench.tsv"
