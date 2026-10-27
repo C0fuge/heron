@@ -207,6 +207,20 @@ Kept up to date after every work session so work can be resumed from this reposi
 > `SET SESSION flight.endpoint_splits_enabled=true` vs the default and `split_count=1` (watch for expired-ticket errors on long
 > scans); on one server the same with `endpointsPerServer` 4. If it wins there, the default could change (Open question).
 
+> **Session 69 (endpoint splits fall back to key ranges on one endpoint).** With `endpoint_splits_enabled` a single server
+> answered with one endpoint = one split (= `split_count=1`, slow on the CPU-heavy scan). Now a coordinator plan with exactly one
+> endpoint is replaced by the `split_count` key-range splits when the scan is large enough (small scans keep their endpoint split;
+> the dropped FlightInfo is never read: GetFlightInfo plans, DoGet runs), and once the client expects a single endpoint (100
+> single-endpoint answers in a row, `ArrowFlightClient.expectsSeveralEndpoints`) key ranges are planned directly without the extra
+> GetFlightInfo. Several endpoints = endpoint splits as before. Default (off) unchanged. Unit tests `EndpointSplitsTest` +4 (56 in
+> total), build 40463892150; e2e push run 40463892049 green on 1 and 3 servers (TPC-H 22/22, types, Iceberg, failover incl.
+> mid-stream `tx8M@2.1`, heap, concurrent, splits 5/5 + checksum). Splits block full-scan checksum, best of 2: 1 server s1p1 7.75 /
+> s4p1 4.52 / **ep1 4.40 s** (session 67: ep1 = s1); 3 servers 9.13 / 5.19 / **4.93 s**. Profile run 40463937582 (TPC-H SF1 22 +
+> raw scan, Trino elapsed sums, settings default / `split_count=1` / endpoint splits): 1 server 37.7 / 28.5 / 35.2 s (endpoint
+> splits now = range splits there), 3 servers 37.3 / 29.3 / 30.0 s. So endpoint splits on = cluster: split 1's TPC-H speed and
+> split 4's CPU-heavy scan speed; single server: unchanged from today's default. A default change still waits on the stand (Open
+> question split_count).
+
 > **Stand (next):** on SF10, one Trino node, single server and 3-node cluster: (a) the raw scan through Trino
 > (`SELECT max(l_orderkey), …, max(l_comment) FROM lineitem` with `SET SESSION flight.aggregation_pushdown_enabled=false`, file
 > `e2e/ci/profile-queries/scan.sql`) vs the same 8 columns fetched by one plain Flight client (`scan-direct.sql`, e.g.
@@ -623,6 +637,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   Session 67: option (c) exists now as opt-in `endpoint_splits_enabled` (one split per endpoint of one coordinator-planned
   statement). On 3 servers in CI it is as fast as split 1 on TPC-H and as fast as split 4 on the CPU-heavy checksum scan. Make it
   the default for clusters once the stand confirms it (and that tickets stay valid for long SF10 scans)?
+  Session 69: with endpoint splits on, a single-endpoint plan now falls back to the `split_count` key ranges, so the option can
+  be switched on for single servers and clusters alike (1 server behaves like today's default). Proposal after the stand run:
+  `arrow-flight.endpoint-splits.enabled=true` as the default, `split-count` 4 kept for the single-server fallback.
 - **Answered (session 63; moved to Next steps). Server build 4d707e2aedfc (session 59):** uploaded to `e2e-assets` with no note in STATUS. What does it change vs 7fbe2d75827c,
   and should it become the e2e default? (Session 61: superseded as default by 57d252b1437f = 4d707e2aedfc + shared outbound byte
   budget; only the 4d707e2aedfc delta itself is still undocumented.) The CI suite is green on it in both modes (runs 40295372006, 40295376402).
@@ -1021,3 +1038,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   split 1). Made 775100bf923f the e2e default (`e2e.yml`, `run-e2e.sh`; commit `[skip ci]`, no plugin code changed and the
   same build was just run green). New Open question: direct-ADBC q04 catalog error on cluster members (server side,
   pre-existing). ~47 Actions minutes. Invariants untouched.
+- 2026-10-27 (cloud session 69): Stage 2. Endpoint splits fall back to `split_count` key ranges when the coordinator plan has a
+  single endpoint (large scans only; planned directly once the client expects one endpoint). Unit tests 56 green (build
+  40463892150); e2e push run 40463892049 green on 1 and 3 servers (ep1 full scan 1 server 4.40 s = s4p1 4.52, was = s1p1 7.75);
+  profile run 40463937582: TPC-H SF1 sums 1 server default / split 1 / endpoint splits 37.7 / 28.5 / 35.2 s, 3 servers 37.3 /
+  29.3 / 30.0 s. Default unchanged (off). ~60 Actions minutes. Invariants untouched (off by default; same per-endpoint failover).
