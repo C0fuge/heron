@@ -47,7 +47,7 @@ trino_seconds() {  # Trino duration ("2.37s", "980.00ms", "1.20m") [fallback] ->
 }
 
 read_bench() {
-  log "profile: read benchmark without Trino (plugin Java client vs ADBC), $PROFILE_REPEAT timed pass(es)"
+  log "profile: read benchmark without Trino (plugin Java client vs ADBC), $PROFILE_REPEAT timed pass(es); $(runner_cpu)"
   docker cp "$REPO/e2e/ci/FlightReadBench.java" trino:/tmp/FlightReadBench.java > /dev/null
   {
     echo "# plugin Java client (FlightSqlSession, drain only): mode best_s getflightinfo_s rows MB endpoints MB/s"
@@ -76,9 +76,12 @@ read_bench() {
   echo "--- profile: read benchmark (lineitem scan: Java client, ADBC, Trino)"; cat "$OUT/profile-bench.tsv"
 }
 
+# runner hardware differs between jobs (session 78: Trino CPU 35 % apart on two same-time runs), so timings name it
+runner_cpu() { echo "runner: $(nproc) vCPU, $(lscpu 2>/dev/null | sed -n 's/^Model name: *//p' | head -1)"; }
+
 profile_run() {
   local setting tag dir q pass sess t pid jfr names
-  log "profile: settings $PROFILE_SETTINGS, $PROFILE_REPEAT timed pass(es), $SERVERS server(s)"
+  log "profile: settings $PROFILE_SETTINGS, $PROFILE_REPEAT timed pass(es), $SERVERS server(s); $(runner_cpu)"
   mkdir -p "$OUT/profile/warm"
   names=$(for q in "$QUERIES"/q*.sql; do basename "$q" .sql; done)
   for q in $names; do profile_query "$OUT/profile/warm" "$q" > /dev/null; done
