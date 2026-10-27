@@ -57,6 +57,13 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **New server build `server-1.0.0-45fc0a9e6e02`** (2026-10-27, local coordinator; jar, plugins tar, libs tar + merged
+> `SHA256SUMS` in this repo's assets release) = 27f583adccd7 + per-query overhead cuts (stage 2 item 15: describe once per views
+> snapshot, parse check once per node, partial-mode sample-file cache, executionPath log line written asynchronously). Needs
+> the DuckDB 1.5.6 extension set (server repo `ci-assets`). Candidate for the presentation build: run the suite once on it
+> (note small-query timings) and make it the CI default if green.
+
+
 > **New server build `server-1.0.0-775100bf923f`** (2026-10-27, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release) = 27f583adccd7 + complete mode describes a query once per catalog-views snapshot
 > (per-query overhead, stage 2 item 15 step 1). Needs the DuckDB 1.5.6 extension set (server repo `ci-assets`). Run the suite
