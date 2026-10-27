@@ -18,7 +18,7 @@ profile_query() {  # setting-dir query session-args... -> seconds; Trino query i
   local dir=$1 q=$2 t0 t id; shift 2
   t0=$(date +%s.%N)
   if docker exec trino trino --catalog flight --schema tpch --source "prof-$q" "$@" --output-format TSV \
-       -f "/queries/$q.sql" > "$dir/$q.tsv" 2> "$dir/$q.err"; then
+       -f "/$( [ "$q" = scan ] && echo profile-queries || echo queries)/$q.sql" > "$dir/$q.tsv" 2> "$dir/$q.err"; then
     rm -f "$dir/$q.err"
   else
     rm -f "$dir/$q.tsv"
@@ -53,14 +53,19 @@ profile_run() {
       if [ -n "$jfr" ] && [ "$setting" = default ] && [ "$pass" = 1 ]; then
         docker exec trino jcmd "$pid" JFR.stop name=prof > /dev/null || jfr=""
       fi
+      # raw scan rate: 6M lineitem rows x 8 columns through the plugin, aggregated by Trino (pushdown off)
+      printf '%s\t%s\t%s\n' "$tag" scan "$(profile_query "$dir" scan "${sess[@]}" --session flight.aggregation_pushdown_enabled=false)" \
+        >> "$OUT/profile/times-raw.tsv"
       "${COMPARE[@]}" "$dir" "$QUERIES" "$dir/compare.tsv" || status=1
+      cmp -s "$dir/scan.tsv" "$OUT/profile/$(echo "$PROFILE_SETTINGS" | awk '{ s = $1; gsub(/flight\./, "", s); gsub(/[^a-z0-9_]/, "", s); print s }')-1/scan.tsv" \
+        || { echo "profile: scan answer of $tag-$pass differs from the first setting's"; status=1; }
       python3 "$REPO/e2e/ci/profile_report.py" stats "$dir" > "$OUT/profile-stats-$tag-$pass.tsv" || true
     done
   done
   log "profile: direct to flight1 (ADBC, whole query in DuckDB)"
-  docker run --rm --network "$NET" -e FLIGHT_TOKEN="$TOKEN" -v "$REPO/e2e/ci":/probe:ro -v "$QUERIES":/queries:ro \
+  docker run --rm --network "$NET" -e FLIGHT_TOKEN="$TOKEN" -v "$REPO/e2e/ci":/probe:ro -v "$QUERIES":/queries:ro -v "$REPO/e2e/ci/profile-queries":/pq:ro \
     python:3.12-slim sh -c 'pip install -q --disable-pip-version-check adbc-driver-flightsql pyarrow >/dev/null 2>&1 &&
-      python /probe/flight_time.py grpc://flight1:32010 tpch "$@"' probe "$PROFILE_REPEAT" $(for q in $names; do echo "/queries/$q.sql"; done) \
+      python /probe/flight_time.py grpc://flight1:32010 tpch "$@"' probe "$PROFILE_REPEAT" $(for q in $names; do echo "/queries/$q.sql"; done) /pq/scan-direct.sql \
     | tee "$OUT/profile/direct.tsv" || true
   # best time per query x setting, plus the direct time
   python3 - "$OUT/profile/times-raw.tsv" "$OUT/profile/direct.tsv" > "$OUT/profile-times.tsv" <<'PY' || true
@@ -72,7 +77,7 @@ for line in open(sys.argv[1]):
     if tag not in tags:
         tags.append(tag)
     best[q][tag] = min(float(t), best[q].get(tag, float("inf")))
-direct = {l.split("\t")[0]: l.split("\t")[1] for l in open(sys.argv[2]) if "\t" in l}
+direct = {l.split("\t")[0].replace("scan-direct", "scan"): l.split("\t")[1] for l in open(sys.argv[2]) if "\t" in l}
 print("query\t" + "\t".join(tags) + "\tdirect")
 for q in sorted(best):
     print(q + "\t" + "\t".join(f"{best[q].get(t, 0):.2f}" for t in tags) + "\t" + direct.get(q, "?"))
@@ -80,7 +85,7 @@ print("TOTAL\t" + "\t".join(f"{sum(best[q].get(t, 0) for q in best):.2f}" for t 
       + f"{sum(float(v) for v in direct.values() if v.replace('.', '', 1).isdigit()):.2f}")
 PY
   echo "--- profile: best seconds per query (direct = straight to flight1)"; cat "$OUT/profile-times.tsv"
-  for f in "$OUT"/profile-stats-*-1.tsv; do echo "--- $(basename "$f")"; cat "$f"; done
+  for f in "$OUT"/profile-stats-*.tsv; do echo "--- $(basename "$f")"; grep -E '^(q0[1-9]|q1[0-9]|q2[0-2]|scan|TOTAL|query)' "$f"; done
   if [ -n "$jfr" ]; then
     docker cp trino:/tmp/prof.jfr "$OUT/profile/prof.jfr" > /dev/null
     "${JAVA_HOME:+$JAVA_HOME/bin/}jfr" print --json --stack-depth 64 --events jdk.ExecutionSample "$OUT/profile/prof.jfr" \

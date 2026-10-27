@@ -158,7 +158,7 @@ start_trino() {
     -v "$WORK/etc/catalog/flight.properties":/etc/trino/catalog/flight.properties:ro \
     -v "$WORK/etc/catalog/flighth.properties":/etc/trino/catalog/flighth.properties:ro \
     -v "$WORK/etc/jvm.config":/etc/trino/jvm.config:ro \
-    -v "$REPO/e2e/ci/queries":/queries:ro \
+    -v "$REPO/e2e/ci/queries":/queries:ro -v "$REPO/e2e/ci/profile-queries":/profile-queries:ro \
     "trinodb/trino:$TRINO_VERSION" >/dev/null
   for i in $(seq 1 90); do
     docker exec trino trino --execute 'SELECT 1' >/dev/null 2>&1 && break
