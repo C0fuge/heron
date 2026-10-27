@@ -57,8 +57,12 @@ profile_run() {
       printf '%s\t%s\t%s\n' "$tag" scan "$(profile_query "$dir" scan "${sess[@]}" --session flight.aggregation_pushdown_enabled=false)" \
         >> "$OUT/profile/times-raw.tsv"
       "${COMPARE[@]}" "$dir" "$QUERIES" "$dir/compare.tsv" || status=1
-      cmp -s "$dir/scan.tsv" "$OUT/profile/$(echo "$PROFILE_SETTINGS" | awk '{ s = $1; gsub(/flight\./, "", s); gsub(/[^a-z0-9_]/, "", s); print s }')-1/scan.tsv" \
-        || { echo "profile: scan answer of $tag-$pass differs from the first setting's"; status=1; }
+      first="$OUT/profile/$(echo "$PROFILE_SETTINGS" | awk '{ s = $1; gsub(/flight\./, "", s); gsub(/[^a-z0-9_]/, "", s); print s }')-1"
+      if [ ! -f "$dir/scan.tsv" ] || ! cmp -s "$dir/scan.tsv" "$first/scan.tsv"; then
+        echo "profile: scan answer of $tag-$pass differs from the first setting's or failed:" \
+          "$(cat "$dir/scan.tsv" "$dir/scan.err" 2>/dev/null | head -c 400) | first: $(cat "$first/scan.tsv" "$first/scan.err" 2>/dev/null | head -c 400)"
+        status=1
+      fi
       python3 "$REPO/e2e/ci/profile_report.py" stats "$dir" > "$OUT/profile-stats-$tag-$pass.tsv" || true
     done
   done
