@@ -260,7 +260,8 @@ df_stats() {  # source -> "<physicalInputPositions> <elapsed>"
 df_ratio() { awk -v a="$1" -v b="$2" 'BEGIN { if (b + 0 > 0) printf "%.3f", a / b; else print "?" }'; }
 
 # TopN pushdown (off by default): with flight.topn_pushdown_enabled every answer must equal the one without
-# it (sort keys are unique, so the order is exact), and EXPLAIN must show the TopN in the table scan. Rows read
+# it (sort keys are unique, so the order is exact), and EXPLAIN must show the TopN in the table scan; q4-q6 sort
+# by VARCHAR (comments with spaces/punctuation, mixed case: the server's byte order must equal Trino's). Rows read
 # from the server with it off and on go to topn-rows.tsv (INFO: the measurement for STATUS item 3).
 log "TopN pushdown: on vs off"
 mkdir -p "$OUT/topn"
@@ -269,6 +270,9 @@ TOPN_QUERIES=(
   "SELECT o_orderkey, o_orderdate, o_totalprice FROM orders WHERE o_orderstatus = 'F' ORDER BY o_orderdate, o_orderkey LIMIT 20"
   'SELECT c_custkey, c_acctbal FROM customer ORDER BY c_acctbal DESC NULLS FIRST, c_custkey LIMIT 5'
   'SELECT l_shipdate, l_orderkey, l_linenumber FROM lineitem ORDER BY l_shipdate DESC, l_orderkey DESC, l_linenumber LIMIT 1000'
+  'SELECT o_comment, o_orderkey FROM orders ORDER BY o_comment, o_orderkey LIMIT 50'
+  'SELECT s_comment, s_suppkey FROM supplier ORDER BY s_comment DESC, s_suppkey LIMIT 30'
+  'SELECT c_name, c_mktsegment, c_custkey FROM customer ORDER BY c_mktsegment DESC, c_name LIMIT 25'
 )
 topn_run() {  # on|off index sql
   local t0; t0=$(date +%s.%N)

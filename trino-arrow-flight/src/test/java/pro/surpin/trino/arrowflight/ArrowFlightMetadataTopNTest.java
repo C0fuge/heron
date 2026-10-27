@@ -12,10 +12,12 @@ import java.util.Map;
 import java.util.Optional;
 
 import static io.trino.spi.type.BigintType.BIGINT;
+import static io.trino.spi.type.CharType.createCharType;
 import static io.trino.spi.type.DateType.DATE;
 import static io.trino.spi.type.DecimalType.createDecimalType;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.VarcharType.VARCHAR;
+import static io.trino.spi.type.VarcharType.createVarcharType;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -64,11 +66,26 @@ class ArrowFlightMetadataTopNTest
     void onlyExactlySortableColumnsArePushed()
     {
         assertTrue(topN(table(), 5, new SortItem("score", SortOrder.DESC_NULLS_LAST)).isEmpty());
-        assertTrue(topN(table(), 5, new SortItem("k", SortOrder.ASC_NULLS_LAST), new SortItem("name", SortOrder.ASC_NULLS_LAST)).isEmpty());
+        assertTrue(topN(table(), 5, new SortItem("k", SortOrder.ASC_NULLS_LAST), new SortItem("score", SortOrder.ASC_NULLS_LAST)).isEmpty());
         assertTrue(topN(table(), 5, new SortItem("unknown", SortOrder.ASC_NULLS_LAST)).isEmpty());
+        ArrowFlightColumnHandle padded = new ArrowFlightColumnHandle("code", createCharType(3));
+        assertTrue(ArrowFlightMetadata.applyTopN(new ArrowFlightTableHandle("s", "t", ImmutableList.of(padded), ""), 5,
+                List.of(new SortItem("code", SortOrder.ASC_NULLS_LAST)), ImmutableMap.of("code", padded)).isEmpty());
         ArrowFlightColumnHandle expression = new ArrowFlightColumnHandle("afexpr_1", BIGINT, Optional.of(Expr.column("k", BIGINT)));
         assertTrue(ArrowFlightMetadata.applyTopN(table(), 5, List.of(new SortItem("e", SortOrder.ASC_NULLS_LAST)),
                 ImmutableMap.of("e", expression)).isEmpty());
+    }
+
+    @Test
+    void varcharSortKeysArePushedBecauseTheServerComparesUtf8Bytes()
+    {
+        ArrowFlightTableHandle handle = topN(table(), 7,
+                new SortItem("name", SortOrder.DESC_NULLS_FIRST),
+                new SortItem("k", SortOrder.ASC_NULLS_LAST)).orElseThrow();
+        assertEquals(Optional.of(new TopN("name DESC NULLS FIRST, k ASC NULLS LAST", 7)), handle.getTopN());
+        ArrowFlightColumnHandle bounded = new ArrowFlightColumnHandle("tag", createVarcharType(10));
+        assertTrue(ArrowFlightMetadata.applyTopN(new ArrowFlightTableHandle("s", "t", ImmutableList.of(bounded), ""), 5,
+                List.of(new SortItem("tag", SortOrder.ASC_NULLS_LAST)), ImmutableMap.of("tag", bounded)).isPresent());
     }
 
     @Test

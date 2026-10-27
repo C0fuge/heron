@@ -238,12 +238,14 @@ public final class SqlQueryBuilder
 
     /**
      * Types DuckDB orders exactly like Trino, so a server-side ORDER BY picks the same top rows. Not DOUBLE/REAL
-     * (NaN placement) nor VARCHAR (the server's collation is not known to be binary).
+     * (NaN placement). VARCHAR is: the server sets no collation and its lockdown refuses SET, so DuckDB compares
+     * strings by their UTF-8 bytes, which is Trino's order too (checked on the stand 2026-10-23, non-ASCII included).
+     * Not CHAR (Trino pads it).
      */
     static boolean isTopNSortable(Type type)
     {
         return isIntegral(type) || type.equals(BOOLEAN) || type.equals(DATE) || type.equals(TIMESTAMP_MICROS)
-                || type instanceof DecimalType;
+                || type instanceof DecimalType || type instanceof VarcharType;
     }
 
     /**

@@ -50,10 +50,11 @@ can be added) and reads that query's endpoints, one after another or several at 
   Trino keeps its final `LIMIT`.
 * **`ORDER BY … LIMIT n` (TopN)** – off by default (`arrow-flight.topn-pushdown.enabled=true`
   or session property `topn_pushdown_enabled`). When every sort key is a plain column of an
-  integer, decimal, boolean, date or timestamp type, the server query gets
+  integer, decimal, boolean, date, timestamp or `VARCHAR` type, the server query gets
   `ORDER BY … LIMIT n`; each endpoint and range split returns its own top `n` rows and Trino
-  keeps its TopN over them. `DOUBLE`/`REAL` (NaN order) and `VARCHAR` (collation) keys are
-  not pushed.
+  keeps its TopN over them. `VARCHAR` keys rely on the server comparing strings by their UTF-8
+  bytes (no collation; its lockdown refuses `SET`), which is Trino's order too. `DOUBLE`/`REAL`
+  (NaN order) and `CHAR` (padding) keys are not pushed.
 * **Aggregations** – count/sum/min/max/avg + `GROUP BY` (session property
   `aggregation_pushdown_enabled`).
 * **Join dynamic filters** – off by default (`arrow-flight.dynamic-filtering.enabled=true` or
