@@ -192,9 +192,9 @@ if [ "$HEAP_PROBE" = only ]; then
   save_logs
   exit $status
 fi
-# PROFILE=only: just the throughput profile (profile.sh), then stop.
-if [ "${PROFILE:-0}" = only ]; then
-  profile_run
+# PROFILE=only: just the throughput profile (profile.sh), then stop; PROFILE=bench: only its read benchmark.
+if [ "${PROFILE:-0}" = only ] || [ "${PROFILE:-0}" = bench ]; then
+  if [ "$PROFILE" = bench ]; then read_bench; else profile_run; fi
   save_logs
   exit $status
 fi

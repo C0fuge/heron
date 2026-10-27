@@ -10,6 +10,10 @@
 # timed straight against flight1 (flight_time.py, ADBC, DuckDB runs the whole query) = the server's share. Answers are
 # compared with the reference (a wrong answer fails the job); times are INFO.
 # Results: profile-times.tsv (best seconds per query x setting + direct), profile-stats-<setting>.tsv, profile-jfr.txt.
+#
+# read_bench (also the whole run with PROFILE=bench): the raw lineitem scan (profile-queries/scan-direct.sql) read without
+# Trino, once through the plugin's own Java Flight client (FlightReadBench.java, plugin jars, drain only) and once over ADBC
+# (flight_scan_time.py), each as one statement and as 4 range splits = Java client vs server vs Trino. Result: profile-bench.tsv.
 
 PROFILE_SETTINGS="${PROFILE_SETTINGS:-default flight.split_count=16}"
 PROFILE_REPEAT="${PROFILE_REPEAT:-2}"
@@ -28,6 +32,23 @@ profile_query() {  # setting-dir query session-args... -> seconds; Trino query i
     | jq -r --arg s "prof-$q" '[.[] | select(.session.source == $s)] | sort_by(.queryStats.createTime) | last | .queryId // empty')
   [ -z "$id" ] || curl -fsS -H 'X-Trino-User: e2e' "http://127.0.0.1:8080/v1/query/$id" > "$dir/$q.json" || true
   printf '%.2f' "$t"
+}
+
+read_bench() {
+  log "profile: read benchmark without Trino (plugin Java client vs ADBC), $PROFILE_REPEAT timed pass(es)"
+  docker cp "$REPO/e2e/ci/FlightReadBench.java" trino:/tmp/FlightReadBench.java > /dev/null
+  {
+    echo "# plugin Java client (FlightSqlSession, drain only): mode best_s getflightinfo_s rows MB endpoints MB/s"
+    docker exec trino java -Xmx1g --add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true \
+      -cp '/usr/lib/trino/plugin/arrow-flight/*:/usr/lib/trino/lib/*' /tmp/FlightReadBench.java \
+      flight1 32010 "$TOKEN" tpch /profile-queries/scan-direct.sql "$PROFILE_REPEAT" 2>&1 | grep -vE '^(SLF4J|WARNING)' || echo "java bench failed"
+    echo "# ADBC (no partial-mode header): mode best_s rows MB MB/s"
+    docker run --rm --network "$NET" -e FLIGHT_TOKEN="$TOKEN" -v "$REPO/e2e/ci":/probe:ro \
+      python:3.12-slim sh -c 'pip install -q --disable-pip-version-check adbc-driver-flightsql pyarrow >/dev/null 2>&1 &&
+        python /probe/flight_scan_time.py grpc://flight1:32010 tpch "$1" /probe/profile-queries/scan-direct.sql 1 4' probe "$PROFILE_REPEAT" \
+      || echo "adbc bench failed"
+  } > "$OUT/profile-bench.tsv"
+  echo "--- profile: read benchmark (lineitem scan, no Trino)"; cat "$OUT/profile-bench.tsv"
 }
 
 profile_run() {
@@ -99,4 +120,5 @@ PY
   else
     echo "profile: no JFR recording (no TrinoServer pid?)"
   fi
+  read_bench
 }

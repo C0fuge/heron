@@ -31,7 +31,7 @@ on:
         description: 'Trino heaps for the probe, space-separated'
         default: '640M 1G 1536M'
       profile:
-        description: 'Throughput profile (e2e/ci/profile.sh: TPC-H times, query stats, JFR CPU samples): 0 or only'
+        description: 'Throughput profile (e2e/ci/profile.sh: TPC-H times, query stats, JFR CPU samples, read benchmark): 0, only, or bench (read benchmark only)'
         default: '0'
       profile-settings:
         description: 'Profile settings: default and/or comma-separated session settings, space-separated'
