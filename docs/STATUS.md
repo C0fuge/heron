@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `775100bf923f` since session 68, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `45fc0a9e6e02` since session 70, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
@@ -62,6 +62,18 @@ Kept up to date after every work session so work can be resumed from this reposi
 > snapshot, parse check once per node, partial-mode sample-file cache, executionPath log line written asynchronously). Needs
 > the DuckDB 1.5.6 extension set (server repo `ci-assets`). Candidate for the presentation build: run the suite once on it
 > (note small-query timings) and make it the CI default if green.
+>
+> **Done (session 70): green, now the e2e default** (`e2e.yml`, `run-e2e.sh`; 775100bf923f and older stay selectable; same
+> DuckDB 1.5.6 extension set, server started unchanged). Partial 1+3 servers run 40469746196, complete 3 servers run 40469753759:
+> full suite green (TPC-H 22/22, types, Iceberg, concurrent, splits incl. ep1, failover: two down 5/5, coordinator-down 14.0 s on
+> 3 servers partial). **Timings** (profile run 40469761749, settings `default flight.split_count=1 flight.endpoint_splits_enabled=true`,
+> Trino elapsed, best of 2, SF1; session 69's run 40463937582 on 775100bf923f in brackets): 3 servers 37.9 / 29.8 / 30.3 s
+> (37.3 / 29.3 / 30.0) - unchanged; small queries q01 / q04 / q06 1.00 / 0.97 / 0.92 default, 0.70 / 0.93 / 0.81 split 1.
+> 1 server 42.7 / 31.1 / 36.9 s (37.7 / 28.5 / 35.2), but that runner was slow on raw streams too (plugin Java client one stream
+> 3.49 s, ADBC 4.50 s, usually ~1.9 s). Back-to-back read benchmark on 1 server (runs 40472082623 new / 40472093615 old):
+> ADBC one stream 2.16 vs 2.18 s, Trino split 1 / 4 2.38 / 2.04 vs 2.29 / 2.48 s - **no regression; the 1-server profile was
+> runner noise.** Direct ADBC q01 0.52 s (1 server) / 0.73 s (3 servers). As with 775100bf923f, the per-query overhead cuts are
+> below what a 4-vCPU runner resolves at SF1; the stand (SF10) is where they should show.
 
 
 > **New server build `server-1.0.0-775100bf923f`** (2026-10-27, local coordinator; jar, plugins tar, libs tar + merged
@@ -1050,3 +1062,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   40463892150); e2e push run 40463892049 green on 1 and 3 servers (ep1 full scan 1 server 4.40 s = s4p1 4.52, was = s1p1 7.75);
   profile run 40463937582: TPC-H SF1 sums 1 server default / split 1 / endpoint splits 37.7 / 28.5 / 35.2 s, 3 servers 37.3 /
   29.3 / 30.0 s. Default unchanged (off). ~60 Actions minutes. Invariants untouched (off by default; same per-endpoint failover).
+- 2026-10-27 (cloud session 70): first Next step (server build 45fc0a9e6e02, per-query overhead cuts). Suite green: partial 1+3
+  servers run 40469746196, complete 3 servers run 40469753759; profile run 40469761749: 3 servers TPC-H SF1 37.9 / 29.8 / 30.3 s
+  (default / split 1 / endpoint splits), unchanged; the 1-server profile looked ~5 s slower but its runner streamed raw scans at
+  half speed, and back-to-back bench runs 40472082623 (new) / 40472093615 (old) show equal read speed. Made 45fc0a9e6e02 the e2e
+  default (`[skip ci]`, no plugin code changed). ~75 Actions minutes. Invariants untouched (failover checks exact or clean errors).
