@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `57d252b1437f` since session 61, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `27f583adccd7` (DuckDB 1.5.6 extensions) since session 66, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
@@ -47,7 +47,7 @@ Kept up to date after every work session so work can be resumed from this reposi
 - Server start (S3 mode; see START-NOTES, printed at the start of every e2e job): JDK 21, `LANG=C.UTF-8`,
   `-cp "<jar>:libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer --localhost <host> --hosts <all>`,
   `-DdataDir=s3://lake/parquet -Ds3Endpoint=http://minio:9000 -Darrowflight.plugins.dir=<dir>/plugins`,
-  httpfs **v1.4.5** (`http://extensions.duckdb.org/v1.4.5/linux_amd64/httpfs.duckdb_extension.gz`, keep the
+  httpfs **v1.4.5** (**v1.5.6** for builds after 57d252b1437f) (`http://extensions.duckdb.org/v1.4.5/linux_amd64/httpfs.duckdb_extension.gz`, keep the
   file name `httpfs.duckdb_extension`), MinIO credentials via `FLIGHT_S3_ACCESS_KEY`/`FLIGHT_S3_SECRET_KEY`
   (throwaway, generated in the job), auth `FLIGHT_ALLOW_INSECURE=true` or
   `FLIGHT_AUTH_PROVIDER=token FLIGHT_AUTH_TOKEN=<t>`, `-DresultMode=partial|complete`. Two or three servers
@@ -64,6 +64,29 @@ Kept up to date after every work session so work can be resumed from this reposi
 > (httpfs, iceberg, avro, hadoopfs `51b7220-afc3`, layout `extensions/v1.5.6/linux_amd64/`) and
 > `hadoopfs-v1.5.6-afc3.duckdb_extension` are in the server repo's `ci-assets` release (sha256 in its SHA256SUMS); official
 > httpfs/iceberg/avro 1.5.6 builds also work. Run the suite once on it (note small-query timings) and make it the CI default if green.
+>
+> **Done (session 66): green, now the e2e default** (`e2e.yml`, `run-e2e.sh`; older builds stay selectable). `run-e2e.sh`
+> picks the DuckDB extension version from the build (v1.4.5 for int* .. 57d252b1437f, **v1.5.6** for newer builds; override
+> `DUCKDB_EXT_VERSION`); official httpfs/iceberg/avro v1.5.6 from extensions.duckdb.org, server started unchanged otherwise.
+> Partial 1+3 servers run 40446519100, complete 3 servers run 40446521466: TPC-H 22/22, types 2/2, Iceberg incl. time
+> travel, heap and concurrent checks, failover (kill during read exact/clean errors, mid-stream kill hit after data
+> `tx8M@3.0`, restarted exact after 16.3 s with 0 backup reads, two down 5/5, coordinator-down 13.6 s). Job wall time 1 server
+> 11.3 min, 3 servers 18.0 / 18.5 min. **Timings** (profile run 40448316888 vs run 40442908161 on 57d252b1437f, same settings,
+> Trino elapsed, best of 2 passes, SF1, 4-vCPU runner):
+>
+> | | 1 server old → new | 3 servers old → new |
+> |---|---|---|
+> | 22 queries + scan, default (split 4) | 41.5 → 36.1 s | 45.5 → 28.9 s |
+> | same, `split_count=1` | 29.9 → 27.7 s | 33.2 → 24.5 s |
+> | q01 / q04 / q06 | 1.32 / 0.79 / 0.83 → 0.80 / 0.75 / 0.85 | 1.40 / 1.31 / 1.01 → 0.68 / 0.78 / 0.90 |
+> | other small (q02 q11 q13 q16 q22) | 0.78 0.43 0.81 0.61 0.47 → 0.68 0.45 0.69 0.53 0.37 | 0.85 0.49 0.73 0.60 0.43 → 0.64 0.35 0.64 0.45 0.28 |
+> | raw scan, Trino split 1 / 4 | 1.88 / 3.24 → 1.93 / 2.35 | 1.93 / 3.39 → 1.74 / 1.81 |
+> | plugin Java client, 1 stmt / 4 range splits | 1.80 / 3.07 → 1.78 / 2.40 | 1.79 / 3.60 → 1.71 / 1.88 |
+>
+> Small queries are 0.1-0.7 s faster (q01 biggest, q06/q11 flat on 1 server); range splits cost much less server work with
+> DuckDB 1.5.6 (4 splits 1.35x one statement on 1 server, was 1.70x), so the split_count gap of session 65 shrinks (1 server
+> default vs split 1: 36.1 vs 27.7 s; 3 servers 28.9 vs 24.5 s). Direct ADBC q01 1.45 → 0.78 s (1 server). **Stand:** the SF10
+> comparison (item "Stand (next)" below) should be run on 27f583adccd7.
 
 
 > **Stage 2, approved by the maintainer 2026-10-26 - plugin throughput (take first).** On the stand, Trino TPC-H SF10 takes
@@ -539,6 +562,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   numbers (SF10, int7) favoured 4 for a Trino-CPU-heavy scan and for q03/q18. Keep 4, change to 1, or split by endpoint only
   (partial mode already returns one endpoint per node; a single server could use `endpointsPerServer`) instead of key ranges?
   Needs the stand's SF10 split_count 1/4 run first (Next steps, Stage 2 stand item (b)).
+  Session 66: with server 27f583adccd7 (DuckDB 1.5.6) the gap is smaller in CI (1 server 27.7 vs 36.1 s, 3 servers 24.5 vs
+  28.9 s; 4 range splits now ~1.35x one statement on the server, was 1.7x); run the stand comparison on that build.
 - **Answered (session 63; moved to Next steps). Server build 4d707e2aedfc (session 59):** uploaded to `e2e-assets` with no note in STATUS. What does it change vs 7fbe2d75827c,
   and should it become the e2e default? (Session 61: superseded as default by 57d252b1437f = 4d707e2aedfc + shared outbound byte
   budget; only the 4d707e2aedfc delta itself is still undocumented.) The CI suite is green on it in both modes (runs 40295372006, 40295376402).
@@ -919,3 +944,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   1 and 3 servers (22/22 exact) — default unchanged, Open question + stand item (b). Runs 40441072747, 40441623193, 40442318786
   (bench, 1+3 srv), 40442908161 (profile, 1+3 srv), all green. No plugin code changed (scripts only, `[skip ci]` pushes).
   ~70 Actions minutes. Invariants untouched.
+- 2026-10-27 (cloud session 66): new server build 27f583adccd7 (DuckDB 1.5.6). `run-e2e.sh` chooses the DuckDB extension
+  version per build (v1.5.6 after 57d252b1437f); full suite green: partial 1+3 servers run 40446519100, complete 3 servers run
+  40446521466 (22/22, types, Iceberg, heap, concurrent, failover). Now the e2e default. Profile run 40448316888 vs 40442908161:
+  TPC-H SF1 sum 1 server 41.5 → 36.1 s, 3 servers 45.5 → 28.9 s; small queries 0.1-0.7 s faster; range splits much cheaper on the
+  server. No plugin code changed (`[skip ci]` pushes). ~60 Actions minutes. Invariants untouched (failover checks exact or
+  clean errors).
