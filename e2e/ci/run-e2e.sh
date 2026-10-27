@@ -30,7 +30,12 @@ FAILOVER_QUERIES="${FAILOVER_QUERIES:-q01 q03 q05 q06 q18}"
 ICEBERG_FAILOVER_QUERIES="${ICEBERG_FAILOVER_QUERIES:-q01 q03 q18}"  # all in ICEBERG_QUERIES
 WORK="${WORK:-$(mktemp -d)}"
 NET=afe2e
-DUCKDB_EXT_VERSION=v1.4.5
+# the server checks its DuckDB extension versions at startup: 27f583adccd7 and later run DuckDB 1.5.6
+case "$SERVER_BUILD" in
+  int*|4eaab052deaf|c3b276054cc3|20b887839edf|60e888bc26ec|7fbe2d75827c|4d707e2aedfc|57d252b1437f)
+    DUCKDB_EXT_VERSION="${DUCKDB_EXT_VERSION:-v1.4.5}" ;;
+  *) DUCKDB_EXT_VERSION="${DUCKDB_EXT_VERSION:-v1.5.6}" ;;
+esac
 case "$SERVER_BUILD" in int4) ICEBERG="${ICEBERG:-0}" ;; *) ICEBERG="${ICEBERG:-1}" ;; esac
 mkdir -p "$OUT" "$WORK" "$WORK/wh"
 # shellcheck source=e2e/ci/iceberg.sh
