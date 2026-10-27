@@ -7,7 +7,8 @@
 //
 // Modes per pass (name = s<splits><p|q>): splits 1 = the scan as one statement, 4 = the plugin's range splits on the first
 // column (same predicates as AbstractArrowFlightSplitManager), each split on its own thread like Trino drivers;
-// q = a statement's endpoints read one after the other (endpoint_read_parallelism 1, the default), p = all in parallel.
+// q = a statement's endpoints read one after the other (endpoint_read_parallelism 1, the default), p = all in parallel,
+// s = like q but the splits too run one after the other (separates the cost of the range predicates from contention).
 //
 // usage: java -cp '<plugin dir>/*' FlightReadBench.java host port token schema scan.sql repeat [modes...]
 // prints: mode <TAB> best seconds <TAB> GetFlightInfo seconds <TAB> rows <TAB> MB (Arrow buffers) <TAB> endpoints <TAB> MB/s
@@ -45,7 +46,7 @@ public class FlightReadBench
         String scan = Files.readString(Path.of(args[4])).strip().replaceAll(";$", "")
                 .replaceAll("\\bFROM\\s+(\\w+)", "FROM " + schema + ".$1");
         int repeat = Integer.parseInt(args[5]);
-        List<String> modes = args.length > 6 ? List.of(args).subList(6, args.length) : List.of("s1q", "s1p", "s4q", "s4p");
+        List<String> modes = args.length > 6 ? List.of(args).subList(6, args.length) : List.of("s1q", "s1p", "s4q", "s4p", "s4s", "s2q");
 
         FlightConfig config = FlightConfig.builder(host).port(port).bearerToken(token).build();
         try (FlightSqlSession session = new FlightSqlSession(config)) {
@@ -53,10 +54,11 @@ public class FlightReadBench
             for (String mode : modes) {
                 int splits = Integer.parseInt(mode.substring(1, mode.length() - 1));
                 boolean parallel = mode.endsWith("p");
+                boolean serial = mode.endsWith("s");
                 List<String> statements = splits <= 1 ? List.of(scan) : rangeStatements(session, scan, column, splits);
                 Result best = null;
                 for (int i = 0; i <= repeat; i++) {  // pass 0 warms up the JVM and the pooled connections
-                    Result r = run(session, statements, parallel);
+                    Result r = run(session, statements, parallel, serial);
                     if (i > 0 && (best == null || r.seconds() < best.seconds())) {
                         best = r;
                     }
@@ -114,7 +116,7 @@ public class FlightReadBench
         throw new IllegalArgumentException("split column must be INTEGER/BIGINT, got " + vector.getField());
     }
 
-    static Result run(FlightSqlSession session, List<String> statements, boolean parallel)
+    static Result run(FlightSqlSession session, List<String> statements, boolean parallel, boolean serial)
             throws Exception
     {
         AtomicLong rows = new AtomicLong();
@@ -145,6 +147,9 @@ public class FlightReadBench
                     }
                     return null;
                 }));
+                if (serial) {
+                    splits.getLast().get();
+                }
             }
             for (Future<?> split : splits) {
                 split.get();

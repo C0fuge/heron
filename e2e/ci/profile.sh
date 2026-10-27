@@ -13,7 +13,8 @@
 #
 # read_bench (also the whole run with PROFILE=bench): the raw lineitem scan (profile-queries/scan-direct.sql) read without
 # Trino, once through the plugin's own Java Flight client (FlightReadBench.java, plugin jars, drain only) and once over ADBC
-# (flight_scan_time.py), each as one statement and as 4 range splits = Java client vs server vs Trino. Result: profile-bench.tsv.
+# (flight_scan_time.py), each as one statement and as 2/4 range splits, and through Trino with flight.split_count 1/2/4
+# = Java client vs server vs Trino. Result: profile-bench.tsv.
 
 PROFILE_SETTINGS="${PROFILE_SETTINGS:-default flight.split_count=16}"
 PROFILE_REPEAT="${PROFILE_REPEAT:-2}"
@@ -45,10 +46,21 @@ read_bench() {
     echo "# ADBC (no partial-mode header): mode best_s rows MB MB/s"
     docker run --rm --network "$NET" -e FLIGHT_TOKEN="$TOKEN" -v "$REPO/e2e/ci":/probe:ro \
       python:3.12-slim sh -c 'pip install -q --disable-pip-version-check adbc-driver-flightsql pyarrow >/dev/null 2>&1 &&
-        python /probe/flight_scan_time.py grpc://flight1:32010 tpch "$1" /probe/profile-queries/scan-direct.sql 1 4' probe "$PROFILE_REPEAT" \
+        python /probe/flight_scan_time.py grpc://flight1:32010 tpch "$1" /probe/profile-queries/scan-direct.sql 1 2 4' probe "$PROFILE_REPEAT" \
       || echo "adbc bench failed"
+    echo "# Trino (scan.sql, aggregation pushdown off): split_count best_s"
+    mkdir -p "$OUT/profile/bench"
+    for n in 1 2 4; do
+      best=""
+      for pass in $(seq 0 "$PROFILE_REPEAT"); do  # pass 0 warms up
+        t=$(profile_query "$OUT/profile/bench" scan --session flight.aggregation_pushdown_enabled=false --session "flight.split_count=$n")
+        [ "$pass" = 0 ] || best=$(printf '%s\n%s\n' "$best" "$t" | grep . | sort -n | head -1)
+      done
+      [ -f "$OUT/profile/bench/scan.tsv" ] || best="ERROR $(head -c 300 "$OUT/profile/bench/scan.err" 2>/dev/null)"
+      printf 'trino-split%s\t%s\n' "$n" "$best"
+    done
   } > "$OUT/profile-bench.tsv"
-  echo "--- profile: read benchmark (lineitem scan, no Trino)"; cat "$OUT/profile-bench.tsv"
+  echo "--- profile: read benchmark (lineitem scan: Java client, ADBC, Trino)"; cat "$OUT/profile-bench.tsv"
 }
 
 profile_run() {
