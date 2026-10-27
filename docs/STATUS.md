@@ -96,10 +96,40 @@ Kept up to date after every work session so work can be resumed from this reposi
 > speed-up from either change (expected given the profile); they remove per-row work and stop holding a driver thread during
 > network waits, which can matter with many drivers on the stand.
 >
+> **Session 65 (CI: Java client cleared, range splits are the cost).** New `profile=bench` mode (also runs at the end of
+> `profile=only`): `e2e/ci/FlightReadBench.java` reads the raw `lineitem` scan (`scan-direct.sql`, 6.0M rows, 645 MB of Arrow
+> buffers) through the plugin's own client (`FlightSqlSession`/`FlightDataStream`, the plugin jars, run with `java` inside the
+> Trino container, drain only, no Trino) as one statement and as the plugin's range splits on `l_orderkey`; `flight_scan_time.py`
+> does the same over ADBC; then the Trino scan with `flight.split_count` 1/2/4. Runs 40441072747, 40441623193, 40442318786
+> (bench) and 40442908161 (`profile=only`, settings `default flight.split_count=1`), server 57d252b1437f, best of 2 (s):
+>
+> | | Java 1 stmt | Java 2 splits | Java 4 splits | Java 4 splits one after another | ADBC 1 / 2 / 4 | Trino split_count 1 / 2 / 4 |
+> |---|---|---|---|---|---|---|
+> | 1 server | 1.80-1.97 | 2.76-2.87 | 3.07-3.15 | 2.84-2.89 | 1.78-2.00 / 2.63-2.72 / 3.07-3.15 | 1.88 / 2.72 / 3.24 |
+> | 3 servers | 1.79-3.49 | 2.45-3.82 | 3.60-3.97 | 2.57-4.70 | 1.54-2.82 / 2.42-3.79 / 2.52-4.41 | 1.93 / 2.83 / 3.39 |
+>
+> - **The plugin's Java Flight client is as fast as ADBC** (C++/Go) in every shape, within run noise; reading a statement's
+>   endpoints in parallel changes nothing measurable. Not the bottleneck.
+> - **Range splits cost server work**: 4 range statements run *one after another* already take ~1.5x one statement (2.88 vs
+>   1.97 s): each range query re-reads the files (the `l_orderkey` ranges do not prune row groups well); concurrently on the
+>   4-vCPU runner they are slower still. **Trino itself adds almost nothing**: with `split_count=1` the Trino scan (1.88-1.95 s,
+>   CPU 0.24 s) equals one direct stream.
+> - **Correction to session 64:** the profile's per-query times were wall times of `docker exec trino trino` and included
+>   ~1.4 s of CLI JVM start per query (Trino's own elapsed for the scan was 2.37 s where the wall time said 3.82 s).
+>   `profile_query` now reports Trino's `elapsedTime`.
+> - **TPC-H SF1, Trino elapsed, sum of 22 queries + scan** (run 40442908161): 1 server default (split 4) 42.3-50.8 s vs
+>   `split_count=1` 30.4-31.1 s; 3 servers 45.5-56.5 s vs 33.8-35.0 s (best per query 45.5 vs 33.2) = **~27 % faster with one
+>   split** on CI, biggest on the scan-heavy joins (q17 3.3-3.4 → 1.4-1.5 s, q21 5.0-5.1 → 3.1-3.3, q08/q09 2.6-3.2 → 1.2-1.6,
+>   q03 2.1-3.1 → 1.5-1.6); no query is slower by more than noise. Answers 22/22 exact in both settings.
+> - Not changed: the stand (2026-10-23, SF10, int7, 2 DuckDB threads per node) measured the opposite for a Trino-CPU-heavy
+>   full scan (`checksum(ROW(16 cols))` s1 43.05 vs s4 13.71 s) and q03/q18 better with 4; CI shares 4 vCPUs between DuckDB
+>   and Trino, so it cannot decide the default. See Open questions (split_count default) and the stand item below (b).
+>
 > **Stand (next):** on SF10, one Trino node, single server and 3-node cluster: (a) the raw scan through Trino
 > (`SELECT max(l_orderkey), …, max(l_comment) FROM lineitem` with `SET SESSION flight.aggregation_pushdown_enabled=false`, file
 > `e2e/ci/profile-queries/scan.sql`) vs the same 8 columns fetched by one plain Flight client (`scan-direct.sql`, e.g.
-> `flight_time.py`); (b) TPC-H SF10 with `flight.split_count` 4 / 16 / 32 and `flight.read_ahead_enabled` true / false; (c) the
+> `flight_time.py`); (b) TPC-H SF10 with `flight.split_count` **1** / 4 / 16 and `flight.read_ahead_enabled` true / false, timed by Trino's
+`elapsedTime` (not CLI wall time; session 65: CI is ~27 % faster with 1 split because range splits re-scan the files); (c) the
 > query JSON (`/v1/query/<id>`) of q17/q21 (scan blocked vs plugin read time). If (a) shows the plugin path much slower than one
 > plain stream, the next CI step is a plugin-only Flight read benchmark (no Trino) to separate the Java client from the server.
 
@@ -494,6 +524,12 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **`flight.split_count` default 4 vs 1 (session 65).** In CI (SF1, 4 vCPUs) one split is ~27 % faster on TPC-H (Trino
+  elapsed 30-35 s vs 42-56 s, 1 and 3 servers) because every range split re-reads the Parquet files on the server (4 range
+  statements in sequence = 1.5x the work of one); the plugin and its Flight client add almost nothing. The stand's 2026-10-23
+  numbers (SF10, int7) favoured 4 for a Trino-CPU-heavy scan and for q03/q18. Keep 4, change to 1, or split by endpoint only
+  (partial mode already returns one endpoint per node; a single server could use `endpointsPerServer`) instead of key ranges?
+  Needs the stand's SF10 split_count 1/4 run first (Next steps, Stage 2 stand item (b)).
 - **Answered (session 63; moved to Next steps). Server build 4d707e2aedfc (session 59):** uploaded to `e2e-assets` with no note in STATUS. What does it change vs 7fbe2d75827c,
   and should it become the e2e default? (Session 61: superseded as default by 57d252b1437f = 4d707e2aedfc + shared outbound byte
   budget; only the 4d707e2aedfc delta itself is still undocumented.) The CI suite is green on it in both modes (runs 40295372006, 40295376402).
@@ -867,3 +903,10 @@ Kept up to date after every work session so work can be resumed from this reposi
   (1 srv; its 3-srv job cancelled by the next dispatch's concurrency group), 40437349225, 40438299101 (1+3 srv) — the first two
   later ones "failed" only on the new scan check (missing `;` in scan.sql, fixed). ~75 Actions minutes. Invariants hold
   (failover checks exact or clean errors, server errors surface; read-ahead keeps each stream's failover rules).
+- 2026-10-27 (cloud session 65): Stage 2. Plugin-only read benchmark in CI (`profile=bench`: `FlightReadBench.java` through the
+  plugin's own Flight client vs ADBC vs Trino split_count 1/2/4): the Java client = ADBC speed; range splits cost server re-scans
+  (4 serial range statements 1.5x one statement); Trino with one split = one direct stream. Profile now uses Trino's elapsed
+  time (session 64's per-query times included ~1.4 s CLI start). TPC-H SF1 with `split_count=1` ~27 % faster than default 4 on
+  1 and 3 servers (22/22 exact) — default unchanged, Open question + stand item (b). Runs 40441072747, 40441623193, 40442318786
+  (bench, 1+3 srv), 40442908161 (profile, 1+3 srv), all green. No plugin code changed (scripts only, `[skip ci]` pushes).
+  ~70 Actions minutes. Invariants untouched.
