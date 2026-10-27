@@ -36,7 +36,8 @@ import static java.util.Objects.requireNonNull;
  * statement, and each endpoint of its FlightInfo (one per Flight node, or {@code endpointsPerServer} per
  * server) becomes a split: Trino still reads the parts in parallel, but the server runs the scan once
  * rather than once per key range. Join dynamic filters (applied on the worker) are then not used, so the
- * mode stays off while {@code dynamic_filtering_enabled} is on.
+ * mode stays off while {@code dynamic_filtering_enabled} is on. A scan planned with a single endpoint (a single
+ * server) falls back to key ranges, so the mode can be on for clusters and single servers alike.
  * <p>
  * The {@code getSplits} signature differs between Trino SPI lines, so the concrete
  * {@code ArrowFlightSplitManager} lives in a per-SPI source root and calls {@link #planSplits}.
@@ -62,15 +63,32 @@ public abstract class AbstractArrowFlightSplitManager
     protected ConnectorSplitSource planSplits(ConnectorSession session, ConnectorTableHandle table)
     {
         ArrowFlightTableHandle handle = (ArrowFlightTableHandle) table;
-        if (useEndpointSplits(session, handle)) {
-            List<ArrowFlightSplit> splits = endpointSplits(handle);
-            log.debug("%s: %s endpoint split(s)", handle, splits.size());
-            return new FixedSplitSource(splits);
-        }
-        List<ArrowFlightSplit> splits = rangeSplits(session, handle)
-                .orElseGet(() -> List.of(new ArrowFlightSplit(Optional.empty())));
+        List<ArrowFlightSplit> splits = splits(session, handle);
         log.debug("%s: %s split(s)", handle, splits.size());
         return new FixedSplitSource(splits);
+    }
+
+    List<ArrowFlightSplit> splits(ConnectorSession session, ArrowFlightTableHandle handle)
+    {
+        // Endpoint splits need an install that answers with several endpoints; once the client has seen only
+        // single-endpoint answers for a while (a single server), plan key ranges directly.
+        if (useEndpointSplits(session, handle) && client.expectsSeveralEndpoints()) {
+            List<ArrowFlightSplit> splits = endpointSplits(handle);
+            if (splits.size() != 1) {
+                log.debug("%s: %s endpoint split(s)", handle, splits.size());
+                return splits;
+            }
+            // One endpoint (a single server): key ranges are the only way to read a large scan in parallel. The
+            // planned statement is dropped unread; in both result modes GetFlightInfo plans, DoGet runs it.
+            Optional<List<ArrowFlightSplit>> ranges = rangeSplits(session, handle);
+            if (ranges.isPresent()) {
+                log.debug("%s: one endpoint, %s key-range split(s) instead", handle, ranges.get().size());
+                return ranges.get();
+            }
+            return splits;
+        }
+        return rangeSplits(session, handle)
+                .orElseGet(() -> List.of(new ArrowFlightSplit(Optional.empty())));
     }
 
     static boolean useEndpointSplits(ConnectorSession session, ArrowFlightTableHandle handle)

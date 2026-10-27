@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.VarcharType.VARCHAR;
@@ -33,7 +34,8 @@ class EndpointSplitsTest
     {
         Map<String, Object> properties = Map.of(
                 ArrowFlightSessionProperties.ENDPOINT_SPLITS_ENABLED, endpointSplits,
-                ArrowFlightSessionProperties.DYNAMIC_FILTERING_ENABLED, dynamicFiltering);
+                ArrowFlightSessionProperties.DYNAMIC_FILTERING_ENABLED, dynamicFiltering,
+                ArrowFlightSessionProperties.SPLIT_COUNT, 4);
         return (ConnectorSession) Proxy.newProxyInstance(ConnectorSession.class.getClassLoader(), new Class<?>[] {ConnectorSession.class},
                 (proxy, method, args) -> {
                     if (method.getName().equals("getProperty") && properties.containsKey((String) args[0])) {
@@ -92,6 +94,88 @@ class EndpointSplitsTest
                 assertEquals(Optional.empty(), split.getRangePredicate());
             }
         }
+    }
+
+    /** A split manager over a fake server whose scans have {@code endpoints} endpoints and whose table has {@code rows} rows. */
+    private static List<ArrowFlightSplit> plan(int endpoints, long rows, int singleAnswersBefore, List<String> queries)
+    {
+        ArrowFlightConfig config = new ArrowFlightConfig().setHost("unused");
+        try (ArrowFlightClient client = new ArrowFlightClient(config)
+        {
+            @Override
+            public FlightInfo getFlightInfo(String sql)
+            {
+                queries.add(sql);
+                List<FlightEndpoint> list = new ArrayList<>();
+                for (int i = 0; i < endpoints; i++) {
+                    list.add(new FlightEndpoint(new Ticket(new byte[] {(byte) i}), Location.forGrpcInsecure("n" + i, 32010)));
+                }
+                return new FlightInfo(new Schema(List.of()), FlightDescriptor.command(new byte[0]), list, -1, -1);
+            }
+        }) {
+            for (int i = 0; i < singleAnswersBefore; i++) {
+                client.recordEndpointCount(1);
+            }
+            ArrowFlightStatistics statistics = new ArrowFlightStatistics(client, config)
+            {
+                @Override
+                public OptionalLong rowCount(ArrowFlightTableHandle table)
+                {
+                    return OptionalLong.of(rows);
+                }
+
+                @Override
+                public Optional<Range> range(ArrowFlightTableHandle table, String column)
+                {
+                    return Optional.of(new Range(1, 6_000_000));
+                }
+            };
+            return new ArrowFlightSplitManager(client, statistics, config).splits(session(true, false), table());
+        }
+    }
+
+    @Test
+    void severalEndpointsGiveEndpointSplits()
+    {
+        List<String> queries = new ArrayList<>();
+        List<ArrowFlightSplit> splits = plan(3, 6_000_000, 0, queries);
+        assertEquals(1, queries.size());
+        assertEquals(3, splits.size());
+        assertTrue(splits.stream().allMatch(split -> split.getTicket().isPresent() && split.getRangePredicate().isEmpty()));
+    }
+
+    @Test
+    void aSingleEndpointFallsBackToKeyRanges()
+    {
+        List<String> queries = new ArrayList<>();
+        List<ArrowFlightSplit> splits = plan(1, 6_000_000, 0, queries);
+        // planned once to learn the endpoint count, then the large scan is cut into split_count key ranges
+        assertEquals(1, queries.size());
+        assertEquals(4, splits.size());
+        assertTrue(splits.stream().allMatch(split -> split.getTicket().isEmpty() && split.getRangePredicate().isPresent()));
+        assertEquals("(\"id\" < 1500001 OR \"id\" IS NULL)", splits.get(0).getRangePredicate().orElseThrow());
+        assertEquals("(\"id\" >= 4500001)", splits.get(3).getRangePredicate().orElseThrow());
+    }
+
+    @Test
+    void aSmallScanKeepsItsSingleEndpoint()
+    {
+        List<String> queries = new ArrayList<>();
+        List<ArrowFlightSplit> splits = plan(1, 1_000, 0, queries);
+        assertEquals(1, queries.size());
+        assertEquals(1, splits.size());
+        assertArrayEquals(new byte[] {0}, splits.get(0).ticketBytes().orElseThrow());
+    }
+
+    @Test
+    void aSingleServerIsNotPlannedTwice()
+    {
+        // after SINGLE_ENDPOINT_ANSWERS single-endpoint answers in a row the client expects one endpoint: key ranges directly
+        List<String> queries = new ArrayList<>();
+        List<ArrowFlightSplit> splits = plan(1, 6_000_000, ArrowFlightClient.SINGLE_ENDPOINT_ANSWERS, queries);
+        assertEquals(List.of(), queries);
+        assertEquals(4, splits.size());
+        assertTrue(splits.stream().allMatch(split -> split.getRangePredicate().isPresent()));
     }
 
     @Test

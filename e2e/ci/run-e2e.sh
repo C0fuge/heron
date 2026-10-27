@@ -387,8 +387,8 @@ done
 PAR_QUERIES="${PAR_QUERIES:-q03 q12 q14 q18 q19}"
 PAR_PARALLELISM="${PAR_PARALLELISM:-3}"
 PAR_REPEAT="${PAR_REPEAT:-2}"
-# Setting "ep1": flight.endpoint_splits_enabled (one split per endpoint of one coordinator-planned statement; 1 server =
-# one endpoint = one split, 3 servers = 3 splits).
+# Setting "ep1": flight.endpoint_splits_enabled (one split per endpoint of one coordinator-planned statement; 3 servers =
+# 3 splits; 1 server = one endpoint, so a large scan falls back to split_count=4 key ranges).
 PAR_SETTINGS="s1p1 s1p$PAR_PARALLELISM s4p1 s4p$PAR_PARALLELISM ep1"
 SCAN_SQL='SELECT count(*), checksum(ROW(l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment)) FROM lineitem'
 log "splits: $PAR_SETTINGS on $PAR_QUERIES + full lineitem scan"
