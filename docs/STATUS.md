@@ -1083,3 +1083,5 @@ Kept up to date after every work session so work can be resumed from this reposi
   (AggregationReaderTest: the merge shared the predicate; e2e 40476803533 cancelled), fixed: build 40477030899 green, e2e push run
   40477030751 green on 1+3 servers incl. 3 new VARCHAR TopN checks (on = off, rows 1.5M → 150). ~45 Actions minutes. Invariants
   untouched (TopN off by default; answers compared on vs off).
+- 2026-10-27 (cloud session 72): nothing actionable — no new server build in `e2e-assets` since 45fc0a9e6e02, no new maintainer
+  answers; every Next steps item waits on the stand or an Open question. No CI run, 0 Actions minutes. Stopped early.
