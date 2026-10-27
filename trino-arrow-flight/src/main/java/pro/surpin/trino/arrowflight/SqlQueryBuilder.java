@@ -244,8 +244,17 @@ public final class SqlQueryBuilder
      */
     static boolean isTopNSortable(Type type)
     {
+        return isServerOrderedFixedWidth(type) || type instanceof VarcharType;
+    }
+
+    /**
+     * Fixed-width types DuckDB orders exactly like Trino; the grouping keys the sorted aggregation merge accepts
+     * (it compares the keys itself, VARCHAR is not one of them).
+     */
+    static boolean isServerOrderedFixedWidth(Type type)
+    {
         return isIntegral(type) || type.equals(BOOLEAN) || type.equals(DATE) || type.equals(TIMESTAMP_MICROS)
-                || type instanceof DecimalType || type instanceof VarcharType;
+                || type instanceof DecimalType;
     }
 
     /**

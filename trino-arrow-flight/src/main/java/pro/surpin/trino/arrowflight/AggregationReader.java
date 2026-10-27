@@ -301,12 +301,12 @@ final class AggregationReader
     /**
      * True if the groups of this aggregation can be merged from streams sorted by the server:
      * every grouping column has a type whose server order equals Trino's (see
-     * {@link SqlQueryBuilder#isTopNSortable}).
+     * {@link SqlQueryBuilder#isServerOrderedFixedWidth}).
      */
     boolean canMergeSorted()
     {
         return !aggregation.getGroupingColumns().isEmpty()
-                && aggregation.getGroupingColumns().stream().allMatch(c -> SqlQueryBuilder.isTopNSortable(c.getColumnType()));
+                && aggregation.getGroupingColumns().stream().allMatch(c -> SqlQueryBuilder.isServerOrderedFixedWidth(c.getColumnType()));
     }
 
     SortedMerger sortedMerger(List<PageStream> streams, int maxRows)
