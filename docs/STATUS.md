@@ -79,6 +79,19 @@ Kept up to date after every work session so work can be resumed from this reposi
 > 0.57 / 0.73 / 0.67 split 1 (0.70 / 0.93 / 0.81). Raw reads did not change much (3 servers: Java client 1 stream 1.45 s, ADBC
 > 1.42 s, Trino split 1 / 4 1.67 / 1.81 s), so the gain is per-query overhead - the largest drop seen on CI since the DuckDB
 > 1.5.6 build. Not yet repeated back to back with 45fc0a9e6e02 on the same runner type; the stand (SF10) should confirm.
+>
+> **Back to back (session 78): the ~30 % above was mostly runner hardware.** Two same-time pairs, settings as above, Trino 455
+> partial (old 45fc0a9e6e02 → new 4e77c6bda59a, TPC-H SF1 sums default / split 1 / endpoint splits). GitHub's `ubuntu-latest`
+> hands out different CPUs (Trino's own CPU time for the same queries, which does not depend on the server, differed up to 1.7x);
+> `profile.sh` now logs the runner (`runner: 4 vCPU, <model>`). Pair 1 (runs 40590270774 old / 40590274657 new, CPU model not
+> yet logged): 3 servers 38.0 / 29.2 / 29.4 → 25.8 / 22.8 / 20.9 s, but Trino CPU 13.5 → 8.7 s (faster runner for the new
+> build); 1 server 37.3 / 28.5 / 34.4 → 26.7 / 24.5 / 24.9 s with Trino CPU 12.4 → 11.5 s and equal raw reads (Java client one
+> stream 1.79 vs 1.89 s, ADBC 1.83 vs 2.01 s), so on 1 server the gain looks real (heavier queries: q17 3.19 → 2.08, q21 6.40 →
+> 2.66 s default). Pair 2, 3 servers (runs 40592375074 old on AMD EPYC 9V45 / 40592379356 new on AMD EPYC 7763): old 27.6 /
+> 23.3 / 21.8 s (Trino CPU 9.3 s) vs new 36.0 / 27.4 / 27.4 s (15.6 s) - reversed by the runner. Matched by runner class (Trino
+> CPU ~9 s: old pair 2 vs new pair 1; ~13-16 s: old pair 1 vs new pair 2) **the new build is ~3-7 % faster on 3 servers**;
+> 1 server 14-28 % from one pair only. **CI timing comparisons across runs are only valid on the same CPU model** (check the
+> `runner:` line; compare Trino CPU too). The stand (SF10, fixed hardware) remains the real check.
 
 
 > **New server build `server-1.0.0-45fc0a9e6e02`** (2026-10-27, local coordinator; jar, plugins tar, libs tar + merged
@@ -1110,3 +1123,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   green: partial 1+3 servers 40582176690, complete 3 servers 40582181234; profile run 40582216959: TPC-H SF1 sums 3 servers
   26.0 / 22.0 / 20.3 s (was 37.9 / 29.8 / 30.3 on 45fc0a9e6e02), 1 server 27.6 / 23.8 / 25.8 s. Made 4e77c6bda59a the e2e
   default (`[skip ci]`, no plugin code changed). ~75 Actions minutes. Invariants untouched (failover checks exact or clean errors).
+- 2026-10-27 (cloud session 78): no new server build or maintainer answer; checked session 77's open point (4e77c6bda59a timing
+  gain not repeated back to back). Two same-time profile pairs vs 45fc0a9e6e02: 40590270774 / 40590274657 (1+3 servers) and
+  40592375074 / 40592379356 (3 servers), all green. The ~30 % 3-server gain was mostly runner hardware (`ubuntu-latest` mixes
+  AMD EPYC 9V45 and 7763; Trino CPU up to 1.7x apart); matched by runner class the new build is ~3-7 % faster on 3 servers,
+  1 server 14-28 % (one pair). `profile.sh` now logs vCPU count + CPU model (`[skip ci]`, profile output only). ~55 Actions
+  minutes. No plugin code changed; Invariants untouched.
