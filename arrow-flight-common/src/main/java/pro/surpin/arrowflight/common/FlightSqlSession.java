@@ -182,9 +182,9 @@ public class FlightSqlSession
                 else {
                     failure.addSuppressed(e);
                 }
-                allTls &= isTlsFailure(e);
+                allTls = allTls && (config.isTlsEnabled() ? isTlsFailure(e) : answersWithTls(coordinator, e));
                 if (allTls && i + 1 == coordinators.size()) {
-                    throw tlsRejected(coordinator, e, failure);
+                    throw config.isTlsEnabled() ? tlsRejected(coordinator, e, failure) : tlsExpected(coordinator, failure);
                 }
                 if (!isCoordinatorUnreachable(e) || i + 1 == coordinators.size()) {
                     throw failure;
@@ -261,6 +261,61 @@ public class FlightSqlSession
         return new FlightTlsHandshakeException("TLS handshake with " + server + " failed (server certificate checked against "
                 + trust + "): " + reason.getMessage() + ". Set arrow-flight.tls.truststore-path to the CA (PEM or .jks) that issued"
                 + " the server's certificate; the certificate must also name the host the catalog connects to.", failure);
+    }
+
+    /**
+     * A plaintext catalog against a TLS listener: gRPC reports UNAVAILABLE "Network closed for unknown reason", like a
+     * lost connection. Only then (the TCP connection was made) the port is asked once with a TLS ClientHello; a TLS
+     * record in reply (ServerHello or alert) means the server speaks TLS. Nothing is verified or sent beyond the hello.
+     */
+    private boolean answersWithTls(FlightConfig.Coordinator coordinator, RuntimeException e)
+    {
+        boolean unavailable = false;
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof java.net.ConnectException || t instanceof java.net.NoRouteToHostException
+                    || t instanceof java.net.UnknownHostException || t instanceof java.nio.channels.UnresolvedAddressException) {
+                return false;
+            }
+            if (t instanceof FlightRuntimeException f && f.status().code() == FlightStatusCode.UNAVAILABLE) {
+                unavailable = true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        int timeout = (int) Math.min(Integer.MAX_VALUE, config.getConnectTimeoutMillis() > 0 ? config.getConnectTimeoutMillis() : 5_000);
+        return unavailable && answersWithTls(coordinator.host(), coordinator.port(), timeout);
+    }
+
+    static boolean answersWithTls(String host, int port, int timeoutMillis)
+    {
+        try (java.net.Socket socket = new java.net.Socket()) {
+            javax.net.ssl.SSLEngine engine = javax.net.ssl.SSLContext.getDefault().createSSLEngine(host, port);
+            engine.setUseClientMode(true);
+            engine.beginHandshake();
+            java.nio.ByteBuffer hello = java.nio.ByteBuffer.allocate(engine.getSession().getPacketBufferSize());
+            engine.wrap(java.nio.ByteBuffer.allocate(0), hello);
+            hello.flip();
+            socket.connect(new java.net.InetSocketAddress(host, port), timeoutMillis);
+            socket.setSoTimeout(timeoutMillis);
+            socket.getOutputStream().write(hello.array(), 0, hello.limit());
+            socket.getOutputStream().flush();
+            byte[] header = socket.getInputStream().readNBytes(3);
+            // TLS record header: content type handshake (22) or alert (21), protocol major version 3
+            return header.length == 3 && (header[0] == 22 || header[0] == 21) && header[1] == 3;
+        }
+        catch (java.io.IOException | java.security.GeneralSecurityException | RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    // Every configured coordinator answers with TLS, but the catalog does not use it.
+    private FlightTlsHandshakeException tlsExpected(FlightConfig.Coordinator coordinator, RuntimeException failure)
+    {
+        return new FlightTlsHandshakeException("Arrow Flight server " + coordinator.host() + ":" + coordinator.port()
+                + " answers with TLS, but the catalog connects without it: set arrow-flight.tls.enabled=true (and"
+                + " arrow-flight.tls.truststore-path to the CA that issued the server's certificate), or use the port of its"
+                + " plaintext listener.", failure);
     }
 
     // Connection refused/unresolved, UNAVAILABLE, or no handshake answer within its deadline (a host that is gone).

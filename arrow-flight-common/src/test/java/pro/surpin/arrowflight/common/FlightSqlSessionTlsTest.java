@@ -22,7 +22,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -253,6 +257,61 @@ class FlightSqlSessionTlsTest
             RuntimeException e = assertThrows(RuntimeException.class, () -> session.getFlightInfo("SELECT 1"));
             assertFalse(e instanceof FlightTlsHandshakeException, e.toString());
             assertTrue(e.getMessage().contains("after 2 attempts"), e.getMessage());
+        }
+    }
+
+    @Test
+    void plaintextCatalogAgainstTlsServerIsFinal()
+    {
+        FlightTlsHandshakeException e = assertFinal(FlightConfig.builder("127.0.0.1").port(flightServer.getPort())
+                .bearerToken("token").maxRetries(3).retryBackoffMillis(BACKOFF_MILLIS).build(), "arrow-flight.tls.enabled=true");
+        assertTrue(e.getMessage().contains("127.0.0.1:" + flightServer.getPort() + " answers with TLS"), e.getMessage());
+    }
+
+    @Test
+    void tlsProbe()
+            throws Exception
+    {
+        assertTrue(FlightSqlSession.answersWithTls("127.0.0.1", flightServer.getPort(), 5_000));
+        try (FlightServer plain = FlightServer.builder(allocator, Location.forGrpcInsecure("127.0.0.1", 0), producer).build().start()) {
+            assertFalse(FlightSqlSession.answersWithTls("127.0.0.1", plain.getPort(), 5_000));
+        }
+        try (ServerSocket closing = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
+            Thread acceptor = Thread.ofVirtual().start(() -> {
+                try (Socket socket = closing.accept()) {
+                    // closes without answering
+                }
+                catch (IOException ignored) {
+                }
+            });
+            assertFalse(FlightSqlSession.answersWithTls("127.0.0.1", closing.getLocalPort(), 5_000));
+            acceptor.join();
+        }
+    }
+
+    @Test
+    void plaintextCatalogAgainstClosingServerIsStillRetried()
+            throws Exception
+    {
+        // A listener that accepts and closes (a server going down) is not TLS: the old retry path, no final error.
+        try (ServerSocket closing = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
+            Thread acceptor = Thread.ofVirtual().start(() -> {
+                while (!closing.isClosed()) {
+                    try (Socket socket = closing.accept()) {
+                        // closes without answering
+                    }
+                    catch (IOException ignored) {
+                    }
+                }
+            });
+            try (FlightSqlSession session = new FlightSqlSession(FlightConfig.builder("127.0.0.1").port(closing.getLocalPort())
+                    .bearerToken("token").maxRetries(1).retryBackoffMillis(100).build())) {
+                RuntimeException e = assertThrows(RuntimeException.class, () -> session.getFlightInfo("SELECT 1"));
+                assertFalse(e instanceof FlightTlsHandshakeException, e.getMessage());
+                assertTrue(e.getMessage().contains("failed after 2 attempts"), e.getMessage());
+            }
+            closing.close();
+            acceptor.join();
         }
     }
 }

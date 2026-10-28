@@ -69,11 +69,11 @@ LDIF
   chmod a+r "$AUTH_DIR"/*
 }
 
-# auth_catalog name key=value... : catalog file + mount for start_trino (host flight1 or AUTH_HOST, TLS)
+# auth_catalog name key=value... : catalog file + mount for start_trino (host flight1 or AUTH_HOST, TLS unless AUTH_TLS=false)
 auth_catalog() {
   local name=$1; shift
   { echo connector.name=arrow_flight; echo "arrow-flight.host=${AUTH_HOST:-flight1}"; echo "arrow-flight.port=${AUTH_PORT:-32010}"
-    echo arrow-flight.tls.enabled=true; printf '%s\n' "$@"; } > "$WORK/etc/catalog/$name.properties"
+    echo "arrow-flight.tls.enabled=${AUTH_TLS:-true}"; printf '%s\n' "$@"; } > "$WORK/etc/catalog/$name.properties"
   EXTRA_CATALOG_MOUNTS+=(-v "$WORK/etc/catalog/$name.properties:/etc/trino/catalog/$name.properties:ro")
 }
 
@@ -180,6 +180,8 @@ auth_run() {
   auth_catalog flight_ldap_noca arrow-flight.user=e2e "arrow-flight.password=$AUTH_PASSWORD"
   # TLS against a port without TLS (Trino's own plain HTTP port answers "400 Bad Request")
   AUTH_HOST=trino AUTH_PORT=8080 auth_catalog flight_tls_plain arrow-flight.bearer-token=unused
+  # no TLS against the servers' TLS port (gRPC alone reports a lost connection)
+  AUTH_TLS=false auth_catalog flight_plain_tls arrow-flight.bearer-token=unused
   good=$(python3 "$REPO/e2e/ci/jwt_make.py" token "$AUTH_DIR/jwt.key" "$AUTH_ISSUER" "$AUTH_AUDIENCE" e2e 3600)
   expired=$(python3 "$REPO/e2e/ci/jwt_make.py" token "$AUTH_DIR/jwt.key" "$AUTH_ISSUER" "$AUTH_AUDIENCE" e2e -600)
   forged=$(python3 "$REPO/e2e/ci/jwt_make.py" token "$AUTH_DIR/other.key" "$AUTH_ISSUER" "$AUTH_AUDIENCE" e2e 3600)
@@ -198,6 +200,7 @@ auth_run() {
     auth_refused_once ldap-wrong-password flight_ldap_badpw 'UNAUTHENTICATED|password'
     auth_refused_final ldap-tls-without-ca flight_ldap_noca 'certificate|PKIX|SSL|TLS|handshake' arrow-flight.tls.truststore-path
     auth_refused_final tls-plaintext-port flight_tls_plain 'TLS' arrow-flight.tls.enabled=false
+    auth_refused_final plaintext-to-tls-port flight_plain_tls 'TLS' arrow-flight.tls.enabled=true
     log "auth: ldap session expiry (${AUTH_EXPIRY_WAIT} s)"
     sleep "$AUTH_EXPIRY_WAIT"
     auth_exact ldap-after-expiry flight_ldap q06
