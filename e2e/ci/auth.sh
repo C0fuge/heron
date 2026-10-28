@@ -69,10 +69,10 @@ LDIF
   chmod a+r "$AUTH_DIR"/*
 }
 
-# auth_catalog name key=value... : catalog file + mount for start_trino (host flight1, TLS)
+# auth_catalog name key=value... : catalog file + mount for start_trino (host flight1 or AUTH_HOST, TLS)
 auth_catalog() {
   local name=$1; shift
-  { echo connector.name=arrow_flight; echo arrow-flight.host=flight1; echo arrow-flight.port=32010
+  { echo connector.name=arrow_flight; echo "arrow-flight.host=${AUTH_HOST:-flight1}"; echo "arrow-flight.port=${AUTH_PORT:-32010}"
     echo arrow-flight.tls.enabled=true; printf '%s\n' "$@"; } > "$WORK/etc/catalog/$name.properties"
   EXTRA_CATALOG_MOUNTS+=(-v "$WORK/etc/catalog/$name.properties:/etc/trino/catalog/$name.properties:ro")
 }
@@ -146,18 +146,18 @@ auth_refused_once() {
   fi
 }
 
-# auth_refused_final label catalog pattern: as auth_refused, and the refusal is final: within 10 s, no
-# "failed after N attempts", and the message names the truststore setting (an untrusted server certificate)
+# auth_refused_final label catalog pattern setting: as auth_refused, and the TLS refusal is final: within 10 s,
+# no "failed after N attempts", and the message names the catalog setting to fix
 auth_refused_final() {
-  local start took
+  local setting=$4 start took
   start=$(date +%s)
-  auth_refused "$@"
+  auth_refused "$1" "$2" "$3"
   took=$(( $(date +%s) - start ))
   if [ "$took" -le 10 ] && ! grep -q 'failed after [0-9]* attempts' "$OUT/auth/$1.err" \
-       && grep -q 'arrow-flight.tls.truststore-path' "$OUT/auth/$1.err"; then
-    auth_note "$1-final" OK "refused in ${took} s, names arrow-flight.tls.truststore-path"
+       && grep -qF "$setting" "$OUT/auth/$1.err"; then
+    auth_note "$1-final" OK "refused in ${took} s, names $setting"
   else
-    auth_note "$1-final" FAIL "refused in ${took} s: $(grep -m1 -oE 'failed after [0-9]* attempts|TLS handshake with[^.]*' "$OUT/auth/$1.err")"
+    auth_note "$1-final" FAIL "refused in ${took} s: $(grep -m1 -oE 'failed after [0-9]* attempts|Arrow Flight server [^.]*' "$OUT/auth/$1.err")"
   fi
 }
 
@@ -178,6 +178,8 @@ auth_run() {
   auth_catalog flight_ldap_badpw arrow-flight.user=e2e "arrow-flight.password=wrong-$AUTH_PASSWORD" \
     arrow-flight.tls.truststore-path=/etc/trino/flight-tls/ca.jks arrow-flight.tls.truststore-password=changeit
   auth_catalog flight_ldap_noca arrow-flight.user=e2e "arrow-flight.password=$AUTH_PASSWORD"
+  # TLS against a port without TLS (Trino's own plain HTTP port answers "400 Bad Request")
+  AUTH_HOST=trino AUTH_PORT=8080 auth_catalog flight_tls_plain arrow-flight.bearer-token=unused
   good=$(python3 "$REPO/e2e/ci/jwt_make.py" token "$AUTH_DIR/jwt.key" "$AUTH_ISSUER" "$AUTH_AUDIENCE" e2e 3600)
   expired=$(python3 "$REPO/e2e/ci/jwt_make.py" token "$AUTH_DIR/jwt.key" "$AUTH_ISSUER" "$AUTH_AUDIENCE" e2e -600)
   forged=$(python3 "$REPO/e2e/ci/jwt_make.py" token "$AUTH_DIR/other.key" "$AUTH_ISSUER" "$AUTH_AUDIENCE" e2e 3600)
@@ -194,7 +196,8 @@ auth_run() {
     grep -h 'Flight security' "$OUT"/auth/ldap-*.log | head -1 | cut -c1-300
     auth_exact ldap flight_ldap $AUTH_QUERIES
     auth_refused_once ldap-wrong-password flight_ldap_badpw 'UNAUTHENTICATED|password'
-    auth_refused_final ldap-tls-without-ca flight_ldap_noca 'certificate|PKIX|SSL|TLS|handshake'
+    auth_refused_final ldap-tls-without-ca flight_ldap_noca 'certificate|PKIX|SSL|TLS|handshake' arrow-flight.tls.truststore-path
+    auth_refused_final tls-plaintext-port flight_tls_plain 'TLS' arrow-flight.tls.enabled=false
     log "auth: ldap session expiry (${AUTH_EXPIRY_WAIT} s)"
     sleep "$AUTH_EXPIRY_WAIT"
     auth_exact ldap-after-expiry flight_ldap q06

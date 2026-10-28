@@ -182,7 +182,7 @@ public class FlightSqlSession
                 else {
                     failure.addSuppressed(e);
                 }
-                allTls &= isTlsCertificateFailure(e);
+                allTls &= isTlsFailure(e);
                 if (allTls && i + 1 == coordinators.size()) {
                     throw tlsRejected(coordinator, e, failure);
                 }
@@ -225,35 +225,41 @@ public class FlightSqlSession
     }
 
     /**
-     * The server's certificate was refused (unknown CA, expired, wrong host name). gRPC reports it as
-     * UNAVAILABLE "io exception", like a lost connection; the cause chain tells it apart.
+     * TLS failed for good: the server's certificate was refused (unknown CA, expired, wrong host name) or the
+     * server does not speak TLS at all. gRPC reports both as UNAVAILABLE "io exception", like a lost
+     * connection; the cause chain tells them apart.
      */
-    static boolean isTlsCertificateFailure(Throwable e)
+    static boolean isTlsFailure(Throwable e)
     {
         for (Throwable t = e; t != null; t = t.getCause()) {
             if (t instanceof javax.net.ssl.SSLHandshakeException
                     || t instanceof java.security.cert.CertificateException
-                    || t instanceof java.security.cert.CertPathValidatorException) {
+                    || t instanceof java.security.cert.CertPathValidatorException
+                    || t instanceof io.netty.handler.ssl.NotSslRecordException) {
                 return true;
             }
         }
         return false;
     }
 
-    // Every configured coordinator refused at TLS; a later attempt would see the same certificates.
+    // Every configured coordinator refused at TLS; a later attempt would get the same answer.
     private FlightTlsHandshakeException tlsRejected(FlightConfig.Coordinator coordinator, RuntimeException e, RuntimeException failure)
     {
+        String server = "Arrow Flight server " + coordinator.host() + ":" + coordinator.port();
         Throwable reason = e;
         for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof io.netty.handler.ssl.NotSslRecordException) {
+                return new FlightTlsHandshakeException(server + " does not answer with TLS (not an SSL/TLS record):"
+                        + " set arrow-flight.tls.enabled=false for a server without TLS, or use the port of its TLS listener.", failure);
+            }
             if (t instanceof javax.net.ssl.SSLException || t instanceof java.security.GeneralSecurityException) {
                 reason = t;
             }
         }
         String trust = config.getTlsTruststorePath().map(path -> "the truststore " + path)
                 .orElse(config.isTlsVerifyServer() ? "the JVM's default truststore" : "no verification");
-        return new FlightTlsHandshakeException("TLS handshake with Arrow Flight server "
-                + coordinator.host() + ":" + coordinator.port() + " failed (server certificate checked against " + trust
-                + "): " + reason.getMessage() + ". Set arrow-flight.tls.truststore-path to the CA (PEM or .jks) that issued"
+        return new FlightTlsHandshakeException("TLS handshake with " + server + " failed (server certificate checked against "
+                + trust + "): " + reason.getMessage() + ". Set arrow-flight.tls.truststore-path to the CA (PEM or .jks) that issued"
                 + " the server's certificate; the certificate must also name the host the catalog connects to.", failure);
     }
 

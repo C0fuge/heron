@@ -161,12 +161,17 @@ class FlightSqlSessionTlsTest
 
     private FlightTlsHandshakeException assertFinal(FlightConfig config)
     {
+        return assertFinal(config, "arrow-flight.tls.truststore-path");
+    }
+
+    private FlightTlsHandshakeException assertFinal(FlightConfig config, String setting)
+    {
         try (FlightSqlSession session = new FlightSqlSession(config)) {
             long start = System.nanoTime();
             FlightTlsHandshakeException e = assertThrows(FlightTlsHandshakeException.class, () -> session.getFlightInfo("SELECT 1"));
             long millis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
             assertTrue(millis < BACKOFF_MILLIS, "retried: " + millis + " ms");
-            assertTrue(e.getMessage().contains("arrow-flight.tls.truststore-path"), e.getMessage());
+            assertTrue(e.getMessage().contains(setting), e.getMessage());
             assertFalse(e.getMessage().contains("attempts"), e.getMessage());
             // a schema listing must not turn it into "only the default schema"
             assertThrows(FlightTlsHandshakeException.class, session::listSchemas);
@@ -208,6 +213,20 @@ class FlightSqlSessionTlsTest
         flightServer.close();
         flightServer = startServer(otherHost);
         assertFinal(tls("127.0.0.1").port(flightServer.getPort()).tlsTruststorePath(otherHost.cert().toString()).build());
+    }
+
+    @Test
+    void serverWithoutTlsIsFinal()
+            throws Exception
+    {
+        flightServer.close();
+        flightServer = FlightServer.builder(allocator, Location.forGrpcInsecure("127.0.0.1", 0), producer)
+                .headerAuthenticator(producer)
+                .build()
+                .start();
+        FlightTlsHandshakeException e = assertFinal(tls("127.0.0.1").port(flightServer.getPort()).build(),
+                "arrow-flight.tls.enabled=false");
+        assertTrue(e.getMessage().contains("does not answer with TLS"), e.getMessage());
     }
 
     @Test
