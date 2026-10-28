@@ -1165,3 +1165,6 @@ Kept up to date after every work session so work can be resumed from this reposi
   26.6 s on EPYC 7763 = 4e77c6bda59a on the same CPU model within noise; 1 server 30.6 / 25.5 / 27.8 s on EPYC 9V74). Made it
   the e2e default (`e2e.yml`, `run-e2e.sh`, `[skip ci]`). New Open question: plugin opt-in for result compression. ~70 Actions
   minutes. No plugin code changed; Invariants untouched.
+- 2026-10-28 (cloud session 83): nothing actionable — no new `e2e-assets` upload since cadd1aca9c23 (01:31 UTC), no new
+  maintainer/stand answers (compression opt-in question still open); every Next steps item waits on the stand or an Open
+  question. 0 Actions minutes.
