@@ -144,9 +144,24 @@ Kept up to date after every work session so work can be resumed from this reposi
 > both **refused in 1 s** (was ~15 s / 4 attempts). Runs: push 40731094492 + build 40731094532, push 40734883795 + build
 > 40734883558, all green on 1 + 3 servers (TPC-H, types, Iceberg, failover, all auth checks).
 >
-> **Next:** no open own item. Candidates (pick one, or wait for the stand / maintainer): a plaintext catalog against a TLS
-> server (today UNAVAILABLE "Network closed for unknown reason", indistinguishable from a lost connection, so still retried;
-> could be probed once with a TLS ClientHello before reporting), or the Open questions below.
+> **Done (session 91): a plaintext catalog against a TLS listener is final too.** gRPC reports it as UNAVAILABLE "Network
+> closed for unknown reason" (like a lost connection), so it was retried. Now, when `arrow-flight.tls.enabled=false` and the
+> handshake fails with UNAVAILABLE after the TCP connection was made (no `ConnectException` / unknown host in the cause chain),
+> `FlightSqlSession.answersWithTls` sends the port one TLS ClientHello (from the JDK's `SSLEngine`, nothing verified, nothing
+> else sent) and reads 3 bytes; a TLS record header (handshake 22 / alert 21, major version 3) makes it a
+> `FlightTlsHandshakeException`: "Arrow Flight server h:p answers with TLS, but the catalog connects without it: set
+> arrow-flight.tls.enabled=true (and arrow-flight.tls.truststore-path to the CA ...), or use the port of its plaintext
+> listener." As for TLS failures, only when every coordinator gives that answer; data-stream failover unchanged. Unit tests in
+> `FlightSqlSessionTlsTest` (now 10): plaintext catalog against the TLS server final within the backoff; the probe is true for
+> a TLS server, false for a plaintext Flight server and for a listener that accepts and closes; a plaintext catalog against
+> such a closing listener is still retried ("failed after 2 attempts"). Common module 49/49 locally (JDK 21, `-Dmaven.compiler.release=21`),
+> failover tests included. e2e: new `plaintext-to-tls-port(-final)` in `e2e/ci/auth.sh` (`AUTH_TLS=false` catalog at flight1's
+> TLS port): **refused in 1 s**, names the setting. Runs: build 40740553512, e2e 40740554738, green on 1 + 3 servers (TPC-H,
+> types, Iceberg, failover incl. coordinator-down 12.9 s, all 13 auth checks OK).
+>
+> **Next:** no open own item. Candidates (pick one, or wait for the stand / maintainer): the Open questions below; or
+> README/`flight.properties.example` troubleshooting notes listing the connection error messages added in sessions 89-91
+> (credentials rejected, certificate refused, TLS mismatch either way) and the setting each one names.
 
 
 > **Maintainer, 2026-10-28: yes to result compression as a connector opt-in.** Add a catalog property (off by default) that
@@ -1348,3 +1363,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   46/46 locally with JDK 21). e2e checks `ldap-tls-without-ca-final`, `tls-plaintext-port(-final)`: refused in 1 s (was ~15 s).
   Runs 40731094492 / 40731094532 and 40734883795 / 40734883558 green on 1 + 3 servers. Invariants: auth checks all OK, data paths
   unchanged. ~45 Actions minutes.
+- 2026-10-28 (cloud session 91): plaintext catalog against a TLS listener is final (one TLS ClientHello probe after an
+  UNAVAILABLE plaintext handshake; message names `arrow-flight.tls.enabled=true`). `FlightSqlSessionTlsTest` 10/10, common
+  module 49/49 locally. e2e `plaintext-to-tls-port(-final)` refused in 1 s. Runs build 40740553512, e2e 40740554738 green on
+  1 + 3 servers; Invariants: auth checks all OK, failover unchanged, data paths unchanged. ~30 Actions minutes.
