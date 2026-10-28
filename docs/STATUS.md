@@ -62,6 +62,37 @@ Kept up to date after every work session so work can be resumed from this reposi
 > equal with and without (full suite on one setting), and a slow-link check in CI (`tc netem delay 10ms rate 1gbit` on the
 > runner's loopback or between containers) reporting MB/s with off / lz4 / zstd. The server side is in builds since
 > `cadd1aca9c23` (assets). Then continue with your own open items.
+>
+> **Done (session 84): `arrow-flight.result-compression` = `NONE` (default) | `ZSTD` | `LZ4`.** Set, data streams (`DoGet` of
+> `openStream` only; metadata calls and info streams never) send `arrow-compression: zstd|lz4`; the reader decodes the
+> compressed IPC bodies. Arrow Java 18's FlightStream takes no codec factory and its default one comes from a `ServiceLoader`
+> lookup on the thread context class loader, done once per class loader (unreliable inside a Trino plugin), so
+> `StreamDecompression` swaps the stream's `VectorLoader` (reflection on `FlightStream.loader`/`root`/`cancelled`, checked at
+> catalog start) for one with `arrow-compression`'s `CommonsCompressionFactory`, after the schema and before the first batch;
+> failures there go through the normal failover path. `NONE` sends nothing: wire and code path unchanged. Bundle +5 jars
+> (arrow-compression, zstd-jni 1.5.6-6, commons-compress 1.27.1, commons-io 2.16.1, commons-lang3 3.16.0; all three Trino lists).
+> Unit tests `FlightSqlSessionCompressionTest` (11: off sends no header, zstd/lz4 asked and decoded, only DoGet asks, old server
+> ignoring it, TCCL-independent decoding, failover on UNAVAILABLE / refused location, INVALID_ARGUMENT not failed over, stream
+> ending without schema does not hang) + config test; build run 40670140762 green on 455/477/483. **e2e:** full suite with
+> `result-compression=zstd` run 40670144631 green on 1 and 3 servers (TPC-H 22/22, types, Iceberg, TopN, splits, failover);
+> default (off) run 40671042992 green on 1 and 3 servers (Invariants). New e2e inputs `result-compression` and `slow-link=only`
+> (`e2e/ci/slowlink.sh`: lineitem `checksum(ROW(16 cols))`, nothing pushed, catalogs flight / flight_lz4 / flight_zstd, 2 runs
+> each, plain link then `tc netem delay 10ms rate 1gbit limit 100000` on the host side of Trino's veth; answers must match).
+> **Slow-link run 40670149146** (1 server, partial, SF1, best of 2; effective MB/s = plain Arrow bytes / elapsed):
+>
+> | link | setting | s | MB on link | effective MB/s |
+> |---|---|---|---|---|
+> | plain | off | 6.24 | 1051.8 | 168.6 |
+> | plain | lz4 | 11.24 | 412.2 | 93.6 |
+> | plain | zstd | 7.39 | 245.0 | 142.3 |
+> | 1 Gbit + 10 ms | off | 9.41 | 1051.8 | 111.8 |
+> | 1 Gbit + 10 ms | lz4 | 10.95 | 412.1 | 96.1 |
+> | 1 Gbit + 10 ms | zstd | 7.22 | 245.0 | 145.7 |
+>
+> ZSTD: 4.3x fewer bytes and **23 % faster than off on the 1 Gbit link** (7.22 vs 9.41 s), 18 % slower on the unshaped Docker
+> link. LZ4 (2.55x) is slower than off on both: CPU-bound, the plugin's LZ4 decoder is commons-compress's pure-Java frame
+> codec (ZSTD is native zstd-jni). Suggested value where the link is ≤ ~1 Gbit: `ZSTD`. Off stays the default. The stand (real
+> network, SF10) should measure off vs ZSTD before anyone turns it on (see Open questions).
 
 > **New server build `server-1.0.0-cadd1aca9c23`** (2026-10-28, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release). Since 7562a5bdb7b9 (so it also covers what 4e77c6bda59a brought): opt-in result
@@ -82,10 +113,7 @@ Kept up to date after every work session so work can be resumed from this reposi
 > 1 server 1.82 / 2.02 / 2.05 s. Small queries 3 servers q01 / q04 / q06 0.68 / 0.88 / 0.79 default, 0.64 / 0.85 / 0.72 split 1.
 > No regression; the new server features (compression, S3 cache, `duckDbThreads`) are opt-in or invisible at SF1 on 4 vCPUs.
 >
-> **Follow-up candidate (needs a maintainer answer, see Open questions): plugin opt-in for result compression.** The plugin
-> could send `arrow-compression: zstd|lz4` (new catalog property, off by default) and decode compressed IPC bodies (Arrow
-> Java needs `arrow-compression`'s `CommonsCompressionFactory` on the reader). Only worth it where the network, not the
-> server or Trino, is the bottleneck - on CI (one host) it cannot show a gain; the stand could.
+> *(Session 82 follow-up candidate "plugin opt-in for result compression": answered by the maintainer 2026-10-28, done in session 84, above.)*
 
 
 > **Session 71 (TopN pushes VARCHAR sort keys).** Every item below is done or waits on the stand / a maintainer answer, so this
@@ -854,10 +882,11 @@ Kept up to date after every work session so work can be resumed from this reposi
   (HadoopDataStoreProvider; the Hadoop jars in `libs/` do not register LocalFileSystem). CI works around it with a
   `core-site.xml` (`fs.file.impl=org.apache.hadoop.fs.LocalFileSystem`) on the server classpath. Fix in the server?
 
-- **Result compression in the plugin? (session 82)** Server cadd1aca9c23 compresses result streams (ZSTD/LZ4) when the
-  client asks (`arrow-compression` header / session option). Should the plugin get an opt-in catalog property for it (off by
-  default, so Invariants and old servers are untouched), and is the stand's network slow enough for it to matter? If yes,
-  which codec should be the suggested value?
+- **Result compression on the stand? (session 84; replaces the session-82 question, answered 2026-10-28 and done).** The plugin
+  has `arrow-flight.result-compression=NONE|ZSTD|LZ4` (off by default). In CI ZSTD wins only on a shaped 1 Gbit link (+23 %),
+  LZ4 never (pure-Java decoder). Could the stand run TPC-H SF10 and the full-scan checksum with `ZSTD` vs off (its real
+  network) and say whether ZSTD should be the suggested value in `flight.properties.example`? A faster LZ4 decoder (lz4-java
+  or aircompressor instead of commons-compress) is possible if LZ4 matters on the stand - worth it?
 - e2e S3 is `rclone serve s3` instead of MinIO (MinIO images/binaries are no longer downloadable). OK, or is
   there a MinIO build you want to put into `e2e-assets`?
 - **S3 Iceberg warehouse in CI** (session 13): should `iceberg-warehouse=s3` become the default for int6 runs? It covers
@@ -1174,3 +1203,12 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-10-28 (cloud session 83): nothing actionable — no new `e2e-assets` upload since cadd1aca9c23 (01:31 UTC), no new
   maintainer/stand answers (compression opt-in question still open); every Next steps item waits on the stand or an Open
   question. 0 Actions minutes.
+- 2026-10-28 (cloud session 84): Next steps item 1 (maintainer: result compression as connector opt-in). New catalog property
+  `arrow-flight.result-compression` (NONE default / ZSTD / LZ4): `arrow-compression` header on data-stream DoGets only, compressed
+  IPC bodies decoded through a codec-aware `VectorLoader` swapped into the FlightStream (`StreamDecompression`); bundle +5 jars.
+  Unit tests `FlightSqlSessionCompressionTest` (11) + config test; build 40670140762 green on 455/477/483 (failed intermediate
+  runs 40669497835: a test with a wrong premise - Arrow's default loader finds codecs via ServiceLoader on the TCCL, now a test
+  that decoding does not depend on it; 40669864811: bundle lists). e2e: zstd full suite 40670144631 green (1 + 3 servers),
+  default off 40671042992 green (1 + 3 servers), slow-link check 40670149146 green (ZSTD 7.22 s vs off 9.41 s on netem 1 Gbit
+  + 10 ms, 245 vs 1052 MB; LZ4 slower than off). New e2e inputs `result-compression`, `slow-link` (`e2e/ci/slowlink.sh`).
+  New Open question: stand off vs ZSTD. ~85 Actions minutes. Invariants untouched (off by default, nothing sent).
