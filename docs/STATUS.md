@@ -57,6 +57,19 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **New server build `server-1.0.0-a9e43ca5e296`** (2026-10-28, local coordinator; jar, plugins tar, libs tar + merged
+> `SHA256SUMS` in this repo's assets release). Since cadd1aca9c23: LDAP / Active Directory login (`FLIGHT_AUTH_PROVIDER=ldap`,
+> opt-in LDAP groups into Ranger via `FLIGHT_LDAP_GROUP_SEARCH_BASE`) and OIDC / Knox JWT login (`FLIGHT_AUTH_PROVIDER=jwt`)
+> as optional modules (server release asset `flight-auth-...tar.zst`, not in these assets; need Flight TLS), opt-in Hive ORC
+> tables `hive.orcTables` and Hive text tables `hive.textTables` (default false), S3 small-query tail fix (`duckDbThreads`
+> default at least 4 on S3/lakeFS), S3/lakeFS read cache now held at its size in heap + opt-in admission
+> `arrowflight.s3.cacheAdmission=reuse`, opt-in caps `duckDbThreadsUnderLoad` / `duckDbProducingStreams` (default 0 = off),
+> opt-in zero-copy writes `flightZeroCopyWrites`, opt-in distributed complete mode `distributedComplete` (default false), and
+> size-aware DuckDB sizing (item 19b: `duckDbThreads` cores/4 between 2 and 16, a per-connection `memory_limit` from host
+> cores + memory by default, `duckDbMemoryLimit=none` restores DuckDB's default). Same DuckDB 1.5.6 extension set. Run the
+> suite once on it (note timings) and make it the CI default if green.
+
+
 > **Maintainer, 2026-10-28: yes to result compression as a connector opt-in.** Add a catalog property (off by default) that
 > asks the server for `arrow-compression: zstd|lz4` and decodes compressed IPC bodies; never on unless set. Test: answers
 > equal with and without (full suite on one setting), and a slow-link check in CI (`tc netem delay 10ms rate 1gbit` on the
