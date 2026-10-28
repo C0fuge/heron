@@ -68,6 +68,25 @@ Kept up to date after every work session so work can be resumed from this reposi
 > size-aware DuckDB sizing (item 19b: `duckDbThreads` cores/4 between 2 and 16, a per-connection `memory_limit` from host
 > cores + memory by default, `duckDbMemoryLimit=none` restores DuckDB's default). Same DuckDB 1.5.6 extension set. Run the
 > suite once on it (note timings) and make it the CI default if green.
+>
+> **Session 86: not yet the CI default (cadd1aca9c23 stays), because of one intermittent heap-check failure.** On a9e43ca5e296:
+> complete mode 3 servers run 40683589412 green; partial 3 servers green (40683586005 job e2e (3)); partial 1 server **failed
+> once** (40683586005 job e2e (1), the only red check: `1/eps4 1G default q18 ERROR` "Query exceeded per-node memory limit of
+> 307.20MB [Allocated: 305.67MB …HashBuilderOperator=228.13MB]"), then green twice (40687927967, 40690539517; peaks 249 / 427
+> MB live). cadd1aca9c23 baseline run 40687878656 green (eps4 default peak 409 MB). Everything else (TPC-H 22/22, types,
+> Iceberg, TopN, splits, dynamic filters, concurrent, failover) green on a9e43ca5e296. **Cause (EXPLAIN, now printed by
+> `heap_plan` in `e2e/ci/heap-probe.sh` for eps4 runs and failures):** q18's `InnerJoin[o_orderkey = l_orderkey, PARTITIONED]`
+> builds its hash table from the lineitem scan (6001215 rows, 103 MB estimated) because the IN-subquery side is estimated
+> `rows: ?`; whether the build stays small depends on how early the semi-join side (the pushed `GROUP BY l_orderkey` merged from
+> 4 endpoints) finishes - a timing race, not a server or plugin answer difference; the margin at Trino 1G (30 % per-node limit)
+> is ~1.5 MB. **Next:** make the guard deterministic before switching (options: measure the failure rate with a heap-probe-only
+> loop on both builds; run the eps4 check with `query_max_memory_per_node`-independent criterion such as "no
+> OutOfMemoryError / answer exact" and report the memory-limit error as INFO; or give q18 a join hint so lineitem is not the
+> build side), then switch the default (`e2e.yml` two places + `run-e2e.sh`). **Timings** (profile run 40683593135, settings
+> `default / flight.split_count=1 / flight.endpoint_splits_enabled=true`, best of 2, SF1): 3 servers **28.94 / 24.88 / 23.08 s**
+> on AMD EPYC 9V74 (cadd1aca9c23 3 servers on EPYC 7763: 34.2 / 27.1 / 26.6); 1 server **34.40 / 27.79 / 31.79 s** on EPYC
+> 7763 (cadd1aca9c23 1 server on 9V74: 30.6 / 25.5 / 27.8) - CPU models swapped between the two runs, so no conclusion beyond
+> "same range". Raw lineitem read: ADBC 1 stream 1.51 s (3 srv) / 1.96 s (1 srv), Trino split 1 1.90 / 1.96 s.
 
 
 > **Maintainer, 2026-10-28: yes to result compression as a connector opt-in.** Add a catalog property (off by default) that
@@ -1228,3 +1247,9 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-10-28 (cloud session 85): nothing actionable — no new `e2e-assets` upload since cadd1aca9c23 (01:31 UTC), no new
   maintainer/stand answers since session 84 (result compression done; stand off-vs-ZSTD and faster-LZ4 questions open); every
   Next steps item waits on the stand or an Open question. 0 Actions minutes.
+- 2026-10-28 (cloud session 86): first Next steps item (server build a9e43ca5e296). Suite: partial 1+3 servers run 40683586005
+  (3 green; 1 red only on the eps4 q18 heap guard, 305.7 of 307.2 MB per-node limit), complete 3 servers 40683589412 green,
+  profile 40683593135; a9e43ca5e296 1 server again 40687927967 + 40690539517 green; cadd1aca9c23 baseline 40687878656 green.
+  Cause: q18 builds the lineitem hash table unless the IN-subquery side finishes first (EXPLAIN via new `heap_plan` in
+  `e2e/ci/heap-probe.sh`, commits 6418a96, 2fbaaae). Default stays cadd1aca9c23 until the guard is deterministic. No plugin
+  code changed; Invariants untouched. ~95 Actions minutes.
