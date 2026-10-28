@@ -33,6 +33,12 @@ on:
       profile:
         description: 'Throughput profile (e2e/ci/profile.sh: TPC-H times, query stats, JFR CPU samples, read benchmark): 0, only, or bench (read benchmark only)'
         default: '0'
+      result-compression:
+        description: 'Catalogs ask for compressed result streams: none (plugin default), zstd or lz4'
+        default: 'none'
+      slow-link:
+        description: 'Slow-link check of result compression (e2e/ci/slowlink.sh: off / lz4 / zstd, plain and netem-shaped link): 0 or only'
+        default: '0'
       profile-settings:
         description: 'Profile settings: default and/or comma-separated session settings, space-separated'
         default: 'default flight.split_count=16'
@@ -47,7 +53,7 @@ on:
       - '.github/workflows/e2e.yml'
 
 concurrency:
-  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}-${{ inputs.iceberg-core-site }}-${{ inputs.heap-probe }}-${{ inputs.profile }}
+  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}-${{ inputs.iceberg-core-site }}-${{ inputs.heap-probe }}-${{ inputs.profile }}-${{ inputs.result-compression }}-${{ inputs.slow-link }}
   cancel-in-progress: true
 
 # e2e-assets is a published pre-release, so a read token can list and download its assets.
@@ -73,6 +79,8 @@ jobs:
       HEAP_PROBE_XMX: ${{ inputs.heap-probe-xmx || '640M 1G 1536M' }}
       PROFILE: ${{ inputs.profile || '0' }}
       PROFILE_SETTINGS: ${{ inputs.profile-settings || 'default flight.split_count=16' }}
+      RESULT_COMPRESSION: ${{ inputs.result-compression || 'none' }}
+      SLOW_LINK: ${{ inputs.slow-link || '0' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -117,6 +125,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: e2e-${{ env.TRINO_VERSION }}-${{ env.SERVER_BUILD }}-${{ env.RESULT_MODE }}-${{ matrix.servers }}srv
+          name: e2e-${{ env.TRINO_VERSION }}-${{ env.SERVER_BUILD }}-${{ env.RESULT_MODE }}-${{ env.RESULT_COMPRESSION }}-${{ env.SLOW_LINK }}-${{ matrix.servers }}srv
           path: ${{ runner.temp }}/out/
           retention-days: 7

@@ -15,11 +15,14 @@ import java.util.concurrent.TimeoutException;
 /**
  * Lets a {@link FlightStream} read record batches whose IPC bodies the server compressed (ZSTD or LZ4 frame).
  *
- * <p>Arrow Java 18's FlightStream loads every batch with a {@code VectorLoader} that has no codec, so a
- * compressed body fails with "compression type not supported". It has no way to pass one in either, so
- * {@link #install} replaces the stream's loader with one that has the codecs of {@code arrow-compression},
- * once the schema arrived and before the caller reads the first batch. Plain bodies are loaded as before
- * by that loader, so a server that ignores the request is read unchanged.
+ * <p>Arrow Java 18's FlightStream loads every batch with {@code new VectorLoader(root)}, whose codecs come from
+ * {@code CompressionCodec.Factory.INSTANCE}: a {@code ServiceLoader} lookup on the thread context class loader, done
+ * once when that class is first used. In a Trino plugin that thread may belong to the server's class loader, which does
+ * not see the plugin's {@code arrow-compression}; then every compressed body fails with "compression type not
+ * supported", for the JVM's lifetime. FlightStream takes no factory, so {@link #install} replaces the stream's loader
+ * with one that has the codecs of {@code arrow-compression} explicitly, once the schema arrived and before the caller
+ * reads the first batch. Plain bodies are loaded as before by that loader, so a server that ignores the request is read
+ * unchanged.
  */
 final class StreamDecompression
 {

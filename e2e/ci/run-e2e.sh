@@ -44,6 +44,8 @@ mkdir -p "$OUT" "$WORK" "$WORK/wh"
 . "$REPO/e2e/ci/heap-probe.sh"
 # shellcheck source=e2e/ci/profile.sh
 . "$REPO/e2e/ci/profile.sh"
+# shellcheck source=e2e/ci/slowlink.sh
+. "$REPO/e2e/ci/slowlink.sh"
 
 S3_KEY="ci$(openssl rand -hex 8)"; S3_SECRET="$(openssl rand -hex 24)"; TOKEN="$(openssl rand -hex 24)"
 
@@ -149,6 +151,21 @@ arrow-flight.hosts=flight1,flight2:32010,flight3
 arrow-flight.port=32010
 arrow-flight.bearer-token=$TOKEN
 CAT
+# RESULT_COMPRESSION=zstd|lz4: both catalogs ask for compressed result streams (arrow-flight.result-compression), so the
+# whole suite runs on that setting; empty or none = the plugin default (nothing asked).
+if [ -n "${RESULT_COMPRESSION:-}" ] && [ "$RESULT_COMPRESSION" != none ]; then
+  log "catalogs ask for result compression $RESULT_COMPRESSION"
+  for c in flight flighth; do echo "arrow-flight.result-compression=$RESULT_COMPRESSION" >> "$WORK/etc/catalog/$c.properties"; done
+fi
+# SLOW_LINK=only (slowlink.sh): the same servers through catalogs that ask for LZ4 / ZSTD.
+EXTRA_CATALOG_MOUNTS=()
+if [ "${SLOW_LINK:-0}" = only ]; then
+  for codec in lz4 zstd; do
+    sed '/^arrow-flight.result-compression=/d' "$WORK/etc/catalog/flight.properties" > "$WORK/etc/catalog/flight_$codec.properties"
+    echo "arrow-flight.result-compression=$codec" >> "$WORK/etc/catalog/flight_$codec.properties"
+    EXTRA_CATALOG_MOUNTS+=(-v "$WORK/etc/catalog/flight_$codec.properties:/etc/trino/catalog/flight_$codec.properties:ro")
+  done
+fi
 # start_trino <xmx> [probe]: (re)starts the Trino container; 'probe' (heap-probe.sh) drops ExitOnOutOfMemoryError so a
 # heap error fails the query instead of ending the JVM.
 start_trino() {
@@ -162,6 +179,7 @@ start_trino() {
     -v "$WORK/plugin":/usr/lib/trino/plugin/arrow-flight:ro \
     -v "$WORK/etc/catalog/flight.properties":/etc/trino/catalog/flight.properties:ro \
     -v "$WORK/etc/catalog/flighth.properties":/etc/trino/catalog/flighth.properties:ro \
+    "${EXTRA_CATALOG_MOUNTS[@]}" \
     -v "$WORK/etc/jvm.config":/etc/trino/jvm.config:ro \
     -v "$REPO/e2e/ci/queries":/queries:ro -v "$REPO/e2e/ci/profile-queries":/profile-queries:ro \
     "trinodb/trino:$TRINO_VERSION" >/dev/null
@@ -200,6 +218,12 @@ fi
 # PROFILE=only: just the throughput profile (profile.sh), then stop; PROFILE=bench: only its read benchmark.
 if [ "${PROFILE:-0}" = only ] || [ "${PROFILE:-0}" = bench ]; then
   if [ "$PROFILE" = bench ]; then read_bench; else profile_run; fi
+  save_logs
+  exit $status
+fi
+# SLOW_LINK=only: just the slow-link check of result compression (slowlink.sh), then stop.
+if [ "${SLOW_LINK:-0}" = only ]; then
+  slow_link_run
   save_logs
   exit $status
 fi

@@ -313,11 +313,19 @@ class FlightSqlSessionCompressionTest
     }
 
     @Test
-    void compressedBodiesNeedTheDecodingLoader()
+    void decodingDoesNotDependOnTheThreadContextClassLoader()
+            throws Exception
     {
-        // what the opt-in is for: without it, Arrow Java's FlightStream cannot load a compressed batch
-        coordinator.forced = CompressionUtil.CodecType.ZSTD;
-        assertThrows(RuntimeException.class, () -> read(ResultCompression.NONE, List.of(coordinator.uri())));
+        // Arrow's default codecs are found on the thread context class loader; a Trino thread may not see this plugin's
+        ClassLoader previous = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread().setContextClassLoader(ClassLoader.getPlatformClassLoader());
+        try {
+            assertEquals(expectedRows(), read(ResultCompression.ZSTD, List.of(coordinator.uri())));
+        }
+        finally {
+            Thread.currentThread().setContextClassLoader(previous);
+        }
+        assertEquals(BATCHES, coordinator.compressedBatches.get());
     }
 
     @Test
