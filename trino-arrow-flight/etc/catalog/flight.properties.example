@@ -11,6 +11,9 @@ arrow-flight.user=test-user
 arrow-flight.bearer-token=test-token
 # arrow-flight.password=secret
 
+# A refused login or a TLS mismatch fails the query at once with a message naming the setting to fix;
+# see trino-arrow-flight/README.md, "Troubleshooting connection errors".
+
 # Optional
 # arrow-flight.default-schema=test_schema
 # arrow-flight.tls.enabled=true

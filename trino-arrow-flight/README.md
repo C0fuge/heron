@@ -193,6 +193,29 @@ timestamp without zone is read in the session time zone, as in Trino's Iceberg c
 tag names (`FOR VERSION AS OF 'main'`) and version ranges are refused. On a table that is not an
 Iceberg table the server answers with an error.
 
+## Troubleshooting connection errors
+
+A query that cannot connect fails with one of the messages below (Trino error `GENERIC_INTERNAL_ERROR`; `h:p` is
+the coordinator the catalog tried). The first five are **final**: they are not retried (another attempt gets the
+same answer, and a refused login retried would only cost more failed logins on the server's directory), so the
+query fails within about a second. With several coordinators in `arrow-flight.hosts` a TLS answer is final only
+when every coordinator gives it; one that cannot be reached is still retried, it may come back.
+
+| Message contains | Cause | Fix |
+|---|---|---|
+| `Arrow Flight server h:p rejected the catalog's user name and password (user '…'): <server reason>` | the server's login (built-in, LDAP / Active Directory) refused `arrow-flight.user` / `arrow-flight.password` | correct the credentials; the server's reason follows the colon (e.g. `Invalid LDAP user name or password`) |
+| `Arrow Flight server h:p rejected the catalog's bearer token: <server reason>` | `arrow-flight.bearer-token` refused: wrong, revoked or expired token, or a JWT signed by a key the server does not trust (e.g. `Invalid or expired JWT`) | issue a new token. A server *session* token that expires during use is renewed by one fresh login; only a refused login is final |
+| `TLS handshake with Arrow Flight server h:p failed (server certificate checked against <the JVM's default truststore \| the truststore path>): <reason>. Set arrow-flight.tls.truststore-path …` | the catalog does not trust the server's certificate: unknown CA (`unable to find valid certification path to requested target`), expired, or issued for another host name | set `arrow-flight.tls.truststore-path` to the issuing CA (PEM or `.jks`); the certificate's names (SAN) must include the host the catalog connects to (`arrow-flight.host(s)`) |
+| `Arrow Flight server h:p does not answer with TLS (not an SSL/TLS record): set arrow-flight.tls.enabled=false …` | `arrow-flight.tls.enabled=true`, but the port is a plaintext listener (or not a Flight server) | `arrow-flight.tls.enabled=false`, or the port of the server's TLS listener |
+| `Arrow Flight server h:p answers with TLS, but the catalog connects without it: set arrow-flight.tls.enabled=true …` | plaintext catalog against a TLS listener (detected by sending that port one TLS ClientHello after the plaintext handshake failed; nothing else is sent) | `arrow-flight.tls.enabled=true` + `arrow-flight.tls.truststore-path`, or the port of a plaintext listener |
+| `Cannot read TLS truststore <path>: …` | the truststore file is missing or unreadable, or the `.jks` password is wrong (it may follow `Flight call '…' failed after N attempts:`) | fix the path / `arrow-flight.tls.truststore-password` |
+| `Arrow Flight server unavailable while resolving <schema.table>: Flight call '…' failed after N attempts: …` (or just `Flight call '…' failed after N attempts`) | no coordinator could be reached: refused, unknown host, no answer within the connect timeout, or the connection dropped. Retried `arrow-flight.max-retries` times with exponential backoff (`retry-backoff-millis`: 1 + 2 + 4 s by default) | check that the server runs and the host/port; list more coordinators in `arrow-flight.hosts` so the catalog can move to the next one |
+| `Error reading from Arrow Flight: … (cause: …)` | a data stream failed. Before its first batch the plugin reads the endpoint's next (backup) location instead and the query does not fail; this message means every location failed, or the stream broke after data was delivered (never retried: no duplicate or partial rows) | the cause names the reason; re-run the query once the node is back |
+
+Server errors (an unknown table or column, a SQL error from DuckDB, a permission denied by the server's
+authorization) are passed through with the server's message. Requests the server rejects as invalid, not found,
+unimplemented or unauthorized are not repeated; other server errors are retried like lost connections.
+
 ## Limitations / TODO
 
 * Read-only. No `INSERT` / `CREATE TABLE` (the server's writer path is experimental).
