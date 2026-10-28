@@ -1212,3 +1212,6 @@ Kept up to date after every work session so work can be resumed from this reposi
   default off 40671042992 green (1 + 3 servers), slow-link check 40670149146 green (ZSTD 7.22 s vs off 9.41 s on netem 1 Gbit
   + 10 ms, 245 vs 1052 MB; LZ4 slower than off). New e2e inputs `result-compression`, `slow-link` (`e2e/ci/slowlink.sh`).
   New Open question: stand off vs ZSTD. ~85 Actions minutes. Invariants untouched (off by default, nothing sent).
+- 2026-10-28 (cloud session 85): nothing actionable — no new `e2e-assets` upload since cadd1aca9c23 (01:31 UTC), no new
+  maintainer/stand answers since session 84 (result compression done; stand off-vs-ZSTD and faster-LZ4 questions open); every
+  Next steps item waits on the stand or an Open question. 0 Actions minutes.
