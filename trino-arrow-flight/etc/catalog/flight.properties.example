@@ -26,6 +26,9 @@ arrow-flight.bearer-token=test-token
 # next location (backup node) is tried. Keepalive pings only to servers that list backups.
 # arrow-flight.connect-timeout-millis=5000
 # arrow-flight.keepalive-millis=10000
+# Ask the server to compress result streams (servers since cadd1aca9c23; older ones send plain
+# streams): NONE, ZSTD or LZ4. Costs server and Trino CPU; pays off only on a slow network.
+# arrow-flight.result-compression=NONE
 # Send ORDER BY ... LIMIT n to the server (each endpoint returns its own top n; Trino keeps its TopN)
 # arrow-flight.topn-pushdown.enabled=false
 # Add join dynamic filters (build-side keys) to the server SQL; each query text becomes unique

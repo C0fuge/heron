@@ -35,6 +35,7 @@ public final class FlightConfig
     private final long requestTimeoutMillis;
     private final long connectTimeoutMillis;
     private final long keepAliveMillis;
+    private final ResultCompression resultCompression;
 
     private FlightConfig(Builder b)
     {
@@ -62,6 +63,7 @@ public final class FlightConfig
         }
         this.connectTimeoutMillis = b.connectTimeoutMillis;
         this.keepAliveMillis = b.keepAliveMillis;
+        this.resultCompression = requireNonNull(b.resultCompression, "resultCompression is null");
     }
 
     public static Builder builder(String host)
@@ -154,6 +156,8 @@ public final class FlightConfig
      * a node that does not answer a ping within the connect timeout is taken as gone. 0 = no pings.
      */
     public long getKeepAliveMillis() { return keepAliveMillis; }
+    /** Codec the data streams are asked to be compressed with; NONE = not asked (the server's default). */
+    public ResultCompression getResultCompression() { return resultCompression; }
 
     public static final class Builder
     {
@@ -175,6 +179,7 @@ public final class FlightConfig
         private long requestTimeoutMillis;
         private long connectTimeoutMillis = 5_000;
         private long keepAliveMillis = 10_000;
+        private ResultCompression resultCompression = ResultCompression.NONE;
 
         private Builder(String host)
         {
@@ -209,6 +214,7 @@ public final class FlightConfig
         public Builder requestTimeoutMillis(long v) { this.requestTimeoutMillis = v; return this; }
         public Builder connectTimeoutMillis(long v) { this.connectTimeoutMillis = v; return this; }
         public Builder keepAliveMillis(long v) { this.keepAliveMillis = v; return this; }
+        public Builder resultCompression(ResultCompression v) { this.resultCompression = v; return this; }
 
         public FlightConfig build()
         {

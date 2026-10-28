@@ -3,6 +3,7 @@ package pro.surpin.trino.arrowflight;
 import org.junit.jupiter.api.Test;
 import pro.surpin.arrowflight.common.FlightConfig;
 import pro.surpin.arrowflight.common.FlightConfig.Coordinator;
+import pro.surpin.arrowflight.common.ResultCompression;
 
 import java.util.List;
 
@@ -47,5 +48,16 @@ class ArrowFlightConfigTest
         assertFalse(new ArrowFlightConfig().isCoordinatorConfigured());
         assertFalse(new ArrowFlightConfig().setHosts(" , ").isCoordinatorConfigured());
         assertFalse(new ArrowFlightConfig().setHost("a").setHosts("b").isCoordinatorConfigured());
+    }
+
+    @Test
+    void resultCompressionIsOffUnlessSet()
+    {
+        ArrowFlightConfig plain = new ArrowFlightConfig().setHost("flight1").setBearerToken("t");
+        assertEquals(ResultCompression.NONE, plain.getResultCompression());
+        assertEquals(ResultCompression.NONE, plain.toFlightConfig().getResultCompression());
+        ArrowFlightConfig zstd = new ArrowFlightConfig().setHost("flight1").setBearerToken("t")
+                .setResultCompression(ResultCompression.ZSTD);
+        assertEquals(ResultCompression.ZSTD, zstd.toFlightConfig().getResultCompression());
     }
 }

@@ -37,6 +37,11 @@
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-memory-core</artifactId>
         </dependency>
+        <!-- codecs for result streams the server compresses (opt-in, FlightConfig.resultCompression) -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-compression</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>

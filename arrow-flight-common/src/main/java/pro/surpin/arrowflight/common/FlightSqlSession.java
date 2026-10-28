@@ -44,6 +44,7 @@ import java.nio.file.Path;
 import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Deque;
 import java.util.Enumeration;
@@ -134,11 +135,19 @@ public class FlightSqlSession
     private volatile int coordinatorIndex;
     private volatile FlightSqlClient sqlClient;
     private volatile CredentialCallOption authOption;
+    // asks for compressed data streams; only the getStream calls of openStream send it, they decompress
+    private final Optional<HeaderCallOption> compressionOption;
 
     public FlightSqlSession(FlightConfig config)
     {
         this.config = requireNonNull(config, "config is null");
         this.allocator = new RootAllocator(Long.MAX_VALUE);
+        this.compressionOption = config.getResultCompression().headerValue().map(codec -> {
+            StreamDecompression.checkAvailable();
+            FlightCallHeaders headers = new FlightCallHeaders();
+            headers.insert(StreamDecompression.HEADER, codec);
+            return new HeaderCallOption(headers);
+        });
     }
 
     private synchronized void ensureConnected()
@@ -363,17 +372,19 @@ public class FlightSqlSession
         StreamClient client = leased.client();
         FlightStream stream;
         try {
-            stream = client.client().getStream(ticket, callOptions());
+            stream = client.client().getStream(ticket, dataStreamOptions());
         }
         catch (RuntimeException e) {
             closeQuietly(client.client());
             throw e;
         }
+        FlightStream opened = stream;
         return new FlightDataStream.Opened(stream,
                 reusable -> releaseStreamClient(poolKey, client, reusable && leasedGeneration == generation(uri)),
                 // A pooled connection may be stale; once another stream's failure retired the location's
                 // connections, this one fails over at once instead.
-                () -> leased.reused() && leasedGeneration == generation(uri));
+                () -> leased.reused() && leasedGeneration == generation(uri),
+                compressionOption.isPresent() ? () -> StreamDecompression.install(opened) : () -> {});
     }
 
     /**
@@ -643,6 +654,17 @@ public class FlightSqlSession
             options.add(CallOptions.timeout(config.getRequestTimeoutMillis(), TimeUnit.MILLISECONDS));
         }
         return options.toArray(new CallOption[0]);
+    }
+
+    private CallOption[] dataStreamOptions()
+    {
+        CallOption[] options = callOptions();
+        if (compressionOption.isEmpty()) {
+            return options;
+        }
+        CallOption[] withCompression = Arrays.copyOf(options, options.length + 1);
+        withCompression[options.length] = compressionOption.get();
+        return withCompression;
     }
 
     private static Location location(String uri)

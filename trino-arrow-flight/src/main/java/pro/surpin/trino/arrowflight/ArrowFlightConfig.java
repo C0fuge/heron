@@ -6,6 +6,7 @@ import io.airlift.configuration.ConfigSecuritySensitive;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Min;
 import pro.surpin.arrowflight.common.FlightConfig;
+import pro.surpin.arrowflight.common.ResultCompression;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +43,7 @@ public class ArrowFlightConfig
     // A data connection to a node that is gone fails after this long; the next location is tried.
     private long connectTimeoutMillis = 5_000;
     private long keepAliveMillis = 10_000;
+    private ResultCompression resultCompression = ResultCompression.NONE;
 
     // Empty by default: the reference server parses SQL with regexes and expects bare
     // schema.table / column names. Set to "\"" only if your server accepts quoted identifiers.
@@ -316,6 +318,20 @@ public class ArrowFlightConfig
         return this;
     }
 
+    public ResultCompression getResultCompression()
+    {
+        return resultCompression;
+    }
+
+    @Config("arrow-flight.result-compression")
+    @ConfigDescription("Ask the server to compress result streams: NONE (default, nothing is asked), ZSTD or LZ4. "
+            + "Pays off only where the network, not the server or Trino, limits the scan")
+    public ArrowFlightConfig setResultCompression(ResultCompression resultCompression)
+    {
+        this.resultCompression = resultCompression;
+        return this;
+    }
+
     public String getIdentifierQuote()
     {
         return identifierQuote;
@@ -580,6 +596,7 @@ public class ArrowFlightConfig
                 .requestTimeoutMillis(requestTimeoutMillis)
                 .connectTimeoutMillis(connectTimeoutMillis)
                 .keepAliveMillis(keepAliveMillis)
+                .resultCompression(resultCompression)
                 .build();
     }
 }

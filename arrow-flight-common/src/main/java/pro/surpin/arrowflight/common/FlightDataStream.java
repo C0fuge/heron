@@ -50,14 +50,24 @@ public final class FlightDataStream
      * @param release called once when the stream is closed; true if the connection is fit for another stream
      * @param staleConnection asked when the stream failed unreachable before any data: true if the failure may be
      *         the reused connection's own, so a new connection to the same location is worth one try
+     * @param beforeFirstRead run once before the stream's first {@code next()}; what it throws is handled as a
+     *         failed read (so it fails over like one)
      */
-    record Opened(FlightStream stream, Consumer<Boolean> release, BooleanSupplier staleConnection) {}
+    record Opened(FlightStream stream, Consumer<Boolean> release, BooleanSupplier staleConnection, Runnable beforeFirstRead)
+    {
+        Opened(FlightStream stream, Consumer<Boolean> release, BooleanSupplier staleConnection)
+        {
+            this(stream, release, staleConnection, () -> {});
+        }
+    }
 
     private final List<String> locations;
     private final Opener opener;
     private final BiConsumer<String, RuntimeException> onFailure;
     private int index;
     private Opened current;
+    // beforeFirstRead of the current stream ran
+    private boolean prepared;
     // A next() call returned normally: data (or the end) reached the caller, retrying could duplicate rows.
     private boolean delivered;
     // The current location was already retried on a new connection.
@@ -85,7 +95,12 @@ public final class FlightDataStream
     {
         while (true) {
             try {
-                boolean more = open().stream().next();
+                Opened opened = open();
+                if (!prepared) {
+                    prepared = true;
+                    opened.beforeFirstRead().run();
+                }
+                boolean more = opened.stream().next();
                 delivered = true;
                 return more;
             }
@@ -165,6 +180,7 @@ public final class FlightDataStream
     {
         Opened opened = current;
         current = null;
+        prepared = false;
         if (opened == null) {
             return;
         }
