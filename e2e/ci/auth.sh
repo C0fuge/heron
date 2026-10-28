@@ -2,8 +2,8 @@
 # flight-auth-1.0.0-<build>.tar.zst: auth/ldap, auth/jwt). Sourced by run-e2e.sh; uses its variables and functions (WORK,
 # OUT, NET, HOSTS, QUERIES, COMPARE, SERVER_BUILD, ASSETS, start_server, start_trino, run_query, log, status).
 #
-# auth_run (the whole run with AUTH=only): the servers are restarted with TLS (throwaway CA, server certificate for
-# flight1..3) and
+# auth_run (AUTH=only: the whole run; AUTH=1, or auto on 3 servers: at the end of the suite): the servers are restarted
+# with TLS (throwaway CA, server certificate for flight1..3) and
 #   ldap  FLIGHT_AUTH_PROVIDER=ldap against an UnboundID in-memory directory (container 'ldap', the SDK jar from the
 #         asset), user DN template, session tokens of FLIGHT_LDAP_SESSION_MINUTES=1. Catalog flight_ldap = user/password
 #         (the plugin's BasicAuth handshake, then the server's session bearer token on every call and on the other
@@ -11,8 +11,10 @@
 #         (AUTH_EXPIRY_WAIT s) one more query must be exact (re-login). Must fail: wrong password, TLS without the CA.
 #   jwt   FLIGHT_AUTH_PROVIDER=jwt with a JWK set file (e2e/ci/jwt_make.py, RS256). Catalog flight_jwt = bearer token,
 #         TLS truststore as PEM. AUTH_QUERIES exact; must fail: expired token, token signed by another key. If the
-#         servers do not start with the jwt module the step is reported as SKIP (INFO; seen on a9e43ca5e296: startup
-#         NullPointerException, see docs/STATUS.md) and does not fail the job.
+#         servers do not start with the jwt module the step is reported as SKIP (INFO, server side) and does not fail
+#         the job.
+# The module jars go first on the server classpath: the server jar bundles nimbus-jose-jwt 10.0.1, and with it the jwt
+# module (built against 10.10) stops at startup with a NullPointerException in DefaultJWTClaimsVerifier (a9e43ca5e296).
 # Every "must fail" query must fail (an answer is FAIL) with an authentication / TLS error. Result: auth-summary.tsv.
 # Passwords, keys and tokens are throwaway values generated here.
 

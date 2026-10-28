@@ -226,8 +226,13 @@ if [ "${PROFILE:-0}" = only ] || [ "${PROFILE:-0}" = bench ]; then
   save_logs
   exit $status
 fi
-# AUTH=only: just the TLS + LDAP / JWT login check (auth.sh), then stop.
-if [ "${AUTH:-0}" = only ]; then
+# AUTH=only: just the TLS + LDAP / JWT login check (auth.sh), then stop; AUTH=1: the check at the end of the run;
+# AUTH=auto (default): 1 on 3 servers when the build has its flight-auth asset, else 0.
+AUTH="${AUTH:-auto}"
+if [ "$AUTH" = auto ]; then
+  AUTH=0; [ "$SERVERS" = 3 ] && [ -f "$ASSETS/flight-auth-1.0.0-$SERVER_BUILD.tar.zst" ] && AUTH=1
+fi
+if [ "$AUTH" = only ]; then
   auth_run
   save_logs
   exit $status
@@ -821,6 +826,11 @@ if [ "$SERVERS" -ge 3 ]; then
   done
   grep -q 'Using Flight coordinator flight2' "$OUT/coordinator-down/lines.txt" \
     || { echo "coordinator-down: no switch to flight2 in the Trino log"; status=1; }
+  save_logs
+fi
+if [ "$AUTH" = 1 ]; then
+  log "auth: TLS + LDAP / JWT login (auth.sh)"
+  auth_run
   save_logs
 fi
 exit $status

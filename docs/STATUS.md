@@ -36,7 +36,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `a9e43ca5e296` since session 87, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `a9e43ca5e296` since session 87, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). Input `auth` (session 88, `e2e/ci/auth.sh`):
+  TLS + LDAP / JWT login check, default `auto` = at the end of 3-server runs. `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
@@ -100,6 +101,29 @@ Kept up to date after every work session so work can be resumed from this reposi
 > `hash` setting (old in-memory merge, off by default) gave LIMIT (HashBuilderOperator) in one run and ERROR in the other
 > (ScanFilterAndProjectOperator 151 MB + HashBuilderOperator 142 MB at the 307 MB limit). That is the old hash merge's known
 > cost and shows the classifier still counts scan-led hits against the plugin.
+>
+> **Done (session 88): e2e auth check for TLS + the server's LDAP and JWT login modules** (`flight-auth-1.0.0-a9e43ca5e296.tar.zst`
+> is in `e2e-assets` after all: `auth/ldap` = module + unboundid-ldapsdk 7.0.3, `auth/jwt` = module + nimbus-jose-jwt 10.10; the
+> job checks their `SHA256SUMS`). New `e2e/ci/auth.sh` + `e2e/ci/jwt_make.py` (stdlib + openssl, RS256 JWK set and tokens):
+> servers restarted with `FLIGHT_TLS_CERT/KEY` (throwaway CA, SAN flight1..3) and (1) `FLIGHT_AUTH_PROVIDER=ldap` against an
+> UnboundID in-memory directory (container `ldap`, user DN template, `FLIGHT_LDAP_SESSION_MINUTES=1`): catalog with
+> user/password (plugin BasicAuth handshake, then the server's session bearer on every call and on other members' streams),
+> JKS truststore; (2) `FLIGHT_AUTH_PROVIDER=jwt` with `FLIGHT_JWT_JWKS_FILE`/`ISSUER`/`AUDIENCE`: catalog with bearer token,
+> PEM truststore. Checks (`auth-summary.tsv`): q01/q03/q18 exact on both; after the LDAP session token expired (70 s) q06 exact
+> (re-login works); refused with the right error: wrong password, TLS without the CA, expired JWT, JWT signed by another key.
+> Workflow input `auth` = `auto` (default: at the end of every 3-server run when the build has its flight-auth asset; ~3.5 min),
+> `0`, `1`, `only`. Run 40712836291 (`auth=only`, 1 + 3 servers): all 7 checks OK on both. No plugin code changed.
+> Side findings: the module jars must come **before** the server jar on the classpath (see Open questions), and a rejected
+> password is retried 4 times (next item).
+>
+> **Next (own item, session 88 finding): don't retry rejected credentials.** A wrong password / rejected token surfaces only
+> after 4 handshake attempts (~15 s, "Arrow Flight server unavailable while resolving tpch.nation: Flight call
+> 'getExecuteSchema' failed after 4 attempts: Invalid LDAP user name or password"), because `isConnectionLost` treats every
+> UNAUTHENTICATED as a lost connection. Against Active Directory with an account-lockout policy one Trino query costs 4 failed
+> binds per catalog. Proposal: a handshake that fails with UNAUTHENTICATED is final (clear error naming the credentials, no
+> retry); an UNAUTHENTICATED on a normal call after a successful handshake (expired session token, server restart) keeps the
+> one re-login it gets today. Unit test in `FlightSqlSession*Test` + the e2e `ldap-wrong-password` check asserting the time /
+> the server's bind count (directory access log). Invariant-relevant (auth keeps working): the expiry check must stay exact.
 
 
 > **Maintainer, 2026-10-28: yes to result compression as a connector opt-in.** Add a catalog property (off by default) that
@@ -780,6 +804,12 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **Server (deployment): login-module jars must precede the server jar on the classpath (session 88).** The a9e43ca5e296
+  server jar bundles nimbus-jose-jwt **10.0.1**; with `-cp server.jar:libs/*:auth/jwt/*` the jwt module (built against 10.10)
+  runs on 10.0.1 and the server stops at startup: `NullPointerException ... ImmutableCollections$Set12.contains` from
+  `DefaultJWTClaimsVerifier.<init>` (`JwtVerifier.java:119`) for any `FLIGHT_JWT_AUDIENCE` (which is mandatory). With
+  `-cp auth/jwt/*:server.jar:libs/*` it starts and works (CI does that). Is the order documented for the stand, or should the
+  server shade/relocate nimbus (or the module avoid `Set.of` audiences)? The ldap module is not affected as far as seen.
 - **Heap check criterion (session 87).** The CI q18 heap check (Trino 1G) no longer fails when Trino's own per-node memory
   limit is hit by a non-scan operator (result LIMIT, e.g. q18's HashBuilderOperator when lineitem becomes the join build side).
   Heap errors, wrong answers and scan-led limit hits still fail. If the stand cares about q18 finishing at a small Trino heap

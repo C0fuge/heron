@@ -40,8 +40,8 @@ on:
         description: 'Slow-link check of result compression (e2e/ci/slowlink.sh: off / lz4 / zstd, plain and netem-shaped link): 0 or only'
         default: '0'
       auth:
-        description: 'TLS + LDAP / JWT login check (e2e/ci/auth.sh, server login modules from flight-auth-<build>): 0 or only'
-        default: '0'
+        description: 'TLS + LDAP / JWT login check (e2e/ci/auth.sh, server login modules from flight-auth-<build>): auto (end of 3-server runs), 0, 1 or only'
+        default: 'auto'
       profile-settings:
         description: 'Profile settings: default and/or comma-separated session settings, space-separated'
         default: 'default flight.split_count=16'
@@ -84,7 +84,7 @@ jobs:
       PROFILE_SETTINGS: ${{ inputs.profile-settings || 'default flight.split_count=16' }}
       RESULT_COMPRESSION: ${{ inputs.result-compression || 'none' }}
       SLOW_LINK: ${{ inputs.slow-link || '0' }}
-      AUTH: ${{ inputs.auth || '0' }}
+      AUTH: ${{ inputs.auth || 'auto' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
