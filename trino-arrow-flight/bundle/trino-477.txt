@@ -8,6 +8,7 @@ com.fasterxml.jackson.core_jackson-databind-2.18.12.jar
 com.fasterxml.jackson.datatype_jackson-datatype-jdk8-2.18.12.jar
 com.fasterxml.jackson.datatype_jackson-datatype-joda-2.18.12.jar
 com.fasterxml_classmate-1.5.1.jar
+com.github.luben_zstd-jni-1.5.6-6.jar
 com.google.android_annotations-4.1.1.4.jar
 com.google.api.grpc_proto-google-common-protos-2.63.1.jar
 com.google.code.findbugs_jsr305-3.0.2.jar
@@ -21,6 +22,7 @@ com.google.j2objc_j2objc-annotations-3.1.jar
 com.google.protobuf_protobuf-java-3.25.9.jar
 com.google.protobuf_protobuf-java-util-3.25.9.jar
 commons-codec_commons-codec-1.17.1.jar
+commons-io_commons-io-2.16.1.jar
 io.airlift_bootstrap-252.jar
 io.airlift_concurrent-252.jar
 io.airlift_configuration-252.jar
@@ -63,6 +65,7 @@ netty-tcnative-boringssl-static-2.0.84.Final-linux-x86_64.jar
 netty-tcnative-boringssl-static-2.0.84.Final-osx-aarch_64.jar
 netty-tcnative-boringssl-static-2.0.84.Final-osx-x86_64.jar
 netty-tcnative-boringssl-static-2.0.84.Final-windows-x86_64.jar
+org.apache.arrow_arrow-compression-18.1.0.jar
 org.apache.arrow_arrow-format-18.1.0.jar
 org.apache.arrow_arrow-memory-core-18.1.0.jar
 org.apache.arrow_arrow-memory-netty-18.1.0.jar
@@ -70,6 +73,8 @@ org.apache.arrow_arrow-memory-netty-buffer-patch-18.1.0.jar
 org.apache.arrow_arrow-vector-18.1.0.jar
 org.apache.arrow_flight-core-18.1.0.jar
 org.apache.arrow_flight-sql-18.1.0.jar
+org.apache.commons_commons-compress-1.27.1.jar
+org.apache.commons_commons-lang3-3.16.0.jar
 org.apache.logging.log4j_log4j-api-2.23.1.jar
 org.apache.logging.log4j_log4j-to-slf4j-2.23.1.jar
 org.codehaus.mojo_animal-sniffer-annotations-1.26.jar
