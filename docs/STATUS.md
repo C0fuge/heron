@@ -57,6 +57,15 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **New server build `server-1.0.0-cadd1aca9c23`** (2026-10-28, local coordinator; jar, plugins tar, libs tar + merged
+> `SHA256SUMS` in this repo's assets release). Since 7562a5bdb7b9 (so it also covers what 4e77c6bda59a brought): opt-in result
+> stream compression ZSTD/LZ4 (stage 3 item 20; the client asks via call header or Flight SQL session option `arrow-compression`;
+> buffers compressed in parallel, `flightCompressionThreads`; no default or wire change for clients that do not ask), opt-in S3
+> read cache `arrowflight.s3.cacheMegabytes`, size-aware `duckDbThreads` default (cores/4, between 2 and 8; was 4), Iceberg time
+> travel planned in partial mode, position deletes grouped. Needs the DuckDB 1.5.6 extension set (server repo `ci-assets`). Run
+> the suite once on it (note timings) and make it the CI default if green.
+
+
 > **Session 71 (TopN pushes VARCHAR sort keys).** Every item below is done or waits on the stand / a maintainer answer, so this
 > session took the stand's 2026-10-23 collation finding (server compares strings by UTF-8 bytes = Trino's order): with TopN
 > pushdown on (still **off by default**), `VARCHAR` sort keys are now pushed too (`SqlQueryBuilder.isTopNSortable`; CHAR, DOUBLE,
