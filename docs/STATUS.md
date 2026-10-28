@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `cadd1aca9c23` since session 82, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `a9e43ca5e296` since session 87, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
@@ -87,6 +87,19 @@ Kept up to date after every work session so work can be resumed from this reposi
 > on AMD EPYC 9V74 (cadd1aca9c23 3 servers on EPYC 7763: 34.2 / 27.1 / 26.6); 1 server **34.40 / 27.79 / 31.79 s** on EPYC
 > 7763 (cadd1aca9c23 1 server on 9V74: 30.6 / 25.5 / 27.8) - CPU models swapped between the two runs, so no conclusion beyond
 > "same range". Raw lineitem read: ADBC 1 stream 1.51 s (3 srv) / 1.96 s (1 srv), Trino split 1 1.90 / 1.96 s.
+>
+> **Done (session 87): heap check made deterministic, a9e43ca5e296 is now the e2e default** (`e2e.yml` two places,
+> `run-e2e.sh`; cadd1aca9c23 and older stay selectable). `heap_error_class` in `e2e/ci/heap-probe.sh` gives a new result
+> **LIMIT** when Trino's own per-node memory limit is hit and the largest of the error's "Top Consumers" is not the scan operator
+> (`ScanFilterAndProjectOperator` / `TableScanOperator`, where the plugin's page source and its in-memory merge are accounted). LIMIT is
+> reported and never fails the job. Still failing: wrong answers, `OutOfMemoryError` / "Java heap space" (now also looked up in
+> Trino's log before classifying), memory-limit hits led by the scan, and any other error. The session-86 failure
+> (HashBuilderOperator 228 MB) would now be LIMIT. Runs on a9e43ca5e296: push 40703194404 (partial, 1 + 3 servers), complete 3
+> servers 40703317018, partial 1 server 40703321237, all green. TPC-H 22/22 everywhere. Heap check
+> `1 1G default q18 OK` 221 / 409 MB, `1/eps4 default OK` 364 / 397 MB, `3 1G default OK` 382 / 257 MB. The report-only eps4
+> `hash` setting (old in-memory merge, off by default) gave LIMIT (HashBuilderOperator) in one run and ERROR in the other
+> (ScanFilterAndProjectOperator 151 MB + HashBuilderOperator 142 MB at the 307 MB limit). That is the old hash merge's known
+> cost and shows the classifier still counts scan-led hits against the plugin.
 
 
 > **Maintainer, 2026-10-28: yes to result compression as a connector opt-in.** Add a catalog property (off by default) that
@@ -767,6 +780,10 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **Heap check criterion (session 87).** The CI q18 heap check (Trino 1G) no longer fails when Trino's own per-node memory
+  limit is hit by a non-scan operator (result LIMIT, e.g. q18's HashBuilderOperator when lineitem becomes the join build side).
+  Heap errors, wrong answers and scan-led limit hits still fail. If the stand cares about q18 finishing at a small Trino heap
+  whatever the join order, say so; the alternative is a fixed join order for that check (`join_reordering_strategy`).
 - **Server (not the plugin path): direct ADBC q04 fails on a 3-node cluster (seen session 68, also on 27f583adccd7).** The
   profile's direct baseline (`flight_time.py`, plain ADBC to flight1, no partial-mode header) gets for TPC-H q04 (`EXISTS`
   subquery on `lineitem`) `all 2 DoGet location(s) failed: DoGet("grpc+tcp://flight2|flight3:32010") ... Catalog Error: Table
@@ -1253,3 +1270,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   Cause: q18 builds the lineitem hash table unless the IN-subquery side finishes first (EXPLAIN via new `heap_plan` in
   `e2e/ci/heap-probe.sh`, commits 6418a96, 2fbaaae). Default stays cadd1aca9c23 until the guard is deterministic. No plugin
   code changed; Invariants untouched. ~95 Actions minutes.
+- 2026-10-28 (cloud session 87): first Next-steps item (server build a9e43ca5e296). The q18 eps4 heap guard now reports
+  Trino's own memory-limit hits as LIMIT, defined as the largest consumer not being the scan (`heap_error_class`). Heap errors,
+  wrong answers and scan-led limit hits still fail. Default e2e server build switched to a9e43ca5e296. Runs 40703194404
+  (push, 1 + 3 servers), 40703317018 (complete, 3), 40703321237 (partial, 1): all green. No plugin code changed; Invariants
+  untouched. ~75 Actions minutes.
