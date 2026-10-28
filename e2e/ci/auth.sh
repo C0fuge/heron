@@ -15,7 +15,8 @@
 #         the job.
 # The module jars go first on the server classpath: the server jar bundles nimbus-jose-jwt 10.0.1, and with it the jwt
 # module (built against 10.10) stops at startup with a NullPointerException in DefaultJWTClaimsVerifier (a9e43ca5e296).
-# Every "must fail" query must fail (an answer is FAIL) with an authentication / TLS error. Result: auth-summary.tsv.
+# Every "must fail" query must fail (an answer is FAIL) with an authentication / TLS error. The wrong password must be
+# refused without retries (ldap-wrong-password-attempts: directory access log). Result: auth-summary.tsv.
 # Passwords, keys and tokens are throwaway values generated here.
 
 AUTH_QUERIES="${AUTH_QUERIES:-q01 q03 q18}"
@@ -124,6 +125,27 @@ auth_refused() {
   fi
 }
 
+# failed binds in the directory's access log (LDAP resultCode 49 = invalid credentials)
+ldap_failed_binds() {
+  docker logs ldap 2>&1 | grep -c 'resultCode=49' || true
+}
+
+# auth_refused_once label catalog pattern: as auth_refused, and the rejected password costs one bind per
+# lookup (no retries, no extra table listing): at most 2 failed binds and a refusal within 10 s
+auth_refused_once() {
+  local before after start took
+  before=$(ldap_failed_binds); start=$(date +%s)
+  auth_refused "$@"
+  took=$(( $(date +%s) - start )); after=$(ldap_failed_binds)
+  if [ "$after" -eq 0 ]; then
+    auth_note "$1-attempts" FAIL "no failed bind in the directory's access log (took ${took} s)"
+  elif [ $((after - before)) -le 2 ] && [ "$took" -le 10 ] && ! grep -q 'failed after [0-9]* attempts' "$OUT/auth/$1.err"; then
+    auth_note "$1-attempts" OK "$((after - before)) failed bind(s), refused in ${took} s"
+  else
+    auth_note "$1-attempts" FAIL "$((after - before)) failed binds, refused in ${took} s: $(grep -m1 -o 'failed after [0-9]* attempts' "$OUT/auth/$1.err")"
+  fi
+}
+
 auth_run() {
   local secret good expired forged
   mkdir -p "$OUT/auth"
@@ -132,7 +154,7 @@ auth_run() {
   log "auth: ldap directory"
   docker run -d --name ldap --network "$NET" -v "$WORK/server":/app:ro -v "$AUTH_DIR":/auth:ro eclipse-temurin:21-jdk \
     java -cp '/app/auth/ldap/*' com.unboundid.ldap.listener.InMemoryDirectoryServerTool \
-    --baseDN dc=e2e --port 389 --ldifFile /auth/users.ldif >/dev/null
+    --baseDN dc=e2e --port 389 --ldifFile /auth/users.ldif --accessLogToStandardOut >/dev/null
   for i in $(seq 1 30); do docker logs ldap 2>&1 | grep -q 'Listening for client connections' && break; sleep 1; done
   docker logs ldap 2>&1 | tail -3
 
@@ -156,7 +178,7 @@ auth_run() {
        'FLIGHT_LDAP_USER_DN_TEMPLATE=uid={0},ou=people,dc=e2e' "FLIGHT_LDAP_SESSION_SECRET=$secret" FLIGHT_LDAP_SESSION_MINUTES=1; then
     grep -h 'Flight security' "$OUT"/auth/ldap-*.log | head -1 | cut -c1-300
     auth_exact ldap flight_ldap $AUTH_QUERIES
-    auth_refused ldap-wrong-password flight_ldap_badpw 'UNAUTHENTICATED|password'
+    auth_refused_once ldap-wrong-password flight_ldap_badpw 'UNAUTHENTICATED|password'
     auth_refused ldap-tls-without-ca flight_ldap_noca 'certificate|PKIX|SSL|TLS|handshake'
     log "auth: ldap session expiry (${AUTH_EXPIRY_WAIT} s)"
     sleep "$AUTH_EXPIRY_WAIT"

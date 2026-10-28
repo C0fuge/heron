@@ -172,6 +172,9 @@ public class FlightSqlSession
             }
             catch (RuntimeException e) {
                 closeQuietly(client);
+                if (isUnauthenticated(e)) {
+                    throw credentialsRejected(coordinator, e);
+                }
                 if (failure == null) {
                     failure = e;
                 }
@@ -195,6 +198,25 @@ public class FlightSqlSession
             this.connected = true;
             return;
         }
+    }
+
+    private static boolean isUnauthenticated(Throwable e)
+    {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof FlightRuntimeException f) {
+                return f.status().code() == FlightStatusCode.UNAUTHENTICATED;
+            }
+        }
+        return false;
+    }
+
+    private FlightCredentialsRejectedException credentialsRejected(FlightConfig.Coordinator coordinator, RuntimeException e)
+    {
+        String credentials = config.getPassword().isPresent()
+                ? "user name and password (user '" + config.getUser().orElse("") + "')"
+                : "bearer token";
+        return new FlightCredentialsRejectedException("Arrow Flight server " + coordinator.host() + ":" + coordinator.port()
+                + " rejected the catalog's " + credentials + ": " + e.getMessage(), e);
     }
 
     // Connection refused/unresolved, UNAVAILABLE, or no handshake answer within its deadline (a host that is gone).
@@ -765,6 +787,11 @@ public class FlightSqlSession
             try {
                 ensureConnected();
                 return call.call();
+            }
+            catch (FlightCredentialsRejectedException e) {
+                // A fresh login was refused (wrong password, revoked or expired token): no retry, it would
+                // only cost more failed logins.
+                throw e;
             }
             catch (RuntimeException e) {
                 last = e;
