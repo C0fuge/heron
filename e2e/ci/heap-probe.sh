@@ -47,6 +47,20 @@ heap_sampler() {  # stop-file histo-file
   rm -f "$2.tmp"
 }
 
+# Writes EXPLAIN of query $1 and SHOW STATS of the TPC-H tables to $2/$1.plan; prints joins, estimates and pushed queries.
+heap_plan() {  # query dir
+  local t
+  { echo "EXPLAIN"; cat "$QUERIES/$1.sql"; } | docker exec -i trino trino --catalog flight --schema tpch --output-format TSV_HEADER \
+    > "$2/$1.plan" 2>&1 || true
+  for t in customer orders lineitem; do
+    echo "--- SHOW STATS FOR $t" >> "$2/$1.plan"
+    docker exec trino trino --catalog flight --schema tpch --output-format TSV --execute "SHOW STATS FOR $t" \
+      2>&1 | awk -F'\t' '$1 == "" || $1 ~ /key$/' >> "$2/$1.plan" || true
+  done
+  echo "--- plan of $1 (${HEAP_PROBE_TAG:-plain}):"
+  grep -E 'Join\[|SemiJoin|Estimates|Fragment|query=|SHOW STATS|^\t|^[a-z_]+key\t' "$2/$1.plan" | grep -v 'cpu:\|Layout' | cut -c1-260 | head -60 || true
+}
+
 heap_probe() {
   local xmx setting q dir sess stop histo t0 secs result detail peak
   log "heap probe: Trino -Xmx $HEAP_PROBE_XMX x settings $HEAP_PROBE_SETTINGS x $HEAP_PROBE_QUERIES ($SERVERS server(s)${HEAP_PROBE_TAG:+, $HEAP_PROBE_TAG})"
@@ -88,6 +102,10 @@ heap_probe() {
         echo "--- live heap peak $xmx $setting $q:"; head -14 "$histo" 2>/dev/null || true
         [ -f "$dir/$q.err" ] && head -c 600 "$dir/$q.err"
         docker logs trino 2>&1 | grep -m3 'merged in memory' | cut -c1-300 || true
+        # Join order and estimates decide which side Trino builds a hash of: print them for tagged runs and failures
+        if [ "$setting" = default ] && { [ -n "${HEAP_PROBE_TAG:-}" ] || [ "$result" != OK ]; }; then
+          heap_plan "$q" "$dir"
+        fi
       done
     done
   done
