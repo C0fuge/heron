@@ -1129,5 +1129,5 @@ Kept up to date after every work session so work can be resumed from this reposi
   AMD EPYC 9V45 and 7763; Trino CPU up to 1.7x apart); matched by runner class the new build is ~3-7 % faster on 3 servers,
   1 server 14-28 % (one pair). `profile.sh` now logs vCPU count + CPU model (`[skip ci]`, profile output only). ~55 Actions
   minutes. No plugin code changed; Invariants untouched.
-- 2026-10-27 (cloud sessions 79-80): nothing actionable — no new `e2e-assets` upload since 4e77c6bda59a (20:53 UTC), no new
+- 2026-10-27/28 (cloud sessions 79-81): nothing actionable — no new `e2e-assets` upload since 4e77c6bda59a (20:53 UTC), no new
   maintainer/stand answers; every Next steps item waits on the stand or an Open question. 0 Actions minutes.
