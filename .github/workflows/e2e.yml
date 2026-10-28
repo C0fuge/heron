@@ -39,6 +39,9 @@ on:
       slow-link:
         description: 'Slow-link check of result compression (e2e/ci/slowlink.sh: off / lz4 / zstd, plain and netem-shaped link): 0 or only'
         default: '0'
+      auth:
+        description: 'TLS + LDAP / JWT login check (e2e/ci/auth.sh, server login modules from flight-auth-<build>): 0 or only'
+        default: '0'
       profile-settings:
         description: 'Profile settings: default and/or comma-separated session settings, space-separated'
         default: 'default flight.split_count=16'
@@ -53,7 +56,7 @@ on:
       - '.github/workflows/e2e.yml'
 
 concurrency:
-  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}-${{ inputs.iceberg-core-site }}-${{ inputs.heap-probe }}-${{ inputs.profile }}-${{ inputs.result-compression }}-${{ inputs.slow-link }}
+  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}-${{ inputs.iceberg-core-site }}-${{ inputs.heap-probe }}-${{ inputs.profile }}-${{ inputs.result-compression }}-${{ inputs.slow-link }}-${{ inputs.auth }}
   cancel-in-progress: true
 
 # e2e-assets is a published pre-release, so a read token can list and download its assets.
@@ -81,6 +84,7 @@ jobs:
       PROFILE_SETTINGS: ${{ inputs.profile-settings || 'default flight.split_count=16' }}
       RESULT_COMPRESSION: ${{ inputs.result-compression || 'none' }}
       SLOW_LINK: ${{ inputs.slow-link || '0' }}
+      AUTH: ${{ inputs.auth || '0' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -100,7 +104,7 @@ jobs:
           while read -r id name; do
             # only the selected server build (the release holds several)
             case "$name" in
-              arrow-flight-server-*.jar|*-plugins.tar.zst|flight-plugins-*.tar.zst|flight-server-libs-*.tar.zst)
+              arrow-flight-server-*.jar|*-plugins.tar.zst|flight-plugins-*.tar.zst|flight-server-libs-*.tar.zst|flight-auth-*.tar.zst)
                 case "$name" in *"$SERVER_BUILD"*) ;; *) continue ;; esac ;;
               # shared libs of the intN builds (520 MB); server CI builds ship their own flight-server-libs-1.0.0-<b>
               flight-server-libs.tar.zst)
@@ -125,6 +129,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: e2e-${{ env.TRINO_VERSION }}-${{ env.SERVER_BUILD }}-${{ env.RESULT_MODE }}-${{ env.RESULT_COMPRESSION }}-${{ env.SLOW_LINK }}-${{ matrix.servers }}srv
+          name: e2e-${{ env.TRINO_VERSION }}-${{ env.SERVER_BUILD }}-${{ env.RESULT_MODE }}-${{ env.RESULT_COMPRESSION }}-${{ env.SLOW_LINK }}-${{ env.AUTH }}-${{ matrix.servers }}srv
           path: ${{ runner.temp }}/out/
           retention-days: 7

@@ -46,6 +46,8 @@ mkdir -p "$OUT" "$WORK" "$WORK/wh"
 . "$REPO/e2e/ci/profile.sh"
 # shellcheck source=e2e/ci/slowlink.sh
 . "$REPO/e2e/ci/slowlink.sh"
+# shellcheck source=e2e/ci/auth.sh
+. "$REPO/e2e/ci/auth.sh"
 
 S3_KEY="ci$(openssl rand -hex 8)"; S3_SECRET="$(openssl rand -hex 24)"; TOKEN="$(openssl rand -hex 24)"
 
@@ -108,6 +110,9 @@ if [ "$ICEBERG" = 1 ]; then
 fi
 
 HOSTS="$(seq -s, -f 'flight%g' 1 "$SERVERS")"
+# auth.sh replaces these (TLS + a login module) for its own server restarts
+SERVER_AUTH_ARGS=(-e FLIGHT_AUTH_PROVIDER=token -e FLIGHT_AUTH_TOKEN="$TOKEN"); SERVER_CP_AUTH=""
+mkdir -p "$WORK/auth"
 log "flight servers $HOSTS (result mode $RESULT_MODE)"
 start_server() {  # name
   mkdir -p "$WORK/$1"  # writable cwd: DuckDB temp dir (.tmp)
@@ -115,13 +120,13 @@ start_server() {  # name
     -v "$WORK/server":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro \
     -v "$WORK/$1":/work -w /work -v "$WORK/wh":/wh:ro \
     -e LANG=C.UTF-8 -e FLIGHT_S3_ACCESS_KEY="$S3_KEY" -e FLIGHT_S3_SECRET_KEY="$S3_SECRET" \
-    -e FLIGHT_AUTH_PROVIDER=token -e FLIGHT_AUTH_TOKEN="$TOKEN" \
+    -v "$WORK/auth":/auth:ro "${SERVER_AUTH_ARGS[@]}" \
     eclipse-temurin:21-jdk \
     java -Xmx$SERVER_HEAP --add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true \
          -DdataDir=s3://lake/parquet -Ds3Endpoint=http://s3:9000 -Ds3UrlStyle=path -Ds3Region=us-east-1 \
          -Darrowflight.plugins.dir=/app/plugins -Darrowflight.duckdb.extensionDir=/ext/duckdb-home/extensions \
          -DresultMode="$RESULT_MODE" "${SERVER_EXTRA[@]}" ${SERVER_ENDPOINTS:+-Darrowflight.cluster.endpointsPerServer=$SERVER_ENDPOINTS} \
-         -cp "${SERVER_CP_EXTRA:-}/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
+         -cp "${SERVER_CP_EXTRA:-}${SERVER_CP_AUTH:-}/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
          --port 32010 --localhost "$1" --hosts "$HOSTS" >/dev/null
 }
 wait_server() {  # name
@@ -218,6 +223,12 @@ fi
 # PROFILE=only: just the throughput profile (profile.sh), then stop; PROFILE=bench: only its read benchmark.
 if [ "${PROFILE:-0}" = only ] || [ "${PROFILE:-0}" = bench ]; then
   if [ "$PROFILE" = bench ]; then read_bench; else profile_run; fi
+  save_logs
+  exit $status
+fi
+# AUTH=only: just the TLS + LDAP / JWT login check (auth.sh), then stop.
+if [ "${AUTH:-0}" = only ]; then
+  auth_run
   save_logs
   exit $status
 fi
