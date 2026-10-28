@@ -117,14 +117,23 @@ Kept up to date after every work session so work can be resumed from this reposi
 > Side findings: the module jars must come **before** the server jar on the classpath (see Open questions), and a rejected
 > password is retried 4 times (next item).
 >
-> **Next (own item, session 88 finding): don't retry rejected credentials.** A wrong password / rejected token surfaces only
-> after 4 handshake attempts (~15 s, "Arrow Flight server unavailable while resolving tpch.nation: Flight call
-> 'getExecuteSchema' failed after 4 attempts: Invalid LDAP user name or password"), because `isConnectionLost` treats every
-> UNAUTHENTICATED as a lost connection. Against Active Directory with an account-lockout policy one Trino query costs 4 failed
-> binds per catalog. Proposal: a handshake that fails with UNAUTHENTICATED is final (clear error naming the credentials, no
-> retry); an UNAUTHENTICATED on a normal call after a successful handshake (expired session token, server restart) keeps the
-> one re-login it gets today. Unit test in `FlightSqlSession*Test` + the e2e `ldap-wrong-password` check asserting the time /
-> the server's bind count (directory access log). Invariant-relevant (auth keeps working): the expiry check must stay exact.
+> **Done (session 89): rejected credentials are final.** A handshake refused with UNAUTHENTICATED (wrong password, revoked /
+> expired / forged token) throws `FlightCredentialsRejectedException` ("Arrow Flight server flight1:32010 rejected the
+> catalog's user name and password (user 'e2e'): Invalid LDAP user name or password" / "... bearer token: ..."), which
+> `retry()` does not repeat and which `ArrowFlightMetadata.getTableHandle` no longer follows with a table listing (that cost a
+> second login). An UNAUTHENTICATED on a call after a successful login (expired session token, server restart) still gets one
+> fresh login; if that login is refused, it is final too. Unit test `FlightSqlSessionAuthTest` (5 cases: one login per query
+> on a wrong password, bearer not retried, `listSchemas` does not hide it, expired session = one re-login, refused re-login
+> final). e2e: new check `ldap-wrong-password-attempts` (`auth_refused_once` in `e2e/ci/auth.sh`, counts `resultCode=49` in the
+> UnboundID directory's access log, now `--accessLogToStandardOut`): at most 2 failed binds, refused within 10 s, no "failed
+> after N attempts". Push run 40720718832: **1 failed bind, refused in 2 s** (was 4 attempts / ~15 s); all other auth checks,
+> TPC-H, types, Iceberg, failover green on 1 + 3 servers; build 40720718925 green.
+>
+> **Next (own item, small, session 89 finding): TLS failures are retried like a lost connection.** `ldap-tls-without-ca` is
+> refused correctly but only after "failed after 4 attempts: io exception" (~15 s), because a certificate-path failure surfaces
+> as UNAVAILABLE "io exception". Harmless for correctness and for lockouts (no credentials are checked before TLS), so low
+> priority: optionally treat an `SSLHandshakeException` / `CertPathValidatorException` in the cause chain as final, with a
+> message naming the truststore setting. Unit test with an in-process TLS server and a wrong CA.
 
 
 > **Maintainer, 2026-10-28: yes to result compression as a connector opt-in.** Add a catalog property (off by default) that
@@ -1313,3 +1322,10 @@ Kept up to date after every work session so work can be resumed from this reposi
   precede the server jar on the classpath (server bundles nimbus-jose-jwt 10.0.1; Open question); rejected credentials are
   retried 4x (new Next item). No plugin code changed; Invariants untouched (token-auth suite unchanged and green). ~45 Actions
   minutes.
+- 2026-10-28 (cloud session 89): first Next-steps item, "don't retry rejected credentials" (session 88 finding). Handshake
+  UNAUTHENTICATED is now final (`FlightCredentialsRejectedException`; no retry, no table listing after it); expired session
+  tokens keep their one re-login. Unit test `FlightSqlSessionAuthTest` (5 cases; also run locally with JDK 21 /
+  `-Dmaven.compiler.release=21`, together with `FlightSqlSessionFailoverTest` 23/23). e2e `ldap-wrong-password-attempts`
+  (directory access log): push run 40720718832 green on 1 + 3 servers, 1 failed bind and 2 s instead of 4 attempts / ~15 s;
+  build 40720718925 green. Invariants: auth keeps working (ldap, ldap-after-expiry, jwt exact), no change to data paths.
+  New small own item: TLS certificate failures are retried 4x. ~25 Actions minutes.
