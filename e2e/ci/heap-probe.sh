@@ -50,15 +50,18 @@ heap_sampler() {  # stop-file histo-file
 # Writes EXPLAIN of query $1 and SHOW STATS of the TPC-H tables to $2/$1.plan; prints joins, estimates and pushed queries.
 heap_plan() {  # query dir
   local t
-  { echo "EXPLAIN"; cat "$QUERIES/$1.sql"; } | docker exec -i trino trino --catalog flight --schema tpch --output-format TSV_HEADER \
-    > "$2/$1.plan" 2>&1 || true
+  # TSV writes the plan as one cell with its line breaks escaped
+  docker exec trino trino --catalog flight --schema tpch --output-format TSV \
+    --execute "EXPLAIN $(sed 's/;[[:space:]]*$//' "$QUERIES/$1.sql")" 2>&1 | sed 's/\\n/\n/g; s/\\t/\t/g' > "$2/$1.plan" || true
   for t in customer orders lineitem; do
     echo "--- SHOW STATS FOR $t" >> "$2/$1.plan"
     docker exec trino trino --catalog flight --schema tpch --output-format TSV --execute "SHOW STATS FOR $t" \
-      2>&1 | awk -F'\t' '$1 == "" || $1 ~ /key$/' >> "$2/$1.plan" || true
+      2>&1 | awk -F'\t' '$1 == "" || $1 == "NULL" || $1 ~ /key$/ || /rror/' >> "$2/$1.plan" || true
   done
   echo "--- plan of $1 (${HEAP_PROBE_TAG:-plain}):"
-  grep -E 'Join\[|SemiJoin|Estimates|Fragment|query=|SHOW STATS|^\t|^[a-z_]+key\t' "$2/$1.plan" | grep -v 'cpu:\|Layout' | cut -c1-260 | head -60 || true
+  grep -E 'Join\[|SemiJoin|Estimates|Fragment|query=|SHOW STATS|rror|^\t|^NULL\t|^[a-z_]+key\t' "$2/$1.plan" \
+    | grep -v 'Layout' | cut -c1-260 | head -80 || true
+  grep -q 'Join' "$2/$1.plan" || { echo "(no join in the EXPLAIN output:)"; head -c 1500 "$2/$1.plan"; }
 }
 
 heap_probe() {
