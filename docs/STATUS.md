@@ -159,9 +159,15 @@ Kept up to date after every work session so work can be resumed from this reposi
 > TLS port): **refused in 1 s**, names the setting. Runs: build 40740553512, e2e 40740554738, green on 1 + 3 servers (TPC-H,
 > types, Iceberg, failover incl. coordinator-down 12.9 s, all 13 auth checks OK).
 >
-> **Next:** no open own item. Candidates (pick one, or wait for the stand / maintainer): the Open questions below; or
-> README/`flight.properties.example` troubleshooting notes listing the connection error messages added in sessions 89-91
-> (credentials rejected, certificate refused, TLS mismatch either way) and the setting each one names.
+> **Done (session 92): troubleshooting notes.** `trino-arrow-flight/README.md` "Troubleshooting connection errors": a table of
+> the connection error messages (credentials / bearer token rejected, certificate refused, TLS mismatch either way, truststore
+> unreadable, coordinator unreachable after N attempts, data stream failure), the cause and the setting to fix, with the
+> texts as printed by e2e run 40740554738; which of them are final and which retried. `flight.properties.example` points to
+> it. Docs only (build 40749337846 green; no e2e: no plugin code changed).
+>
+> **Next:** no open own item. Everything left waits on the stand or the maintainer (Open questions below: endpoint splits /
+> `split_count` default, TopN default, heap-check criterion, server-side questions). A session with nothing to do should only
+> check for a new server build in `e2e-assets` (`gh release view e2e-assets`) or new maintainer notes, and otherwise stop.
 
 
 > **Maintainer, 2026-10-28: yes to result compression as a connector opt-in.** Add a catalog property (off by default) that
@@ -1367,3 +1373,6 @@ Kept up to date after every work session so work can be resumed from this reposi
   UNAVAILABLE plaintext handshake; message names `arrow-flight.tls.enabled=true`). `FlightSqlSessionTlsTest` 10/10, common
   module 49/49 locally. e2e `plaintext-to-tls-port(-final)` refused in 1 s. Runs build 40740553512, e2e 40740554738 green on
   1 + 3 servers; Invariants: auth checks all OK, failover unchanged, data paths unchanged. ~30 Actions minutes.
+- 2026-10-28 (cloud session 92): troubleshooting section for connection errors in `trino-arrow-flight/README.md` (messages
+  from e2e run 40740554738) + pointer in `flight.properties.example`. Docs only; build 40749337846 green. Invariants untouched. ~2 Actions
+  minutes.
