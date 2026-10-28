@@ -112,7 +112,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 > PEM truststore. Checks (`auth-summary.tsv`): q01/q03/q18 exact on both; after the LDAP session token expired (70 s) q06 exact
 > (re-login works); refused with the right error: wrong password, TLS without the CA, expired JWT, JWT signed by another key.
 > Workflow input `auth` = `auto` (default: at the end of every 3-server run when the build has its flight-auth asset; ~3.5 min),
-> `0`, `1`, `only`. Run 40712836291 (`auth=only`, 1 + 3 servers): all 7 checks OK on both. No plugin code changed.
+> `0`, `1`, `only`. Run 40712836291 (`auth=only`, 1 + 3 servers): all 7 checks OK on both; push run 40712809504 (start_server
+> refactor) green on 1 + 3 servers; run 40716075647 (3 servers, `auto`: full suite + auth at the end) green. No plugin code changed.
 > Side findings: the module jars must come **before** the server jar on the classpath (see Open questions), and a rejected
 > password is retried 4 times (next item).
 >
@@ -1305,3 +1306,10 @@ Kept up to date after every work session so work can be resumed from this reposi
   wrong answers and scan-led limit hits still fail. Default e2e server build switched to a9e43ca5e296. Runs 40703194404
   (push, 1 + 3 servers), 40703317018 (complete, 3), 40703321237 (partial, 1): all green. No plugin code changed; Invariants
   untouched. ~75 Actions minutes.
+- 2026-10-28 (cloud session 88): no new server build or maintainer answer; own item: the `flight-auth` asset of a9e43ca5e296
+  (LDAP / JWT login modules) is in `e2e-assets`, so new e2e auth check `e2e/ci/auth.sh` (+ `jwt_make.py`): Flight TLS + LDAP
+  BasicAuth (session token expiry/re-login) + JWT bearer, positive and refused cases. Runs 40712836291 (`auth=only`, 1 + 3
+  servers), push 40712809504, 40716075647 (3 servers, auth at the end by default): all green. Findings: login-module jars must
+  precede the server jar on the classpath (server bundles nimbus-jose-jwt 10.0.1; Open question); rejected credentials are
+  retried 4x (new Next item). No plugin code changed; Invariants untouched (token-auth suite unchanged and green). ~45 Actions
+  minutes.
