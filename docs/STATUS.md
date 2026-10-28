@@ -57,6 +57,12 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Maintainer, 2026-10-28: yes to result compression as a connector opt-in.** Add a catalog property (off by default) that
+> asks the server for `arrow-compression: zstd|lz4` and decodes compressed IPC bodies; never on unless set. Test: answers
+> equal with and without (full suite on one setting), and a slow-link check in CI (`tc netem delay 10ms rate 1gbit` on the
+> runner's loopback or between containers) reporting MB/s with off / lz4 / zstd. The server side is in builds since
+> `cadd1aca9c23` (assets). Then continue with your own open items.
+
 > **New server build `server-1.0.0-cadd1aca9c23`** (2026-10-28, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release). Since 7562a5bdb7b9 (so it also covers what 4e77c6bda59a brought): opt-in result
 > stream compression ZSTD/LZ4 (stage 3 item 20; the client asks via call header or Flight SQL session option `arrow-compression`;
