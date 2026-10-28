@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `4e77c6bda59a` since session 77, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `cadd1aca9c23` since session 82, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
   MinIO is no longer distributed (Docker Hub repo gone, quay.io unauthorized, release binaries 410), so S3 is
@@ -64,6 +64,22 @@ Kept up to date after every work session so work can be resumed from this reposi
 > read cache `arrowflight.s3.cacheMegabytes`, size-aware `duckDbThreads` default (cores/4, between 2 and 8; was 4), Iceberg time
 > travel planned in partial mode, position deletes grouped. Needs the DuckDB 1.5.6 extension set (server repo `ci-assets`). Run
 > the suite once on it (note timings) and make it the CI default if green.
+>
+> **Done (session 82): green, now the e2e default** (`e2e.yml`, `run-e2e.sh`; 4e77c6bda59a and older stay selectable; same DuckDB
+> 1.5.6 extension set, server started unchanged, plugin does not ask for compression so the wire is unchanged). Partial 1+3
+> servers run 40617506171, complete 3 servers run 40617513105: full suite green (TPC-H 22/22, types, Iceberg, TopN, splits,
+> failover incl. two down 5/5 + 3/3, coordinator-down 13.8 s on 3 servers partial). Job wall time 1 server 13.6 min, 3 servers
+> 19.4 / 19.2 min. **Timings** (profile run 40617519351, settings `default flight.split_count=1 flight.endpoint_splits_enabled=true`,
+> Trino elapsed, best of 2, SF1): 3 servers **34.2 / 27.1 / 26.6 s** on AMD EPYC 7763 (4e77c6bda59a on the same CPU model,
+> session 78 pair 2: 36.0 / 27.4 / 27.4 s) - equal within noise; 1 server **30.6 / 25.5 / 27.8 s** on AMD EPYC 9V74 (no
+> earlier run on that model to compare). Raw reads 3 servers: Java client one stream 1.77 s, ADBC 1.75 s, Trino split 1 1.92 s;
+> 1 server 1.82 / 2.02 / 2.05 s. Small queries 3 servers q01 / q04 / q06 0.68 / 0.88 / 0.79 default, 0.64 / 0.85 / 0.72 split 1.
+> No regression; the new server features (compression, S3 cache, `duckDbThreads`) are opt-in or invisible at SF1 on 4 vCPUs.
+>
+> **Follow-up candidate (needs a maintainer answer, see Open questions): plugin opt-in for result compression.** The plugin
+> could send `arrow-compression: zstd|lz4` (new catalog property, off by default) and decode compressed IPC bodies (Arrow
+> Java needs `arrow-compression`'s `CommonsCompressionFactory` on the reader). Only worth it where the network, not the
+> server or Trino, is the bottleneck - on CI (one host) it cannot show a gain; the stand could.
 
 
 > **Session 71 (TopN pushes VARCHAR sort keys).** Every item below is done or waits on the stand / a maintainer answer, so this
@@ -832,6 +848,10 @@ Kept up to date after every work session so work can be resumed from this reposi
   (HadoopDataStoreProvider; the Hadoop jars in `libs/` do not register LocalFileSystem). CI works around it with a
   `core-site.xml` (`fs.file.impl=org.apache.hadoop.fs.LocalFileSystem`) on the server classpath. Fix in the server?
 
+- **Result compression in the plugin? (session 82)** Server cadd1aca9c23 compresses result streams (ZSTD/LZ4) when the
+  client asks (`arrow-compression` header / session option). Should the plugin get an opt-in catalog property for it (off by
+  default, so Invariants and old servers are untouched), and is the stand's network slow enough for it to matter? If yes,
+  which codec should be the suggested value?
 - e2e S3 is `rclone serve s3` instead of MinIO (MinIO images/binaries are no longer downloadable). OK, or is
   there a MinIO build you want to put into `e2e-assets`?
 - **S3 Iceberg warehouse in CI** (session 13): should `iceberg-warehouse=s3` become the default for int6 runs? It covers
@@ -1140,3 +1160,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   minutes. No plugin code changed; Invariants untouched.
 - 2026-10-27/28 (cloud sessions 79-81): nothing actionable — no new `e2e-assets` upload since 4e77c6bda59a (20:53 UTC), no new
   maintainer/stand answers; every Next steps item waits on the stand or an Open question. 0 Actions minutes.
+- 2026-10-28 (cloud session 82): Next steps item 1 (new server build cadd1aca9c23, opt-in result compression). Full e2e green:
+  partial 1+3 servers run 40617506171, complete 3 servers run 40617513105; profile run 40617519351 (3 servers 34.2 / 27.1 /
+  26.6 s on EPYC 7763 = 4e77c6bda59a on the same CPU model within noise; 1 server 30.6 / 25.5 / 27.8 s on EPYC 9V74). Made it
+  the e2e default (`e2e.yml`, `run-e2e.sh`, `[skip ci]`). New Open question: plugin opt-in for result compression. ~70 Actions
+  minutes. No plugin code changed; Invariants untouched.
