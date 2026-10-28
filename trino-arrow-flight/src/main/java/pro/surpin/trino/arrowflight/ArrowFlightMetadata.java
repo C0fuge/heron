@@ -125,8 +125,8 @@ public class ArrowFlightMetadata
             // Unknown table -> Trino expects null so it can raise "Table does not exist". But the
             // same call also fails when the server is down or restarting; reporting that as a
             // missing table hides the real problem, so confirm with the table list first.
-            if (credentialsRejected(e)) {
-                // Listing would only cost one more failed login.
+            if (connectRefused(e)) {
+                // Credentials or server certificate refused: listing would only cost one more failed login or TLS handshake.
                 throw new io.trino.spi.TrinoException(io.trino.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR,
                         e.getMessage(), e);
             }
@@ -417,10 +417,11 @@ public class ArrowFlightMetadata
         return Optional.of(new AggregateColumn(kind, Optional.of(input), new ArrowFlightColumnHandle(outputName, outputType)));
     }
 
-    private static boolean credentialsRejected(Throwable e)
+    private static boolean connectRefused(Throwable e)
     {
         for (Throwable t = e; t != null; t = t.getCause()) {
-            if (t instanceof pro.surpin.arrowflight.common.FlightCredentialsRejectedException) {
+            if (t instanceof pro.surpin.arrowflight.common.FlightCredentialsRejectedException
+                    || t instanceof pro.surpin.arrowflight.common.FlightTlsHandshakeException) {
                 return true;
             }
         }
