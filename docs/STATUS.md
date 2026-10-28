@@ -129,11 +129,24 @@ Kept up to date after every work session so work can be resumed from this reposi
 > after N attempts". Push run 40720718832: **1 failed bind, refused in 2 s** (was 4 attempts / ~15 s); all other auth checks,
 > TPC-H, types, Iceberg, failover green on 1 + 3 servers; build 40720718925 green.
 >
-> **Next (own item, small, session 89 finding): TLS failures are retried like a lost connection.** `ldap-tls-without-ca` is
-> refused correctly but only after "failed after 4 attempts: io exception" (~15 s), because a certificate-path failure surfaces
-> as UNAVAILABLE "io exception". Harmless for correctness and for lockouts (no credentials are checked before TLS), so low
-> priority: optionally treat an `SSLHandshakeException` / `CertPathValidatorException` in the cause chain as final, with a
-> message naming the truststore setting. Unit test with an in-process TLS server and a wrong CA.
+> **Done (session 90): TLS failures are final.** When every configured coordinator fails the handshake on TLS (server
+> certificate refused: unknown CA, expired, wrong host name; or the server does not speak TLS: `NotSslRecordException`), the
+> session throws `FlightTlsHandshakeException`, which `retry()` does not repeat and `getTableHandle` does not follow with a table
+> listing (gRPC reports both as UNAVAILABLE "io exception"; the cause chain tells them apart). Messages: "TLS handshake with Arrow
+> Flight server flight1:32010 failed (server certificate checked against the JVM's default truststore | the truststore <path>):
+> <reason>. Set arrow-flight.tls.truststore-path to the CA (PEM or .jks) ..." and "Arrow Flight server h:p does not answer with
+> TLS ...: set arrow-flight.tls.enabled=false ...". A TLS failure on one coordinator while another cannot be reached keeps the old
+> retry path (the unreachable one may come back). Data-stream location failover unchanged. Unit test `FlightSqlSessionTlsTest`
+> (7: trusted CA connects; unknown CA, default truststore, certificate for another host, all coordinators refused, server without
+> TLS are final within the backoff and keep `listSchemas` failing; mixed unreachable + refused still retried; certificates made
+> with the JDK's keytool), fails 4/7 on the old code (35 s of retries each). e2e: `ldap-tls-without-ca-final` (refused within
+> 10 s, no "failed after N attempts", names the setting) and new `tls-plaintext-port` (TLS catalog at Trino's plain HTTP port):
+> both **refused in 1 s** (was ~15 s / 4 attempts). Runs: push 40731094492 + build 40731094532, push 40734883795 + build
+> 40734883558, all green on 1 + 3 servers (TPC-H, types, Iceberg, failover, all auth checks).
+>
+> **Next:** no open own item. Candidates (pick one, or wait for the stand / maintainer): a plaintext catalog against a TLS
+> server (today UNAVAILABLE "Network closed for unknown reason", indistinguishable from a lost connection, so still retried;
+> could be probed once with a TLS ClientHello before reporting), or the Open questions below.
 
 
 > **Maintainer, 2026-10-28: yes to result compression as a connector opt-in.** Add a catalog property (off by default) that
@@ -1329,3 +1342,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   (directory access log): push run 40720718832 green on 1 + 3 servers, 1 failed bind and 2 s instead of 4 attempts / ~15 s;
   build 40720718925 green. Invariants: auth keeps working (ldap, ldap-after-expiry, jwt exact), no change to data paths.
   New small own item: TLS certificate failures are retried 4x. ~25 Actions minutes.
+- 2026-10-28 (cloud session 90): STATUS item "TLS failures are retried like a lost connection" done. `FlightTlsHandshakeException`
+  (refused server certificate, or no TLS on the server's port) is final: no handshake retry, no table listing, message names
+  `arrow-flight.tls.truststore-path` / `arrow-flight.tls.enabled=false`. Unit test `FlightSqlSessionTlsTest` 7/7 (common module
+  46/46 locally with JDK 21). e2e checks `ldap-tls-without-ca-final`, `tls-plaintext-port(-final)`: refused in 1 s (was ~15 s).
+  Runs 40731094492 / 40731094532 and 40734883795 / 40734883558 green on 1 + 3 servers. Invariants: auth checks all OK, data paths
+  unchanged. ~45 Actions minutes.
