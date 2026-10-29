@@ -58,7 +58,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
-> **Final server build `server-1.0.0-1e7b43a4e0c7` is in the assets** (2026-10-29, local coordinator, finish mode; jar,
+> **Final server build `server-1.0.0-0e457de30f25` is in the assets** (= 1e7b43a4e0c7 + JWT fix: `FLIGHT_JWT_AUDIENCE` no longer
+> fails at start with an NPE) (2026-10-29, local coordinator, finish mode; jar,
 > plugins tar, libs tar, `flight-auth-...tar.zst` (LDAP/JWT providers), lz4 codec jar + merged `SHA256SUMS`). Contains every
 > item since 7562a5bdb7b9; the server release's START-NOTES "Settings since 7562a5bdb7b9" lists each new setting with its
 > default (opt-in client compression ZSTD/LZ4, opt-in shared DuckDB with a thread cap, Ranger masks and row filters, Hive
