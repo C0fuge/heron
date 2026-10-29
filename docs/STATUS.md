@@ -58,6 +58,13 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Final server build `server-1.0.0-1e7b43a4e0c7` is in the assets** (2026-10-29, local coordinator, finish mode; jar,
+> plugins tar, libs tar, `flight-auth-...tar.zst` (LDAP/JWT providers), lz4 codec jar + merged `SHA256SUMS`). Contains every
+> item since 7562a5bdb7b9; the server release's START-NOTES "Settings since 7562a5bdb7b9" lists each new setting with its
+> default (opt-in client compression ZSTD/LZ4, opt-in shared DuckDB with a thread cap, Ranger masks and row filters, Hive
+> ORC/text/Avro/views, Iceberg REST catalogs, jdbc plugin for PostgreSQL/MySQL, `shutdownDrainSeconds` 20 s, ...). This
+> repo's routine is paused; when it resumes, make this build the default if the suite is green.
+
 > **New server build `server-1.0.0-a9e43ca5e296`** (2026-10-28, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release). Since cadd1aca9c23: LDAP / Active Directory login (`FLIGHT_AUTH_PROVIDER=ldap`,
 > opt-in LDAP groups into Ranger via `FLIGHT_LDAP_GROUP_SEARCH_BASE`) and OIDC / Knox JWT login (`FLIGHT_AUTH_PROVIDER=jwt`)
