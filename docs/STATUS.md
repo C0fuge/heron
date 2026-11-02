@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `a9e43ca5e296` since session 87, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). Input `auth` (session 88, `e2e/ci/auth.sh`):
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `0e457de30f25` since session 95, `a9e43ca5e296` in session 87-94, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). Input `auth` (session 88, `e2e/ci/auth.sh`):
   TLS + LDAP / JWT login check, default `auto` = at the end of 3-server runs. `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
@@ -91,6 +91,15 @@ Kept up to date after every work session so work can be resumed from this reposi
 > default (opt-in client compression ZSTD/LZ4, opt-in shared DuckDB with a thread cap, Ranger masks and row filters, Hive
 > ORC/text/Avro/views, Iceberg REST catalogs, jdbc plugin for PostgreSQL/MySQL, `shutdownDrainSeconds` 20 s, ...). This
 > repo's routine is paused; when it resumes, make this build the default if the suite is green.
+>
+> **Done (session 95): 0e457de30f25 is the e2e default** (`e2e.yml` two places + `run-e2e.sh`; a9e43ca5e296 and older stay
+> selectable). Dispatch runs on it: partial 1 server 41471740039 green, complete 3 servers 41471746798 green (incl. TLS + LDAP /
+> JWT auth), partial 3 servers in 41471740039 passed every check through LDAP and was then cut by the 40-min job limit. Cause: not
+> the server - `ubuntu-latest` is now **ubuntu-26.04**, whose Python has no duckdb 1.4.1 wheel, so the types check's
+> `pip install` built DuckDB from source for ~18 min in every job. The types check now runs in `python:3.12-slim` (wheels only,
+> host network). Push run 41478757183 on the new default: 1 server 15 min, 3 servers 23 min, both green (TPC-H 22/22, types 8 s,
+> Iceberg, failover, auth incl. jwt / jwt-expired / jwt-forged; heap `1 1G default q18 OK` 463 MB, `1/eps4 default OK` 438 MB,
+> `3 1G default OK` 326 MB; report-only eps4 `hash` LIMIT as before). `START-NOTES.md` sums mismatch warning unchanged.
 
 > **New server build `server-1.0.0-a9e43ca5e296`** (2026-10-28, local coordinator; jar, plugins tar, libs tar + merged
 > `SHA256SUMS` in this repo's assets release). Since cadd1aca9c23: LDAP / Active Directory login (`FLIGHT_AUTH_PROVIDER=ldap`,
@@ -882,6 +891,9 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **Server f06b5834e76e (session 95).** The kestrel pre-release used by the connector comparison is newer than the CI default
+  0e457de30f25 (made default this session as the note above asked). Should the e2e suite run on f06b5834e76e and make it the
+  default, or does it stay a comparison-only build?
 - **Connector comparison follow-up (session 94).** `docs/CONNECTOR-COMPARE.md`: ours finishes everything and wins on
   aggregation-heavy TPC-H queries; upstream `flight-trino` is faster on q03/q10/q12/q17/q20 at SF10 with identical scans. Should
   a session dig into those join plans (and the cost of our planning-time statistics calls), or is the comparison enough?
@@ -1421,3 +1433,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   125299281981 SF1 speed, 125299282076 SF10 default, 125299281747 SF10 speed), server f06b5834e76e, upstream 821f627ba757 on
   Trino 446, ours on 455 and (built unchanged) on 446. Every returned answer exact; upstream 19/22 at SF10 (Trino memory limit
   on q09/q18/q21). No plugin code changed; invariants untouched. ~3.5 h of Actions minutes (4 parallel jobs).
+- 2026-11-02 (cloud session 95): final server build 0e457de30f25 made the e2e default (dispatch runs 41471740039, 41471746798;
+  push run 41478757183 green on 1 + 3 servers). Fixed an 18-min stall in every e2e job: ubuntu-latest moved to ubuntu-26.04 and
+  `pip install duckdb==1.4.1` built from source; the types check now runs in `python:3.12-slim`. No plugin code changed;
+  invariants (failover, auth, answers) checked green. ~2.5 h of Actions minutes (5 jobs).
