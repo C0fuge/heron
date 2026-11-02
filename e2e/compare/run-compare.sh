@@ -58,10 +58,10 @@ docker run -d --name s3 --network $NET -v "$WORK/s3":/data \
 
 start_server() {
   docker rm -f flight1 >/dev/null 2>&1 || true
-  rm -rf "$WORK/flight1"; mkdir -p "$WORK/flight1"
+  SERVER_CWD="$WORK/flight1-$(date +%s%N)"; mkdir -p "$SERVER_CWD"  # fresh cwd; the old one holds root-owned DuckDB temp files
   local extra=(); [ "$PROFILE" = default ] || extra=(-DresourceProfile="$PROFILE")
   docker run -d --name flight1 --network $NET \
-    -v "$WORK/server":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro -v "$WORK/flight1":/work -w /work \
+    -v "$WORK/server":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro -v "$SERVER_CWD":/work -w /work \
     -e LANG=C.UTF-8 -e FLIGHT_S3_ACCESS_KEY="$S3_KEY" -e FLIGHT_S3_SECRET_KEY="$S3_SECRET" \
     -e FLIGHT_AUTH_PROVIDER=token -e FLIGHT_AUTH_TOKEN="$TOKEN" \
     eclipse-temurin:21-jdk \

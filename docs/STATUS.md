@@ -71,6 +71,17 @@ Kept up to date after every work session so work can be resumed from this reposi
 > (EXPLAIN of a few queries: what reaches the server). Output: `docs/CONNECTOR-COMPARE.md` (tables per SF: correct
 > answers, sum of warm medians, per-query table, memory; versions/commits; a short verdict where each is faster and why).
 > Then write "CONNECTOR COMPARE DONE" here and stop.
+>
+> **Session 94: CONNECTOR COMPARE DONE.** Result in `docs/CONNECTOR-COMPARE.md` (job
+> `.github/workflows/connector-compare.yml` → `e2e/compare/run-compare.sh`, run 41452015076, upstream commit 821f627ba757, ours
+> ab563613037b, server f06b5834e76e). Short: all answers that come back are exact on both. SF1: both 22/22; warm sums ours 63.3 s,
+> upstream 71.7 s, ours built for Trino 446 62.2 s (our plugin builds and runs on 446 unchanged); speed profile 43.7 / 46.7 s.
+> SF10 speed: ours 22/22 (362.8 s), upstream 19/22 (q09, q18, q21 exceed Trino's 4 GB per-node limit); 19 common queries 277.6
+> vs 313.9 s. Ours wins on aggregation-heavy queries (aggregate pushdown: q01 9.6 vs 25.1 s at SF10, much less Trino memory);
+> upstream is faster on several join-heavy queries with identical scans (SF10 default q03 13.0 vs 19.2 s, q10, q12, q17, q20),
+> not because of the Trino version (ours446 = ours). SF10 default: ours 22/22, upstream 19/22 (same 3), 19 common queries 258.6 vs
+> 269.3 s (ours446 260.9). Possible follow-up (not started, maintainer's call): find why ours is slower on those joins (plans /
+> planning-time statistics calls).
 
 
 > **Final server build `server-1.0.0-0e457de30f25` is in the assets** (= 1e7b43a4e0c7 + JWT fix: `FLIGHT_JWT_AUDIENCE` no longer
@@ -871,6 +882,9 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **Connector comparison follow-up (session 94).** `docs/CONNECTOR-COMPARE.md`: ours finishes everything and wins on
+  aggregation-heavy TPC-H queries; upstream `flight-trino` is faster on q03/q10/q12/q17/q20 at SF10 with identical scans. Should
+  a session dig into those join plans (and the cost of our planning-time statistics calls), or is the comparison enough?
 - **Server (deployment): login-module jars must precede the server jar on the classpath (session 88).** The a9e43ca5e296
   server jar bundles nimbus-jose-jwt **10.0.1**; with `-cp server.jar:libs/*:auth/jwt/*` the jwt module (built against 10.10)
   runs on 10.0.1 and the server stops at startup: `NullPointerException ... ImmutableCollections$Set12.contains` from
@@ -1401,3 +1415,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   minutes.
 - 2026-10-28 (cloud session 93): nothing actionable. `e2e-assets` unchanged since a9e43ca5e296 (newest asset 11:41 UTC), no
   new maintainer notes; no own open item. No code change, no CI run.
+- 2026-11-02 (cloud session 94): maintainer's CONNECTOR COMPARISON done -> `docs/CONNECTOR-COMPARE.md`. New on-request job
+  `.github/workflows/connector-compare.yml` + `e2e/compare/` (run-compare.sh, report.py, tpch_data.py = SF10 dbgen + DuckDB
+  reference, which reproduces the committed SF1 reference 22/22). Run 41452015076 (jobs 125299281972 SF1 default,
+  125299281981 SF1 speed, 125299282076 SF10 default, 125299281747 SF10 speed), server f06b5834e76e, upstream 821f627ba757 on
+  Trino 446, ours on 455 and (built unchanged) on 446. Every returned answer exact; upstream 19/22 at SF10 (Trino memory limit
+  on q09/q18/q21). No plugin code changed; invariants untouched. ~3.5 h of Actions minutes (4 parallel jobs).

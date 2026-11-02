@@ -93,3 +93,111 @@ Per query, default profile (cold / warm s; rows = rows the connector handed to T
 
 Speed profile, warm s (ours / up): q01 1.54 / 2.44, q07 2.13 / 3.00, q09 2.39 / 3.12, q18 2.73 / 3.17,
 q21 3.57 / 4.87; q03 2.23 / 1.90, q17 2.95 / 2.62, q20 1.94 / 1.74 (all other queries within ±0.2 s).
+
+## SF10
+
+Data: DuckDB `dbgen(sf=10)` Parquet, 2.85 GB (cached as `tpch-sf10-duckdb141-v1`). q11 has 0 rows at SF10 (its
+`0.0001` fraction is the SF1 constant), same in the reference and in both connectors.
+
+### `resourceProfile=speed` (job 125299281747)
+
+| pass | correct (all rounds) | checksum = ref | sum cold s | **sum warm medians s** | **warm, 19 common queries s** | Trino peak MB | server peak MB |
+|---|---|---|---|---|---|---|---|
+| ours (455) | **22/22** | 22/22 | 382.4 | 362.8 | **277.6** | 9194 | 1901 |
+| up (446) | **19/22** | 19/22 | 383.4 | 381.2 (3 failed) | **313.9** | 9576 | 1011 |
+
+Upstream fails q09, q18, q21 in every round with `Query exceeded per-node memory limit of 4GB` (Trino's own limit, same
+config for both; Trino peak user memory 4.0-4.2 GB). Ours answers them with 0.9 / 2.5 / 4.1 GB.
+
+| q | ours cold | ours warm | up cold | up warm | ours rows | up rows | ours MB read | up MB read | ours mem MB | up mem MB |
+|---|---|---|---|---|---|---|---|---|---|---|
+| q01 | 11.31 | 9.57 | 25.33 | 25.05 | 4 | 59142609 | 0 | 4421 | 0 | 13 |
+| q02 | 7.41 | 4.54 | 7.96 | 5.45 | 16207906 | 16239627 | 450 | 538 | 66 | 443 |
+| q03 | 19.10 | 18.43 | 19.18 | 19.52 | 39923968 | 39923968 | 1080 | 1487 | 1584 | 1584 |
+| q04 | 10.98 | 11.83 | 12.56 | 13.14 | 14327145 | 60559723 | 137 | 994 | 379 | 680 |
+| q05 | 21.31 | 21.25 | 23.98 | 23.37 | 63861997 | 63861997 | 2223 | 2966 | 3322 | 3328 |
+| q06 | 12.07 | 11.81 | 10.92 | 14.67 | 1 | 1139264 | 0 | 37 | 0 | 3 |
+| q07 | 21.44 | 19.92 | 32.52 | 29.56 | 34830329 | 34830329 | 1040 | 1223 | 749 | 1671 |
+| q08 | 16.69 | 20.20 | 27.89 | 26.69 | 66157068 | 66157068 | 2827 | 3509 | 252 | 4015 |
+| q09 | 19.13 | 20.37 | 24.48 | FAIL (memory) | 83194859 | 85086077 | 3668 | 4898 | 930 | 4244 |
+| q10 | 21.72 | 22.25 | 15.90 | 18.70 | 16881365 | 16881365 | 670 | 870 | 906 | 925 |
+| q11 | 3.77 | 3.84 | 5.04 | 4.33 | 16200002 | 16200002 | 507 | 585 | 22 | 44 |
+| q12 | 16.26 | 13.34 | 15.09 | 15.77 | 15310803 | 17600101 | 342 | 384 | 80 | 87 |
+| q13 | 8.28 | 7.62 | 11.20 | 13.91 | 16345369 | 16500000 | 281 | 1045 | 204 | 663 |
+| q14 | 17.54 | 17.12 | 12.60 | 17.09 | 2749223 | 2749223 | 89 | 96 | 120 | 127 |
+| q15 | 28.79 | 26.57 | 23.99 | 26.24 | 300000 | 4631428 | 12 | 191 | 12 | 25 |
+| q16 | 4.33 | 3.79 | 3.80 | 3.96 | 8296880 | 8419686 | 160 | 153 | 187 | 187 |
+| q17 | 30.61 | 24.79 | 24.62 | 26.35 | 119974148 | 119974148 | 2699 | 3877 | 174 | 200 |
+| q18 | 28.35 | 26.71 | 16.62 | FAIL (memory) | 91486052 | 128390564 | 1998 | 3306 | 2502 | 4035 |
+| q19 | 13.54 | 17.14 | 18.15 | 14.12 | 4141904 | 4141904 | 156 | 193 | 171 | 129 |
+| q20 | 25.90 | 20.53 | 12.32 | 12.31 | 17220717 | 19199166 | 469 | 586 | 611 | 581 |
+| q21 | 40.89 | 38.14 | 32.45 | FAIL (memory) | 143253933 | 160521893 | 2938 | 3357 | 4146 | 4221 |
+| q22 | 3.03 | 3.04 | 6.84 | 3.64 | 3863596 | 17863614 | 106 | 235 | 20 | 61 |
+
+(For a failed query the "cold" time is the time to the error.)
+
+### Default profile (job 125299282076)
+
+| pass | correct (all rounds) | checksum = ref | sum cold s | **sum warm medians s** | **warm, 19 common queries s** | Trino peak MB | server peak MB |
+|---|---|---|---|---|---|---|---|
+| ours (455) | **22/22** | 22/22 | 366.5 | 334.6 | **258.6** | 8750 | 2345 |
+| up (446) | **19/22** | 19/22 | 336.6 | 329.9 (3 failed) | **269.3** | 9778 | 1463 |
+| ours446 (446) | **22/22** | 22/22 | 361.1 | 337.4 | **260.9** | 8691 | 2293 |
+
+Same three upstream failures (q09, q18, q21: Trino 4 GB per-node limit, every round). Rows read and Trino memory per
+query are the same as in the speed job (same plans); warm seconds (ours / up / ours446):
+
+| q | ours | up | ours446 | | q | ours | up | ours446 |
+|---|---|---|---|---|---|---|---|---|
+| q01 | 9.34 | 21.47 | 9.24 | | q12 | 15.08 | 11.84 | 16.43 |
+| q02 | 4.88 | 5.43 | 4.61 | | q13 | 7.50 | 10.02 | 8.22 |
+| q03 | 19.22 | 13.04 | 18.55 | | q14 | 13.12 | 12.63 | 13.56 |
+| q04 | 10.29 | 12.50 | 10.20 | | q15 | 26.20 | 23.33 | 27.26 |
+| q05 | 18.56 | 23.64 | 20.25 | | q16 | 3.65 | 3.27 | 3.56 |
+| q06 | 11.65 | 13.06 | 12.64 | | q17 | 27.99 | 22.11 | 23.38 |
+| q07 | 19.48 | 28.63 | 20.25 | | q18 | 22.46 | FAIL | 22.31 |
+| q08 | 17.73 | 23.23 | 17.74 | | q19 | 12.38 | 12.37 | 12.08 |
+| q09 | 17.80 | FAIL | 18.07 | | q20 | 18.75 | 11.93 | 19.12 |
+| q10 | 16.39 | 12.84 | 17.11 | | q21 | 35.72 | FAIL | 36.16 |
+| q11 | 3.65 | 4.21 | 3.99 | | q22 | 2.80 | 3.75 | 2.66 |
+
+## Pushdown (EXPLAIN, identical in every job)
+
+What each connector sends to the server (the `table = ...` of the scans):
+
+| query | ours | up |
+|---|---|---|
+| q01 | whole aggregation: `lineitem groupBy=[l_returnflag, l_linestatus] aggs=[SUM x4, AVG x3, COUNT(*)]` + the `l_shipdate` filter → **4 rows** come back | projection (4 columns) + `l_shipdate <= 1998-09-02` → 5.9 M rows (SF1), Trino aggregates |
+| q03 | projection + filters (`c_mktsegment = 'BUILDING'`, date ranges; our handle's `toString` does not print the pushed WHERE, the equal row counts show it); joins in Trino | same: projection + `constraint` ranges (varchar equality, date ranges) |
+| q06 | whole aggregation `aggs=[SUM(...)]` with the filter → **1 row** | projection + 3 range constraints → 114 k rows (SF1), Trino sums |
+| q14 | projection + date filter; join in Trino | same |
+| q18 | `lineitem groupBy=[l_orderkey] aggs=[SUM(l_quantity)]` for the IN-subquery (HAVING stays in Trino), other scans projection-only | projection only on all scans (`constraint=ALL`), the subquery's GROUP BY over 6 M / 60 M lineitem rows runs in Trino |
+
+Beyond EXPLAIN (from the sources): ours also pushes LIMIT, TopN (opt-in), dynamic filters (opt-in) and answers
+`getTableStatistics` with row count + per-column min/max (`SELECT count(*)`, min/max, answered by the server from Parquet footers); upstream pushes
+projection and column domains only (integer / decimal / date / boolean ranges, UTF-8 string equality and IN, null checks;
+string ranges and REAL/DOUBLE stay in Trino), no aggregation / LIMIT / TopN, and reports only a row count
+(`FlightInfo.totalRecords` of the planned scan). Both read one split per Flight endpoint.
+
+## Verdict
+
+- **Correctness:** both connectors return the reference answers for everything they finish (every round, every job).
+  Ours finishes 22/22 at SF1 and SF10; upstream finishes 22/22 at SF1 but **19/22 at SF10 under a 4 GB per-node Trino
+  limit** (q09, q18, q21 exceed it), because it hands Trino every lineitem row of those joins and aggregations.
+- **Where ours is faster and why:** queries whose heavy part is an aggregation over a big scan: q01 (SF10 9.6 s vs 25.1 s,
+  4 rows instead of 59 M), q07, q08, q09, q13, q04, q22 and q18/q21 (which upstream cannot finish). The server does the
+  aggregation in DuckDB and only groups cross the wire; Trino also needs far less memory (q08 0.25 GB vs 4.0 GB at SF10).
+  At SF1 the margin is ~12 % of the warm sum (63.3 vs 71.7 s), of which ~33 s is fixed CLI start for both.
+- **Where upstream is faster:** join-heavy queries whose scans both connectors send identically (same rows read): at SF10
+  default q03 (13.0 vs 19.2 s), q10 (12.8 vs 16.4), q12 (11.8 vs 15.1), q17 (22.1 vs 28.0), q20 (11.9 vs 18.8), q15; in
+  the speed job q10, q20 and roughly even q03/q14/q17. On the 19 queries both finish at SF10 ours is only 4 % faster
+  (default: 258.6 vs 269.3 s) resp. 12 % (speed: 277.6 vs 313.9 s): aggregation wins and join losses nearly cancel. Ours on Trino 446 (`ours446`) is as fast as
+  ours on 455, so it is not the Trino version; likely candidates are our planning-time statistics calls (one `count(*)` /
+  min-max query per table and plan, which upstream does not make) and the different join orders those statistics produce
+  (q20: upstream reads 10 % more rows but finishes 40 % sooner). Not investigated further in this item.
+- **Server profile `speed`:** does not change the picture (SF1 43.7 vs 46.7 s, SF10 common 277.6 vs 313.9 s, other runners
+  than the default jobs, so no profile-vs-profile conclusion).
+- **Worth a follow-up on our side:** the join-query gap (q03/q10/q12/q17/q20) - compare the plans (join order and
+  distribution) of ours and upstream for those queries and the cost of our statistics calls.
+- **Memory:** server peak is higher with ours (1.2-1.9 GB vs 0.9-1.0 GB: DuckDB does the aggregations); Trino's per-query
+  memory is much lower with ours on aggregation queries and about equal on pure joins.
