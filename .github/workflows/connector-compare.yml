@@ -1,0 +1,123 @@
+name: connector-compare
+
+# On request only: this repo's Trino connector vs the upstream server repo's flight-trino connector (branch
+# feat/trino-flight-connector, Trino 446), same Flight server build, same runner per job, TPC-H SF1 / SF10.
+# One job per (scale factor, server profile); both connectors run in the same job. See e2e/compare/run-compare.sh;
+# the report is printed at the end of the "Compare" step (docs/CONNECTOR-COMPARE.md is written from it).
+on:
+  workflow_dispatch:
+    inputs:
+      sf:
+        description: 'Scale factors: 1, 10 or both'
+        default: 'both'
+      profiles:
+        description: 'Server profiles: default, speed or both'
+        default: 'both'
+      server-build:
+        description: 'Flight server build from e2e-assets'
+        default: 'f06b5834e76e'
+      upstream-ref:
+        description: 'Upstream branch or commit (VadimSurpin/arrow-flight-server)'
+        default: 'feat/trino-flight-connector'
+      rounds:
+        description: 'Rounds per pass (round 1 = cold)'
+        default: '3'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        sf: ${{ fromJSON((inputs.sf == '1' && '[1]') || (inputs.sf == '10' && '[10]') || '[1,10]') }}
+        profile: ${{ fromJSON((inputs.profiles == 'default' && '["default"]') || (inputs.profiles == 'speed' && '["speed"]') || '["default","speed"]') }}
+    env:
+      SF: ${{ matrix.sf }}
+      PROFILE: ${{ matrix.profile }}
+      SERVER_BUILD: ${{ inputs.server-build }}
+      ROUNDS: ${{ inputs.rounds }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Free disk
+        if: matrix.sf != 1
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h /
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+          cache: maven
+      - name: Build this connector (Trino 455)
+        run: |
+          mkdir -p "$RUNNER_TEMP/zips"
+          mvn -B -ntp -P trino-455 -DskipTests clean package
+          cp trino-arrow-flight/target/trino-arrow-flight-*.zip "$RUNNER_TEMP/zips/ours.zip"
+          echo "ours $(git rev-parse --short=12 HEAD)" | tee -a "$RUNNER_TEMP/versions.txt"
+      - name: Build this connector for Trino 446 (best effort)
+        if: matrix.profile == 'default'
+        continue-on-error: true
+        run: |
+          mvn -B -ntp -P trino-455 -Ddep.trino.version=446 -Dmaven.compiler.release=21 -DskipTests clean package
+          cp trino-arrow-flight/target/trino-arrow-flight-*.zip "$RUNNER_TEMP/zips/ours446.zip"
+      - name: Build upstream connector (flight-trino, its own pom, JDK 21)
+        env:
+          UPSTREAM_REF: ${{ inputs.upstream-ref }}
+        run: |
+          git init -q "$RUNNER_TEMP/upstream" && cd "$RUNNER_TEMP/upstream"
+          git fetch -q --depth 1 https://github.com/VadimSurpin/arrow-flight-server "$UPSTREAM_REF"
+          git checkout -q FETCH_HEAD
+          echo "upstream $UPSTREAM_REF $(git rev-parse --short=12 HEAD) $(git log -1 --format=%cI)" | tee -a "$RUNNER_TEMP/versions.txt"
+          JAVA_HOME="$JAVA_HOME_21_X64" mvn -B -ntp -pl flight-trino -am -DskipTests -Dcheckstyle.skip -Dspotbugs.skip \
+            -Djacoco.skip package
+          cp flight-trino/target/trino-arrow-flight-*.zip "$RUNNER_TEMP/zips/up.zip"
+          unzip -l "$RUNNER_TEMP/zips/up.zip" | tail -3
+      - name: Download e2e assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/assets"
+          gh api "repos/$GITHUB_REPOSITORY/releases" \
+            --jq '.[] | select(.tag_name == "e2e-assets") | .assets[] | "\(.id) \(.name)"' |
+          while read -r id name; do
+            case "$name" in
+              *"$SERVER_BUILD"*.jar|*"$SERVER_BUILD".tar.zst|SHA256SUMS) ;;
+              test-data-sf1-types.tar.zst) [ "$SF" = 1 ] || continue ;;
+              *) continue ;;
+            esac
+            gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "$RUNNER_TEMP/assets/$name"
+          done
+          cd "$RUNNER_TEMP/assets" && ls -l && grep -v ' START-NOTES\.md$' SHA256SUMS | sha256sum --check --ignore-missing
+      - name: DuckDB for SF10 data and reference
+        if: matrix.sf != 1
+        run: pip install --quiet duckdb==1.4.1
+      - name: SF10 data cache
+        if: matrix.sf != 1
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tpch-sf${{ matrix.sf }}
+          key: tpch-sf${{ matrix.sf }}-duckdb141-v1
+      - name: Compare
+        run: |
+          cat "$RUNNER_TEMP/versions.txt"
+          PASSES="ours:455:$RUNNER_TEMP/zips/ours.zip up:446:$RUNNER_TEMP/zips/up.zip"
+          [ "$PROFILE" = default ] && PASSES="$PASSES ours446:446:$RUNNER_TEMP/zips/ours446.zip"
+          nproc; free -g; lscpu | grep 'Model name'
+          ASSETS="$RUNNER_TEMP/assets" WORK="$RUNNER_TEMP/work" OUT="$RUNNER_TEMP/out" DATA_CACHE="$RUNNER_TEMP/tpch-sf$SF" \
+          PASSES="$PASSES" e2e/compare/run-compare.sh
+          cp "$RUNNER_TEMP/versions.txt" "$RUNNER_TEMP/out/"
+      - name: Results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: compare-sf${{ matrix.sf }}-${{ matrix.profile }}
+          path: |
+            ${{ runner.temp }}/out/
+            !${{ runner.temp }}/out/**/r?/*.tsv
+          retention-days: 14
