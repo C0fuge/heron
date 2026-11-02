@@ -58,6 +58,21 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Maintainer, 2026-11-02 - CONNECTOR COMPARISON (take it first; finish mode lifted for this item only).** Compare the
+> two native Trino connectors to the same Flight server, on the same runner, TPC-H SF1 and SF10, answers checked (rows +
+> checksum against the DuckDB reference the e2e already uses), timings per query (cold + 2 warm, medians), Trino and
+> server peak memory:
+> - **ours**: this repo's connector (the Trino version our e2e uses);
+> - **upstream**: `VadimSurpin/arrow-flight-server` branch `feat/trino-flight-connector` module `flight-trino`
+>   (targets Trino 446; build it with its own pom). If the Trino versions differ, run each on its own Trino version and
+>   add one run of ours on Trino 446 too if our build supports it (else say so).
+> Server for both: kestrel pre-release `server-1.0.0-f06b5834e76e` (in `e2e-assets`), default settings, plus one extra
+> pass of each connector with the server started with `-DresourceProfile=speed`. Record each connector's pushdown
+> (EXPLAIN of a few queries: what reaches the server). Output: `docs/CONNECTOR-COMPARE.md` (tables per SF: correct
+> answers, sum of warm medians, per-query table, memory; versions/commits; a short verdict where each is faster and why).
+> Then write "CONNECTOR COMPARE DONE" here and stop.
+
+
 > **Final server build `server-1.0.0-0e457de30f25` is in the assets** (= 1e7b43a4e0c7 + JWT fix: `FLIGHT_JWT_AUDIENCE` no longer
 > fails at start with an NPE) (2026-10-29, local coordinator, finish mode; jar,
 > plugins tar, libs tar, `flight-auth-...tar.zst` (LDAP/JWT providers), lz4 codec jar + merged `SHA256SUMS`). Contains every
