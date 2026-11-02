@@ -58,6 +58,17 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Maintainer, 2026-11-03 00:45 - IMPROVEMENT from the connector comparison (take it first).** Ours is slower than
+> upstream on join queries that read the same rows: SF10 q03 19.2 vs 13.0 s, q10 16.4 vs 12.8, q12 15.1 vs 11.8, q17
+> 28.0 vs 22.1, q20 18.8 vs 11.9 (also on Trino 446, so not the Trino version). Find out why: compare the plans (join
+> order, distribution, build side) of ours and upstream for these queries, and the cost of our planning-time statistics
+> calls (`count(*)` / min-max per table and plan). Likely fixes: cache table statistics per table and data version,
+> make them cheaper or skip them where they do not change the plan, give Trino the statistics it needs for the right
+> join order. Prove with `connector-compare.yml` (ours vs up, SF1 + SF10, default + speed) against the newest kestrel
+> pre-release in `e2e-assets`; update `docs/CONNECTOR-COMPARE.md` (keep the old numbers as "before"). Then
+> "IMPROVEMENTS DONE".
+
+
 > **Maintainer, 2026-11-02 - CONNECTOR COMPARISON (take it first; finish mode lifted for this item only).** Compare the
 > two native Trino connectors to the same Flight server, on the same runner, TPC-H SF1 and SF10, answers checked (rows +
 > checksum against the DuckDB reference the e2e already uses), timings per query (cold + 2 warm, medians), Trino and
