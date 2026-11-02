@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CI end-to-end run: S3 (rclone) + Flight SQL server(s) + Trino with this plugin, TPC-H SF1 22/22
 # compared with e2e/ci/reference/sf1, and every table of schema 'types' compared with DuckDB
-# (pip duckdb==1.4.1) reading the same Parquet files (e2e/ci/types_check.py).
+# (pip duckdb==1.4.1 in python:3.12-slim) reading the same Parquet files (e2e/ci/types_check.py).
 # Also: an unpushable projection, TopN pushdown on vs off, dynamic filters on vs off (DF_QUERIES: answers
 # vs the reference, rows read and time per setting in dynfilter-rows.tsv), and split count x endpoint read parallelism
 # (PAR_QUERIES: answers vs the reference, times in splits-times.tsv).
@@ -25,7 +25,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 ASSETS="${ASSETS:?}"; PLUGIN_ZIP="${PLUGIN_ZIP:?}"; OUT="${OUT:?}"
 TRINO_VERSION="${TRINO_VERSION:-455}"; RESULT_MODE="${RESULT_MODE:-partial}"
-SERVERS="${SERVERS:-1}"; SERVER_HEAP="${SERVER_HEAP:-2g}"; SERVER_BUILD="${SERVER_BUILD:-a9e43ca5e296}"
+SERVERS="${SERVERS:-1}"; SERVER_HEAP="${SERVER_HEAP:-2g}"; SERVER_BUILD="${SERVER_BUILD:-0e457de30f25}"
 FAILOVER_QUERIES="${FAILOVER_QUERIES:-q01 q03 q05 q06 q18}"
 ICEBERG_FAILOVER_QUERIES="${ICEBERG_FAILOVER_QUERIES:-q01 q03 q18}"  # all in ICEBERG_QUERIES
 WORK="${WORK:-$(mktemp -d)}"
@@ -535,10 +535,12 @@ save_logs
 
 if [ -n "$TYPES" ]; then
   log "types: SELECT * per table vs DuckDB on the same Parquet"
-  python3 -m venv "$WORK/venv"
-  "$WORK/venv/bin/pip" install -q --disable-pip-version-check duckdb==1.4.1 trino==0.333.0
-  "$WORK/venv/bin/python" "$REPO/e2e/ci/types_check.py" "$WORK/s3/lake/parquet/types" 127.0.0.1:8080 \
-    "$OUT/types-summary.tsv" || status=1
+  # In python:3.12-slim with wheels only: on the ubuntu-26.04 runner image the host Python has no duckdb 1.4.1 wheel, and
+  # pip built it from source for ~18 minutes (run 41471740039). Host network reaches Trino; paths are mounted unchanged.
+  docker run --rm --network host -v "$REPO/e2e/ci:$REPO/e2e/ci:ro" -v "$WORK/s3/lake/parquet/types:$WORK/s3/lake/parquet/types:ro" \
+    -v "$OUT:$OUT" python:3.12-slim sh -c 'pip install -q --disable-pip-version-check --root-user-action=ignore --only-binary=:all: \
+      duckdb==1.4.1 trino==0.333.0 && exec python -I "$@"' types "$REPO/e2e/ci/types_check.py" "$WORK/s3/lake/parquet/types" \
+    127.0.0.1:8080 "$OUT/types-summary.tsv" || status=1
   save_logs
 fi
 
