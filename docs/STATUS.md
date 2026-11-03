@@ -77,8 +77,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 > 22 queries, ours 4 splits / up / ours `split_count=1`, every answer exact): SF10 sum of warm medians 402.1 -> **325.4 s**, no
 > query more than 2 % slower; 19 queries upstream finishes: ours-split1 **243.8 s vs upstream 313.8**. SF1 53.2 -> 49.4 s; only
 > SF1 q04 is slower (+0.3 s, +17 %; at SF10 q04 is 9 % faster) - accepted, see `docs/CONNECTOR-COMPARE.md` "Full suite with
-> `split_count=1`". **Next (session 98):** (1) check push runs build 41586915975 and e2e 41586916003 (the e2e's main TPC-H pass
-> now runs with one split; its splits section still covers 4 splits explicitly) - fix anything red; (2) read proof run
+> `split_count=1`". **Next (session 98):** (1) done: push runs build 41586915975 and e2e 41586916003
+> are green with the new default (1 + 3 servers); (2) read proof run
 > 41586926044 (`connector-compare`, SF1 + SF10, default profile, ours (new default) vs up; report at the end of each job's
 > Compare step, `get_job_logs` with `tail_lines` ~200 for the per-query table, ~260 for the sums), put its tables into
 > `docs/CONNECTOR-COMPARE.md` as "after" (keep session 94 numbers as "before"), and if ours is still faster than upstream in
@@ -1477,5 +1477,7 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-11-03 (cloud session 97): read full-suite run 41579205198 (SF1 + SF10, ours / up / ours `split_count=1`, all answers
   exact): one split is 19 % faster at SF10 (402.1 -> 325.4 s; no query > 2 % slower) and 7 % at SF1 (only q04 +0.3 s). **Changed
   the default `arrow-flight.split-count` 4 -> 1** (aa608f3, unit test added; failover, auth and protocol untouched). Push run build
-  41586915975 green (unit tests incl. the new one); e2e 41586916003 and proof compare 41586926044 (ours vs up, SF1 + SF10 default) still running at session end.
+  41586915975 green (unit tests incl. the new one); e2e 41586916003
+  green (1 server 14 min, 3 servers 23 min: TPC-H, types, Iceberg, failover, auth); proof compare 41586926044 (ours vs up,
+  SF1 + SF10 default) still running at session end.
   ~2.5 h + ~1.5 h of Actions minutes.
