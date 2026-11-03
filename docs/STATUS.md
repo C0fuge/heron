@@ -68,19 +68,21 @@ Kept up to date after every work session so work can be resumed from this reposi
 > pre-release in `e2e-assets`; update `docs/CONNECTOR-COMPARE.md` (keep the old numbers as "before"). Then
 > "IMPROVEMENTS DONE".
 >
-> **Session 96: cause found, fix not yet switched on.** Diagnostic run 41574777687 (SF10 default, f06b5834e76e = newest
-> kestrel build in `e2e-assets`, q03/q10/q12/q17/q20 x 3 rounds; `connector-compare.yml` got inputs `queries`, `variants`,
-> `plans`, `ours446` and prints plans + planning time). Warm sums: ours 115.3 s, upstream 91.9, ours with
-> `statistics_enabled=false` 114.4, ours with **`split_count=1` 80.0** (every answer exact). Statistics calls cost ~0.1 s of
-> planning (already cached per table, 600 s) and switching them off changes the plans (REPLICATED -> PARTITIONED) but not the
-> times, so join order is not it. The cause is the 4 key-range server statements per big scan (default
-> `arrow-flight.split-count=4`). Details: `docs/CONNECTOR-COMPARE.md` "Join-query gap: cause". **Next:** read run
-> 41579205198 (full 22 queries, SF1 + SF10 default, passes ours / up / ours-split1; the report is at the end of each job's
-> Compare step, `get_job_logs` with `tail_lines` ~1200 and grep `^| `). If ours-split1 is not slower than ours by more than
-> 10 % on any query and faster in sum at both SFs, change the default `split-count` to 1 (config + README +
-> `flight.properties.example` + unit test for the default; key-range splitting stays available as `split-count` > 1),
-> then rerun the compare (ours vs up) and write "IMPROVEMENTS DONE" - unless the maintainer answers the split_count Open
-> question otherwise.
+> **Session 96: cause found** (diagnostic run 41574777687, SF10: the 4 key-range server statements per big scan, default
+> `arrow-flight.split-count=4`; statistics calls ~0.1 s and not the cause; details `docs/CONNECTOR-COMPARE.md` "Join-query
+> gap: cause").
+>
+> **Session 97: fix switched on - `arrow-flight.split-count` default 4 -> 1** (commit aa608f3: config, README,
+> `flight.properties.example`, unit test `ArrowFlightConfigTest.oneServerQueryPerScanByDefault`). Evidence run 41579205198 (full
+> 22 queries, ours 4 splits / up / ours `split_count=1`, every answer exact): SF10 sum of warm medians 402.1 -> **325.4 s**, no
+> query more than 2 % slower; 19 queries upstream finishes: ours-split1 **243.8 s vs upstream 313.8**. SF1 53.2 -> 49.4 s; only
+> SF1 q04 is slower (+0.3 s, +17 %; at SF10 q04 is 9 % faster) - accepted, see `docs/CONNECTOR-COMPARE.md` "Full suite with
+> `split_count=1`". **Next (session 98):** (1) check push runs build 41586915975 and e2e 41586916003 (the e2e's main TPC-H pass
+> now runs with one split; its splits section still covers 4 splits explicitly) - fix anything red; (2) read proof run
+> 41586926044 (`connector-compare`, SF1 + SF10, default profile, ours (new default) vs up; report at the end of each job's
+> Compare step, `get_job_logs` with `tail_lines` ~200 for the per-query table, ~260 for the sums), put its tables into
+> `docs/CONNECTOR-COMPARE.md` as "after" (keep session 94 numbers as "before"), and if ours is still faster than upstream in
+> sum at both SFs write **"IMPROVEMENTS DONE"** here. Remaining slower spots vs upstream at SF10: q04 (+12 %), q12 (+10 %).
 
 
 > **Maintainer, 2026-11-02 - CONNECTOR COMPARISON (take it first; finish mode lifted for this item only).** Compare the
@@ -938,7 +940,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   with name "tpch.lineitem" does not exist because schema "tpch" does not exist` (jobs 122004793999, 122018291122,
   122034850840); on 1 server it answers. Through Trino q04 is exact (the plugin sends single-table scans). Looks like a
   non-coordinator member running a statement whose subquery table it never registered. Worth a look on the server side?
-- **`flight.split_count` default 4 vs 1 (session 65).** **Session 96: same result at SF10 on server f06b5834e76e** - on the five join
+- **`flight.split_count` default 4 vs 1 (session 65). Decided in session 97: default is now 1** (run 41579205198, see Next
+  steps); stands that want key-range splits set `arrow-flight.split-count=4`. Object if the stand shows 4 winning. History: **Session 96: same result at SF10 on server f06b5834e76e** - on the five join
   queries upstream was faster on, `split_count=1` is 30 % faster than 4 and 13 % faster than upstream (run 41574777687).
   Unless you object (or the stand shows 4 winning), the next session switches the default to 1 after the full-suite run
   41579205198 confirms it; stands that want range splits set `arrow-flight.split-count=4` explicitly. In CI (SF1, 4 vCPUs) one split is ~27 % faster on TPC-H (Trino
@@ -1471,3 +1474,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   `ours446` inputs, plans + planning time in the log. Runs 41574777687 (diagnostic, green), 41579205198 (full suite SF1 + SF10
   with ours-split1, still running at session end). No plugin code changed; invariants untouched. ~1 h + ~2.5 h of Actions
   minutes.
+- 2026-11-03 (cloud session 97): read full-suite run 41579205198 (SF1 + SF10, ours / up / ours `split_count=1`, all answers
+  exact): one split is 19 % faster at SF10 (402.1 -> 325.4 s; no query > 2 % slower) and 7 % at SF1 (only q04 +0.3 s). **Changed
+  the default `arrow-flight.split-count` 4 -> 1** (aa608f3, unit test added; failover, auth and protocol untouched). Push run build
+  41586915975 green (unit tests incl. the new one); e2e 41586916003 and proof compare 41586926044 (ours vs up, SF1 + SF10 default) still running at session end.
+  ~2.5 h + ~1.5 h of Actions minutes.

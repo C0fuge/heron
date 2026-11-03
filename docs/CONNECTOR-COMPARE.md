@@ -200,6 +200,8 @@ string ranges and REAL/DOUBLE stay in Trino), no aggregation / LIMIT / TopN, and
 - **Worth a follow-up on our side:** the join-query gap (q03/q10/q12/q17/q20) - compare the plans (join order and
   distribution) of ours and upstream for those queries and the cost of our statistics calls.
   **Done in session 96 (section below): the cause is the 4 key-range splits per scan, not the statistics or the plans.**
+  **Session 97: `split-count` default is now 1; with it ours is 22 % faster than upstream on the 19 common SF10 queries
+  (243.8 vs 313.8 s, run 41579205198) and faster or within 4 % on every one except q04 / q12 (+10-12 %).**
 - **Memory:** server peak is higher with ours (1.2-1.9 GB vs 0.9-1.0 GB: DuckDB does the aggregations); Trino's per-query
   memory is much lower with ours on aggregation queries and about equal on pure joins.
 
@@ -285,4 +287,4 @@ SF10 warm medians, s (split1 vs 4 splits):
 - **Decision (session 97):** `arrow-flight.split-count` default 4 -> **1**. Key-range splitting stays available
   (`split-count` > 1 or session `split_count`), e.g. for a scan whose Trino-side work dominates (the stand's 2026-10-23
   SF10 run favoured 4 for such a scan).
-- Proof with the new default (ours vs up, no variants): run [41593117071](https://github.com/C0fuge/heron/actions/runs/41593117071) - to be read by the next session.
+- Proof with the new default (ours vs up, no variants): run [41586926044](https://github.com/C0fuge/heron/actions/runs/41586926044) - to be read by the next session.
