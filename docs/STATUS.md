@@ -67,6 +67,20 @@ Kept up to date after every work session so work can be resumed from this reposi
 > join order. Prove with `connector-compare.yml` (ours vs up, SF1 + SF10, default + speed) against the newest kestrel
 > pre-release in `e2e-assets`; update `docs/CONNECTOR-COMPARE.md` (keep the old numbers as "before"). Then
 > "IMPROVEMENTS DONE".
+>
+> **Session 96: cause found, fix not yet switched on.** Diagnostic run 41574777687 (SF10 default, f06b5834e76e = newest
+> kestrel build in `e2e-assets`, q03/q10/q12/q17/q20 x 3 rounds; `connector-compare.yml` got inputs `queries`, `variants`,
+> `plans`, `ours446` and prints plans + planning time). Warm sums: ours 115.3 s, upstream 91.9, ours with
+> `statistics_enabled=false` 114.4, ours with **`split_count=1` 80.0** (every answer exact). Statistics calls cost ~0.1 s of
+> planning (already cached per table, 600 s) and switching them off changes the plans (REPLICATED -> PARTITIONED) but not the
+> times, so join order is not it. The cause is the 4 key-range server statements per big scan (default
+> `arrow-flight.split-count=4`). Details: `docs/CONNECTOR-COMPARE.md` "Join-query gap: cause". **Next:** read run
+> 41579205198 (full 22 queries, SF1 + SF10 default, passes ours / up / ours-split1; the report is at the end of each job's
+> Compare step, `get_job_logs` with `tail_lines` ~1200 and grep `^| `). If ours-split1 is not slower than ours by more than
+> 10 % on any query and faster in sum at both SFs, change the default `split-count` to 1 (config + README +
+> `flight.properties.example` + unit test for the default; key-range splitting stays available as `split-count` > 1),
+> then rerun the compare (ours vs up) and write "IMPROVEMENTS DONE" - unless the maintainer answers the split_count Open
+> question otherwise.
 
 
 > **Maintainer, 2026-11-02 - CONNECTOR COMPARISON (take it first; finish mode lifted for this item only).** Compare the
@@ -924,7 +938,10 @@ Kept up to date after every work session so work can be resumed from this reposi
   with name "tpch.lineitem" does not exist because schema "tpch" does not exist` (jobs 122004793999, 122018291122,
   122034850840); on 1 server it answers. Through Trino q04 is exact (the plugin sends single-table scans). Looks like a
   non-coordinator member running a statement whose subquery table it never registered. Worth a look on the server side?
-- **`flight.split_count` default 4 vs 1 (session 65).** In CI (SF1, 4 vCPUs) one split is ~27 % faster on TPC-H (Trino
+- **`flight.split_count` default 4 vs 1 (session 65).** **Session 96: same result at SF10 on server f06b5834e76e** - on the five join
+  queries upstream was faster on, `split_count=1` is 30 % faster than 4 and 13 % faster than upstream (run 41574777687).
+  Unless you object (or the stand shows 4 winning), the next session switches the default to 1 after the full-suite run
+  41579205198 confirms it; stands that want range splits set `arrow-flight.split-count=4` explicitly. In CI (SF1, 4 vCPUs) one split is ~27 % faster on TPC-H (Trino
   elapsed 30-35 s vs 42-56 s, 1 and 3 servers) because every range split re-reads the Parquet files on the server (4 range
   statements in sequence = 1.5x the work of one); the plugin and its Flight client add almost nothing. The stand's 2026-10-23
   numbers (SF10, int7) favoured 4 for a Trino-CPU-heavy scan and for q03/q18. Keep 4, change to 1, or split by endpoint only
@@ -1448,3 +1465,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   push run 41478757183 green on 1 + 3 servers). Fixed an 18-min stall in every e2e job: ubuntu-latest moved to ubuntu-26.04 and
   `pip install duckdb==1.4.1` built from source; the types check now runs in `python:3.12-slim`. No plugin code changed;
   invariants (failover, auth, answers) checked green. ~2.5 h of Actions minutes (5 jobs).
+- 2026-11-03 (cloud session 96): maintainer's IMPROVEMENT item (join-query gap vs upstream). Cause found: the 4 key-range
+  splits per scan (`split_count=1`: 5 join queries 80.0 s vs 115.3 default vs 91.9 upstream, SF10), not the planning-time
+  statistics (~0.1 s; off = same times) nor the join plans. `connector-compare.yml` gained `queries` / `variants` / `plans` /
+  `ours446` inputs, plans + planning time in the log. Runs 41574777687 (diagnostic, green), 41579205198 (full suite SF1 + SF10
+  with ours-split1, still running at session end). No plugin code changed; invariants untouched. ~1 h + ~2.5 h of Actions
+  minutes.

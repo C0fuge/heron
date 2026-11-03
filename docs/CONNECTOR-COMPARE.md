@@ -199,5 +199,38 @@ string ranges and REAL/DOUBLE stay in Trino), no aggregation / LIMIT / TopN, and
   than the default jobs, so no profile-vs-profile conclusion).
 - **Worth a follow-up on our side:** the join-query gap (q03/q10/q12/q17/q20) - compare the plans (join order and
   distribution) of ours and upstream for those queries and the cost of our statistics calls.
+  **Done in session 96 (section below): the cause is the 4 key-range splits per scan, not the statistics or the plans.**
 - **Memory:** server peak is higher with ours (1.2-1.9 GB vs 0.9-1.0 GB: DuckDB does the aggregations); Trino's per-query
   memory is much lower with ours on aggregation queries and about equal on pure joins.
+
+## Join-query gap: cause (session 96, 2026-11-03)
+
+Maintainer's follow-up item: why is ours slower than upstream on q03/q10/q12/q17/q20 at SF10? Diagnostic run
+[41574777687](https://github.com/C0fuge/heron/actions/runs/41574777687) (job 125715635108; SF10, default server profile,
+server `f06b5834e76e`, the 5 queries x 3 rounds, plans printed to the job log). The job now accepts a query subset,
+extra passes of ours with catalog session properties (`variants`), and prints EXPLAIN plus Trino planning / execution time.
+
+Warm medians, s (every answer exact in every round):
+
+| q | ours (default) | up | ours, `statistics_enabled=false` | ours, `split_count=1` |
+|---|---|---|---|---|
+| q03 | 21.69 | 15.53 | 21.78 | 15.95 |
+| q10 | 22.37 | 16.27 | 21.96 | **15.38** |
+| q12 | 17.96 | 14.44 | 17.62 | 15.09 |
+| q17 | 30.75 | 28.93 | 28.95 | **18.55** |
+| q20 | 22.57 | 16.73 | 24.11 | **15.05** |
+| **sum** | **115.3** | **91.9** | **114.4** | **80.0** |
+
+Trino planning time per query (warm, includes our metadata and statistics calls): ours 0.05-0.13 s, upstream 0.08-0.21 s.
+
+- **Not the statistics.** Their planning-time cost is ~0.1 s (the row count / min-max answers are cached per table,
+  `arrow-flight.statistics.cache-ttl-seconds`, 600 s), and with statistics switched off the times stay the same although
+  the plans change (q03 `c_custkey = o_custkey` REPLICATED with statistics, PARTITIONED without; q17 likewise). The join
+  order and distribution do not decide these queries on a single node.
+- **The cause is the key-range splitting** (`arrow-flight.split-count`, default 4): every big scan (lineitem, orders)
+  becomes 4 server statements `... WHERE key >= a AND key < b`, each planned and run by DuckDB on its own and competing for
+  the same cores. Upstream reads one split per Flight endpoint (one statement). With `split_count=1` ours is **30 % faster
+  than its default and 13 % faster than upstream** on these five queries (q17: 18.6 vs 28.9 s), with the same rows read.
+  This matches the CI finding of session 65/66 (SF1 suite ~27 % faster with one split; see STATUS Open questions).
+- Verification of the whole suite (22 queries, SF1 + SF10, ours vs `split_count=1` vs upstream): run
+  [41579205198](https://github.com/C0fuge/heron/actions/runs/41579205198), evaluated in the next session.
