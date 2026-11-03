@@ -22,6 +22,18 @@ on:
       rounds:
         description: 'Rounds per pass (round 1 = cold)'
         default: '3'
+      queries:
+        description: 'Timed queries, space-separated (empty = q01..q22)'
+        default: ''
+      variants:
+        description: 'Extra passes of ours: "name:prop=value,prop=value ..." (catalog session properties)'
+        default: ''
+      plans:
+        description: 'EXPLAIN these queries and print the plans to the log (empty = q01 q03 q06 q14 q18, not printed)'
+        default: ''
+      ours446:
+        description: 'Also run ours built for Trino 446 (default-profile jobs)'
+        default: 'true'
 
 permissions:
   contents: read
@@ -40,6 +52,10 @@ jobs:
       PROFILE: ${{ matrix.profile }}
       SERVER_BUILD: ${{ inputs.server-build }}
       ROUNDS: ${{ inputs.rounds }}
+      QUERIES: ${{ inputs.queries }}
+      VARIANTS: ${{ inputs.variants }}
+      PLANS: ${{ inputs.plans }}
+      OURS446: ${{ inputs.ours446 }}
     steps:
       - uses: actions/checkout@v5
       - name: Free disk
@@ -61,7 +77,7 @@ jobs:
           cp trino-arrow-flight/target/trino-arrow-flight-*.zip "$RUNNER_TEMP/zips/ours.zip"
           echo "ours $(git rev-parse --short=12 HEAD)" | tee -a "$RUNNER_TEMP/versions.txt"
       - name: Build this connector for Trino 446 (best effort)
-        if: matrix.profile == 'default'
+        if: matrix.profile == 'default' && inputs.ours446 != 'false'
         continue-on-error: true
         run: |
           mvn -B -ntp -P trino-455 -Ddep.trino.version=446 -Dmaven.compiler.release=21 -DskipTests clean package
@@ -107,7 +123,10 @@ jobs:
         run: |
           cat "$RUNNER_TEMP/versions.txt"
           PASSES="ours:455:$RUNNER_TEMP/zips/ours.zip up:446:$RUNNER_TEMP/zips/up.zip"
-          [ "$PROFILE" = default ] && PASSES="$PASSES ours446:446:$RUNNER_TEMP/zips/ours446.zip"
+          [ "$PROFILE" = default ] && [ "$OURS446" != false ] && PASSES="$PASSES ours446:446:$RUNNER_TEMP/zips/ours446.zip"
+          for v in $VARIANTS; do PASSES="$PASSES ${v%%:*}:455:$RUNNER_TEMP/zips/ours.zip:${v#*:}"; done
+          if [ -n "$PLANS" ]; then export EXPLAIN_QUERIES="$PLANS" PLAN_LOG=1; fi
+          echo "passes: $PASSES"
           nproc; free -g; lscpu | grep 'Model name'
           ASSETS="$RUNNER_TEMP/assets" WORK="$RUNNER_TEMP/work" OUT="$RUNNER_TEMP/out" DATA_CACHE="$RUNNER_TEMP/tpch-sf$SF" \
           PASSES="$PASSES" e2e/compare/run-compare.sh

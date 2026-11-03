@@ -3,7 +3,13 @@
 # upstream server repo's flight-trino connector, against the same Flight server on the same runner, TPC-H at scale SF.
 #
 #   ASSETS=<e2e-assets dir> WORK=<dir> OUT=<dir> SF=1|10 PROFILE=default|speed \
-#   PASSES="ours:455:<zip> up:446:<zip> [ours446:446:<zip>]" e2e/compare/run-compare.sh
+#   PASSES="ours:455:<zip> up:446:<zip> [ours446:446:<zip>] [name:455:<zip>:prop=value,prop=value]" \
+#   [QUERIES="q03 q10"] e2e/compare/run-compare.sh
+#
+# A 4th pass field sets catalog session properties for every query of that pass (e.g. ours-nostats with
+# statistics_enabled=false); a pass whose name starts with "up" uses the upstream catalog properties. QUERIES limits the
+# timed queries (default: all). PLAN_LOG=1 prints the EXPLAIN of EXPLAIN_QUERIES (without Layout lines) to the job log,
+# and stats.tsv also records Trino's planning / analysis / execution time per query.
 #
 # Per pass (connector x Trino version): fresh server (PROFILE=speed adds -DresourceProfile=speed, nothing else is set
 # beyond data location / S3 / plugin dirs), fresh Trino (TRINO_XMX, same config for every pass), EXPLAIN of
@@ -19,6 +25,7 @@ PASSES="${PASSES:?}"; SERVER_BUILD="${SERVER_BUILD:-f06b5834e76e}"; ROUNDS="${RO
 TRINO_XMX="${TRINO_XMX:-8G}"; TRINO_QUERY_MEM="${TRINO_QUERY_MEM:-4GB}"; SERVER_HEAP="${SERVER_HEAP:-3g}"
 QUERY_TIMEOUT="${QUERY_TIMEOUT:-900}"  # seconds per query
 EXPLAIN_QUERIES="${EXPLAIN_QUERIES:-q01 q03 q06 q14 q18}"
+QUERIES="${QUERIES:-}"; PLAN_LOG="${PLAN_LOG:-0}"
 DATA_CACHE="${DATA_CACHE:-$WORK/tpch-sf$SF}"   # SF10: Parquet + reference (cached by the workflow)
 NET=afcmp
 QDIR="$REPO/e2e/ci/queries"
@@ -115,18 +122,20 @@ mem_peak() {  # container samples-file
   awk -v c="$1" '$1 == c { print $2 }' "$2" | while read -r v; do to_bytes "$v"; done | sort -n | tail -1 | sed 's/$/ stats/'
 }
 
-query_stats() {  # source -> "rows bytes peak_user_mem_bytes"
+query_stats() {  # source -> "rows bytes peak_user_mem planning analysis execution"
   local id
   id=$(curl -fsS -H 'X-Trino-User: cmp' http://127.0.0.1:8080/v1/query \
     | jq -r --arg s "$1" '[.[] | select(.session.source == $s)] | last | .queryId // empty' 2>/dev/null || true)
-  [ -n "$id" ] || { echo "? ? ?"; return; }
+  [ -n "$id" ] || { echo "? ? ? ? ? ?"; return; }
   curl -fsS -H 'X-Trino-User: cmp' "http://127.0.0.1:8080/v1/query/$id" \
-    | jq -r '.queryStats | "\(.physicalInputPositions) \(.physicalInputDataSize) \(.peakUserMemoryReservation)"' 2>/dev/null \
-    || echo "? ? ?"
+    | jq -r '.queryStats | "\(.physicalInputPositions) \(.physicalInputDataSize) \(.peakUserMemoryReservation) \(.planningTime) \(.analysisTime) \(.executionTime)"' 2>/dev/null \
+    || echo "? ? ? ? ? ?"
 }
 
-run_pass() {  # name trino-version plugin-zip
-  local name=$1 version=$2 zip=$3 dir="$OUT/$1" catalog="$WORK/$1.properties"
+run_pass() {  # name trino-version plugin-zip [session props a=b,c=d]
+  local name=$1 version=$2 zip=$3 props=${4:-} dir="$OUT/$1" catalog="$WORK/$1.properties"
+  local sess=() kv
+  for kv in ${props//,/ }; do sess+=(--session "flight.$kv"); done
   mkdir -p "$dir" "$WORK/plugin-$name"
   rm -rf "${WORK:?}/plugin-$name"/*; unzip -qj "$zip" -d "$WORK/plugin-$name"
   case "$name" in
@@ -135,7 +144,8 @@ run_pass() {  # name trino-version plugin-zip
   esac
   log "pass $name: Trino $version, profile $PROFILE, sf$SF"
   { echo "pass=$name"; echo "trino=$version"; echo "profile=$PROFILE"; echo "sf=$SF"; echo "server=$SERVER_BUILD"
-    echo "zip=$(basename "$zip") $(sha256sum "$zip" | cut -c1-12)"; } > "$dir/meta.txt"
+    echo "zip=$(basename "$zip") $(sha256sum "$zip" | cut -c1-12)"; [ -z "$props" ] || echo "note=session $props"
+  } > "$dir/meta.txt"
   if ! start_server; then echo "server did not start" >> "$dir/meta.txt"; return 0; fi
   if ! start_trino "$version" "$WORK/plugin-$name" "$catalog"; then
     echo "trino did not start" >> "$dir/meta.txt"; docker logs trino > "$dir/trino.log" 2>&1 || true; return 0
@@ -143,15 +153,16 @@ run_pass() {  # name trino-version plugin-zip
   docker exec trino java -version 2>&1 | head -1 | sed 's/^/trino_jvm=/' >> "$dir/meta.txt" || true
   sampler > "$dir/mem-samples.txt" & local spid=$!
   printf 'query\tround\tseconds\tstatus\n' > "$dir/times.tsv"
-  printf 'query\tround\trows_read\tbytes_read\tpeak_user_mem\n' > "$dir/stats.tsv"
+  printf 'query\tround\trows_read\tbytes_read\tpeak_user_mem\tplanning\tanalysis\texecution\n' > "$dir/stats.tsv"
   for r in $(seq 1 "$ROUNDS"); do
     mkdir -p "$dir/r$r"
     for f in "$QDIR"/q*.sql; do
       local q; q=$(basename "$f" .sql)
+      [ -z "$QUERIES" ] || [[ " $QUERIES " == *" $q "* ]] || continue
       local src="cmp-$name-$q-r$r" t0 t1 st=ok
       t0=$(date +%s.%N)
       if timeout "$QUERY_TIMEOUT" docker exec trino trino --catalog flight --schema tpch --output-format TSV \
-           --source "$src" --session "query_max_run_time=${QUERY_TIMEOUT}s" -f "/queries/$q.sql" \
+           --source "$src" --session "query_max_run_time=${QUERY_TIMEOUT}s" "${sess[@]}" -f "/queries/$q.sql" \
            > "$dir/r$r/$q.tsv" 2> "$dir/r$r/$q.err"; then
         rm -f "$dir/r$r/$q.err"
       else
@@ -177,15 +188,19 @@ run_pass() {  # name trino-version plugin-zip
   for q in $EXPLAIN_QUERIES; do
     { echo "EXPLAIN"; cat "$QDIR/$q.sql"; } > "$WORK/explain-$q.sql"
     docker cp "$WORK/explain-$q.sql" trino:/tmp/explain.sql >/dev/null
-    docker exec trino trino --catalog flight --schema tpch -f /tmp/explain.sql > "$dir/explain/$q.txt" 2>&1 || true
+    docker exec trino trino --catalog flight --schema tpch "${sess[@]}" -f /tmp/explain.sql > "$dir/explain/$q.txt" 2>&1 || true
+    if [ "$PLAN_LOG" = 1 ]; then
+      echo "---- PLAN $name $q ----"
+      grep -v -e 'Layout:' -e '^\s*│\?\s*\$hashvalue' "$dir/explain/$q.txt" | sed 's/^"//; s/"$//' | cut -c1-260 || true
+    fi
   done
   docker logs trino > "$dir/trino.log" 2>&1 || true; docker logs flight1 > "$dir/flight1.log" 2>&1 || true
   docker rm -f trino flight1 >/dev/null 2>&1 || true
 }
 
 for p in $PASSES; do
-  IFS=: read -r name version zip <<< "$p"
-  if [ -n "$zip" ] && [ -f "$zip" ]; then run_pass "$name" "$version" "$zip"
+  IFS=: read -r name version zip props <<< "$p"
+  if [ -n "$zip" ] && [ -f "$zip" ]; then run_pass "$name" "$version" "$zip" "$props"
   else mkdir -p "$OUT/$name"; printf 'pass=%s\ntrino=%s\nnot built\n' "$name" "$version" > "$OUT/$name/meta.txt"; fi
 done
 python3 "$REPO/e2e/compare/report.py" "$OUT" "$REF" | tee "$OUT/report.md"

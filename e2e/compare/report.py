@@ -48,11 +48,20 @@ def size_mb(s):
     return f"{float(m.group(1)) * f / 1e6:.0f}"
 
 
+def secs(s):
+    """Trino Duration string ('1.23s', '850.00ms', '2.50m') -> seconds."""
+    m = re.fullmatch(r"([\d.]+)\s*(ns|us|ms|s|m|h|d)", str(s))
+    if not m:
+        return None
+    f = {"ns": 1e-9, "us": 1e-6, "ms": 1e-3, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
+    return float(m.group(1)) * f
+
+
 def main():
     out, ref = sys.argv[1:3]
     passes = sorted(d for d in os.listdir(out) if os.path.isfile(os.path.join(out, d, "meta.txt")))
     order = {"ours": 0, "up": 1, "ours446": 2}
-    passes.sort(key=lambda p: order.get(p, 9))
+    passes.sort(key=lambda p: (order.get(p, 9), p))
     queries = sorted(f[:-4] for f in os.listdir(ref) if re.fullmatch(r"q\d\d\.tsv", f))
     refsum = {r[0]: r[1:] for r in (l.rstrip("\n").split("\t") for l in open(os.path.join(out, "reference-sums.tsv")))}
     data = {}
@@ -94,6 +103,9 @@ def main():
     def fmt(v):
         return "-" if v is None else f"{v:.2f}"
 
+    ran = {q for p in passes for q in data[p]["times"]}
+    if ran:
+        queries = [q for q in queries if q in ran]   # QUERIES subset
     any_meta = next((data[p]["meta"] for p in passes), {})
     print(f"## SF{any_meta.get('sf', '?')}, server profile {any_meta.get('profile', '?')}\n")
     print("| pass | Trino | JVM | plugin zip (sha256) | note |\n|---|---|---|---|---|")
@@ -139,6 +151,22 @@ def main():
             row += (f" {fmt(cold(p, q))} | {fmt(warm(p, q))} | {ans} | {st.get('rows_read', '?')} | "
                     f"{size_mb(st.get('bytes_read'))} | {size_mb(st.get('peak_user_mem'))} |")
         print(row)
+    if any("planning" in s for p in passes for s in data[p]["stats"].values()):
+        print("\nTrino planning / execution time per query (warm rounds, median s; planning includes the connector's "
+              "metadata and statistics calls):\n")
+        print("| query |" + "".join(f" {p} planning | {p} execution |" for p in passes))
+        print("|" + "---|" * (1 + 2 * len(passes)))
+        for q in queries:
+            row = f"| {q} |"
+            for p in passes:
+                dd = data[p]
+                vals = {}
+                for k in ("planning", "execution"):
+                    v = [secs(dd["stats"][(q, rr)].get(k)) for rr in dd["rounds"] if rr > 1 and (q, rr) in dd["stats"]]
+                    v = [x for x in v if x is not None]
+                    vals[k] = statistics.median(v) if v else None
+                row += f" {fmt(vals['planning'])} | {fmt(vals['execution'])} |"
+            print(row)
     print("\n### Pushdown (EXPLAIN: table scans, i.e. what reaches the server)\n")
     for p in passes:
         ed = os.path.join(data[p]["dir"], "explain")
