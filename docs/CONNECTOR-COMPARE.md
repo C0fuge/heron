@@ -232,5 +232,57 @@ Trino planning time per query (warm, includes our metadata and statistics calls)
   the same cores. Upstream reads one split per Flight endpoint (one statement). With `split_count=1` ours is **30 % faster
   than its default and 13 % faster than upstream** on these five queries (q17: 18.6 vs 28.9 s), with the same rows read.
   This matches the CI finding of session 65/66 (SF1 suite ~27 % faster with one split; see STATUS Open questions).
-- Verification of the whole suite (22 queries, SF1 + SF10, ours vs `split_count=1` vs upstream): run
-  [41579205198](https://github.com/C0fuge/heron/actions/runs/41579205198), evaluated in the next session.
+- Verification of the whole suite: see the next section.
+
+## Full suite with `split_count=1` (session 97, 2026-11-03) - the new default
+
+Run [41579205198](https://github.com/C0fuge/heron/actions/runs/41579205198) (jobs 125729788996 SF1, 125729789112 SF10;
+default server profile, server `f06b5834e76e`, ours `62cb748c436f` = old default 4 splits, upstream `2e86e98ad599` on
+Trino 446, ours-split1 = same plugin with session `split_count=1`; 3 rounds, warm = median of rounds 2-3). Every answer
+that came back is exact in every round; upstream again fails q09, q18, q21 at SF10 (Trino's 4 GB per-node limit).
+
+| | ours (4 splits, before) | up | **ours-split1 (now the default)** |
+|---|---|---|---|
+| SF1 correct | 22/22 | 22/22 | 22/22 |
+| SF1 sum warm medians s | 53.2 | 61.6 | **49.4** |
+| SF1 Trino / server peak MB | 5212 / 1254 | 4057 / 1007 | 4284 / 1006 |
+| SF10 correct | 22/22 | 19/22 | 22/22 |
+| SF10 sum warm medians s, all 22 | 402.1 | - | **325.4** |
+| SF10 sum warm medians s, 19 common | 304.2 | 313.8 | **243.8** |
+
+SF10 warm medians, s (split1 vs 4 splits):
+
+| q | ours 4 splits | up | ours-split1 | split1 vs 4 |
+|---|---|---|---|---|
+| q01 | 10.47 | 29.21 | 10.70 | +2 % |
+| q02 | 6.28 | 7.18 | 5.45 | -13 % |
+| q03 | 20.84 | 14.77 | 14.41 | -31 % |
+| q04 | 12.47 | 10.14 | 11.33 | -9 % |
+| q05 | 23.56 | 23.25 | 17.62 | -25 % |
+| q06 | 12.32 | 15.02 | 12.16 | -1 % |
+| q07 | 24.91 | 30.52 | 16.91 | -32 % |
+| q08 | 21.63 | 27.45 | 14.71 | -32 % |
+| q09 | 25.33 | fail | 18.75 | -26 % |
+| q10 | 20.06 | 15.60 | 16.09 | -20 % |
+| q11 | 5.19 | 5.91 | 3.90 | -25 % |
+| q12 | 16.56 | 13.36 | 14.63 | -12 % |
+| q13 | 9.63 | 10.45 | 7.38 | -23 % |
+| q14 | 14.46 | 14.09 | 14.30 | -1 % |
+| q15 | 29.45 | 30.05 | 29.82 | +1 % |
+| q16 | 4.04 | 3.73 | 3.62 | -10 % |
+| q17 | 29.64 | 30.52 | 18.50 | -38 % |
+| q18 | 27.56 | fail | 24.91 | -10 % |
+| q19 | 14.25 | 13.91 | 14.49 | +2 % |
+| q20 | 24.29 | 13.97 | 13.71 | -44 % |
+| q21 | 44.98 | fail | 37.94 | -16 % |
+| q22 | 4.20 | 4.63 | 4.04 | -4 % |
+
+- **SF10:** no query is more than 2 % slower with one split; the sum is 19 % lower. Against upstream, ours-split1 is
+  faster or equal (within 4 %) on every common query except q04 (+12 %) and q12 (+10 %), and 22 % faster in sum.
+- **SF1:** 7 % lower sum; one query is slower by more than 10 %: q04 2.08 vs 1.78 s warm (+0.3 s; cold 2.73 vs 2.31).
+  At SF10 q04 is 9 % faster with one split, so this is taken as the small-table case where 4 parallel server statements
+  still pay off, not a reason to keep 4. Other SF1 queries: -28 % (q17) to +4 %.
+- **Decision (session 97):** `arrow-flight.split-count` default 4 -> **1**. Key-range splitting stays available
+  (`split-count` > 1 or session `split_count`), e.g. for a scan whose Trino-side work dominates (the stand's 2026-10-23
+  SF10 run favoured 4 for such a scan).
+- Proof with the new default (ours vs up, no variants): run [41593117071](https://github.com/C0fuge/heron/actions/runs/41593117071) - to be read by the next session.

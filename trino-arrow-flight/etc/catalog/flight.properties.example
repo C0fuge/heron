@@ -39,6 +39,8 @@ arrow-flight.bearer-token=test-token
 # arrow-flight.dynamic-filtering.enabled=false
 # arrow-flight.dynamic-filtering.wait-timeout-ms=10000
 # arrow-flight.dynamic-filtering.max-values=1000
+# Key-range splits per large scan; each is its own server query re-reading the files (1 = one query per scan).
+# arrow-flight.split-count=1
 # Endpoints (one per Flight node) of one split read at the same time; 1 = one after another.
 # arrow-flight.endpoint-read-parallelism=1
 # Fetch and decode the next batch of a scan in the background while Trino processes the current page.

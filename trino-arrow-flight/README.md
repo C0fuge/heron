@@ -20,8 +20,8 @@ JDBC serialization in between.
 
 The Flight server already speaks the columnar wire format Trino wants. Every
 `FlightEndpoint` it returns from `GetFlightInfo` is one Arrow stream from the Flight node that
-owns the data. A scan becomes one Trino split, or several key-range splits for large tables
-(`arrow-flight.split-count`); each split plans its query on the worker (so join dynamic filters
+owns the data. A scan becomes one Trino split, or, if `arrow-flight.split-count` > 1 (default 1), several key-range
+splits for large tables; each split plans its query on the worker (so join dynamic filters
 can be added) and reads that query's endpoints, one after another or several at a time
 (`arrow-flight.endpoint-read-parallelism`).
 
@@ -173,7 +173,7 @@ return correct results against 50k rows.
 | `arrow-flight.dynamic-filtering.enabled` | `false` | add join dynamic filters to the server SQL (see Pushdown) |
 | `arrow-flight.dynamic-filtering.wait-timeout-ms` | `10000` | how long a probe-side scan waits for them; `0` = do not wait |
 | `arrow-flight.dynamic-filtering.max-values` | `1000` | largest `IN` list a dynamic filter becomes (session `dynamic_filtering_max_values`); more values are sent as their `[min, max]` range |
-| `arrow-flight.split-count` | `4` | range splits per large plain scan (session `split_count`); each split is one server query, `1` = one query per scan |
+| `arrow-flight.split-count` | `1` | key-range splits per large plain scan (session `split_count`); each split is its own server query that re-reads the table's files, so `1` (one query per scan, the default since session 97) is faster on the server; `4` was the default before and can be set for a scan whose Trino-side work dominates |
 | `arrow-flight.split-min-rows` | `1000000` | no range split smaller than this many rows (after the scan's filters, estimated) |
 | `arrow-flight.split-columns` | *(empty)* | range-split column per table, e.g. `tpch.lineitem=l_orderkey`; default: the first integer/date column |
 | `arrow-flight.endpoint-read-parallelism` | `1` | endpoints of one split read at the same time (session `endpoint_read_parallelism`). The server answers each split's query with one endpoint per Flight node; `1` reads them one after another, so a split keeps one node busy at a time. Plain scans only; failover rules per endpoint are unchanged |

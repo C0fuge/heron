@@ -57,7 +57,7 @@ public class ArrowFlightConfig
     private boolean expressionPushdownEnabled = true;
     private boolean statisticsEnabled = true;
     private long statisticsCacheTtlSeconds = 600;
-    private int splitCount = 4;
+    private int splitCount = 1;
     private long splitMinRows = 1_000_000;
     private String splitColumns = "";
     private int dynamicFilteringWaitMillis = 10_000;
@@ -431,7 +431,7 @@ public class ArrowFlightConfig
     }
 
     @Config("arrow-flight.split-count")
-    @ConfigDescription("Parallel range splits per large table scan (1 = one stream per table)")
+    @ConfigDescription("Key-range splits per large table scan, each its own server query (default 1 = one query per scan)")
     public ArrowFlightConfig setSplitCount(int splitCount)
     {
         this.splitCount = splitCount;

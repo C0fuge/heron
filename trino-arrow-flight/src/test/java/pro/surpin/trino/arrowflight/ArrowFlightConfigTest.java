@@ -60,4 +60,12 @@ class ArrowFlightConfigTest
                 .setResultCompression(ResultCompression.ZSTD);
         assertEquals(ResultCompression.ZSTD, zstd.toFlightConfig().getResultCompression());
     }
+
+    @Test
+    void oneServerQueryPerScanByDefault()
+    {
+        // session 96/97: key-range splits re-read the files once per split on the server; one query per scan is faster
+        assertEquals(1, new ArrowFlightConfig().getSplitCount());
+        assertEquals(4, new ArrowFlightConfig().setSplitCount(4).getSplitCount());
+    }
 }
