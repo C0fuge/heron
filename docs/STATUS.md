@@ -83,6 +83,13 @@ Kept up to date after every work session so work can be resumed from this reposi
 > Compare step, `get_job_logs` with `tail_lines` ~200 for the per-query table, ~260 for the sums), put its tables into
 > `docs/CONNECTOR-COMPARE.md` as "after" (keep session 94 numbers as "before"), and if ours is still faster than upstream in
 > sum at both SFs write **"IMPROVEMENTS DONE"** here. Remaining slower spots vs upstream at SF10: q04 (+12 %), q12 (+10 %).
+>
+> **Session 98: IMPROVEMENTS DONE.** Proof run 41586926044 (ours with the shipped default `split-count=1` vs upstream, default
+> profile, server f06b5834e76e, every answer exact): SF1 22/22 vs 22/22, warm sum **60.8 vs 74.8 s**; SF10 22/22 vs 19/22
+> (upstream q09/q18/q21 over Trino's 4 GB limit), 19 common queries **252.1 vs 320.9 s** (before: 258.6 vs 269.3). The five
+> join queries at SF10: q03 14.8 vs 15.7, q10 15.1 vs 15.0, q12 15.4 vs 17.0, q17 19.6 vs 30.2, q20 14.4 vs 15.8 s. Tables in
+> `docs/CONNECTOR-COMPARE.md` "After: proof with `split-count=1` as the default" (session 94 numbers kept as "before"). Only
+> q15 / q19 (+15 %, noisy rounds; equal in run 41579205198) were slower than upstream at SF10. No open item left from this request.
 
 
 > **Maintainer, 2026-11-02 - CONNECTOR COMPARISON (take it first; finish mode lifted for this item only).** Compare the
@@ -921,9 +928,6 @@ Kept up to date after every work session so work can be resumed from this reposi
 - **Server f06b5834e76e (session 95).** The kestrel pre-release used by the connector comparison is newer than the CI default
   0e457de30f25 (made default this session as the note above asked). Should the e2e suite run on f06b5834e76e and make it the
   default, or does it stay a comparison-only build?
-- **Connector comparison follow-up (session 94).** `docs/CONNECTOR-COMPARE.md`: ours finishes everything and wins on
-  aggregation-heavy TPC-H queries; upstream `flight-trino` is faster on q03/q10/q12/q17/q20 at SF10 with identical scans. Should
-  a session dig into those join plans (and the cost of our planning-time statistics calls), or is the comparison enough?
 - **Server (deployment): login-module jars must precede the server jar on the classpath (session 88).** The a9e43ca5e296
   server jar bundles nimbus-jose-jwt **10.0.1**; with `-cp server.jar:libs/*:auth/jwt/*` the jwt module (built against 10.10)
   runs on 10.0.1 and the server stops at startup: `NullPointerException ... ImmutableCollections$Set12.contains` from
@@ -1481,3 +1485,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   green (1 server 14 min, 3 servers 23 min: TPC-H, types, Iceberg, failover, auth); proof compare 41586926044 (ours vs up,
   SF1 + SF10 default) still running at session end.
   ~2.5 h + ~1.5 h of Actions minutes.
+- 2026-11-03 session 98: read proof run 41586926044 (connector-compare, SF1 + SF10 default, ours with `split-count=1` default vs
+  upstream; jobs 125754488670 / 125754488418): every answer exact, ours faster in sum at both SFs (SF1 60.8 vs 74.8 s, SF10 19
+  common 252.1 vs 320.9 s) and on the five join queries except q10 (equal). `docs/CONNECTOR-COMPARE.md` "After" section added,
+  verdict updated; Next steps item marked **IMPROVEMENTS DONE**; the session-94 open question on the join gap removed
+  (answered). Docs only, no CI run started. ~10 min.

@@ -48,6 +48,9 @@ Run [41452015076](https://github.com/C0fuge/heron/actions/runs/41452015076).
 
 ## SF1
 
+**Before** (session 94, ours with the old default `split-count=4`; the numbers with the new default are in
+"After: proof with `split-count=1` as the default" at the end).
+
 Every pass: **22/22 answers equal to the reference in all 3 rounds, 22/22 checksums equal**.
 
 | job (runner CPU) | pass | sum cold s | **sum warm medians s** | Trino peak MB | server peak MB |
@@ -95,6 +98,8 @@ Speed profile, warm s (ours / up): q01 1.54 / 2.44, q07 2.13 / 3.00, q09 2.39 / 
 q21 3.57 / 4.87; q03 2.23 / 1.90, q17 2.95 / 2.62, q20 1.94 / 1.74 (all other queries within ±0.2 s).
 
 ## SF10
+
+**Before** (session 94, ours with the old default `split-count=4`; see "After" at the end).
 
 Data: DuckDB `dbgen(sf=10)` Parquet, 2.85 GB (cached as `tpch-sf10-duckdb141-v1`). q11 has 0 rows at SF10 (its
 `0.0001` fraction is the SF1 constant), same in the reference and in both connectors.
@@ -202,6 +207,8 @@ string ranges and REAL/DOUBLE stay in Trino), no aggregation / LIMIT / TopN, and
   **Done in session 96 (section below): the cause is the 4 key-range splits per scan, not the statistics or the plans.**
   **Session 97: `split-count` default is now 1; with it ours is 22 % faster than upstream on the 19 common SF10 queries
   (243.8 vs 313.8 s, run 41579205198) and faster or within 4 % on every one except q04 / q12 (+10-12 %).**
+  **Session 98 (proof with the shipped default, run 41586926044): SF1 60.8 vs 74.8 s, SF10 19 common 252.1 vs 320.9 s; the
+  five join queries are now equal or faster than upstream (see "After").**
 - **Memory:** server peak is higher with ours (1.2-1.9 GB vs 0.9-1.0 GB: DuckDB does the aggregations); Trino's per-query
   memory is much lower with ours on aggregation queries and about equal on pure joins.
 
@@ -287,4 +294,51 @@ SF10 warm medians, s (split1 vs 4 splits):
 - **Decision (session 97):** `arrow-flight.split-count` default 4 -> **1**. Key-range splitting stays available
   (`split-count` > 1 or session `split_count`), e.g. for a scan whose Trino-side work dominates (the stand's 2026-10-23
   SF10 run favoured 4 for such a scan).
-- Proof with the new default (ours vs up, no variants): run [41586926044](https://github.com/C0fuge/heron/actions/runs/41586926044) - to be read by the next session.
+- Proof with the new default (ours vs up, no variants): next section.
+
+## After: proof with `split-count=1` as the default (session 98, 2026-11-03)
+
+Run [41586926044](https://github.com/C0fuge/heron/actions/runs/41586926044) (jobs 125754488670 SF1, 125754488418 SF10;
+default server profile, server `f06b5834e76e`, ours = commit aa608f3 with the shipped default (no session properties) on
+Trino 455, up = upstream branch head at run time on Trino 446; 3 rounds, warm = median of rounds 2-3). Every answer that
+came back is exact in every round (checksums = reference); upstream again fails q09, q18, q21 at SF10 (Trino's 4 GB
+per-node limit, every round). Runners differ from the "before" jobs, so compare within a row of this table.
+
+| | ours (new default) | up |
+|---|---|---|
+| SF1 correct | 22/22 | 22/22 |
+| SF1 sum cold / **warm medians** s | 77.5 / **60.8** | 94.9 / **74.8** |
+| SF1 Trino / server peak MB | 3392 / 979 | 4543 / 1022 |
+| SF10 correct | 22/22 | 19/22 |
+| SF10 sum warm medians s, all 22 | 332.7 | - |
+| SF10 sum warm medians s, **19 common** | **252.1** | **320.9** |
+| SF10 Trino / server peak MB | 8333 / 1814 | 9637 / 1461 |
+
+Ours is 19 % faster than upstream at SF1 and 21 % faster on the common SF10 queries (before: 12 % resp. 4 %).
+
+The five join queries of the maintainer's item, SF10 warm medians s (before = session 94 default job, same server):
+
+| q | before: ours | before: up | **after: ours** | **after: up** |
+|---|---|---|---|---|
+| q03 | 19.22 | 13.04 | **14.82** | 15.72 |
+| q10 | 16.39 | 12.84 | **15.09** | 15.04 |
+| q12 | 15.08 | 11.84 | **15.41** | 16.98 |
+| q17 | 27.99 | 22.11 | **19.55** | 30.18 |
+| q20 | 18.75 | 11.93 | **14.41** | 15.75 |
+
+SF10 per query, warm medians s (ours / up): q01 10.85 / 28.98, q02 4.50 / 8.27, q04 11.32 / 10.84, q05 18.30 / 23.46,
+q06 12.77 / 12.51, q07 17.51 / 30.95, q08 14.89 / 28.05, q09 16.23 / fail, q11 3.29 / 5.75, q13 6.94 / 10.90,
+q14 14.51 / 14.75, q15 33.62 / 29.34, q16 3.88 / 4.33, q18 27.79 / fail, q19 16.85 / 14.79, q21 36.66 / fail,
+q22 3.56 / 4.31. Planning time (includes our statistics calls) 0.02-0.25 s for ours, 0.02-0.21 s for upstream.
+
+SF1 per query, warm medians s (ours / up): q01 2.17 / 4.50, q02 2.21 / 2.56, q03 2.85 / 3.01, q04 2.30 / 2.50,
+q05 3.35 / 4.38, q06 2.19 / 2.45, q07 2.96 / 4.40, q08 2.90 / 4.53, q09 3.12 / 5.26, q10 2.97 / 2.84, q11 1.97 / 2.19,
+q12 2.67 / 2.56, q13 2.25 / 2.47, q14 2.56 / 2.52, q15 3.46 / 3.42, q16 2.33 / 2.03, q17 2.91 / 4.05, q18 3.84 / 4.93,
+q19 2.58 / 2.56, q20 2.69 / 2.67, q21 4.72 / 7.18, q22 1.79 / 1.81.
+
+- **Remaining spots where upstream is faster (SF10):** q15 (+15 %) and q19 (+14 %), both with a noisy round in ours
+  (q15 cold 28.8 s < warm 33.6 s; q19 cold 23.2 s) and both read the same or fewer rows than upstream; q04 +4 %; q10 and
+  q14 equal. In the session-97 run q15/q19 were equal (29.8 / 30.1 and 14.5 / 13.9 s), so these are taken as runner noise,
+  not a new gap. SF1: everything within 0.13 s except q16 (+0.3 s, 2.33 vs 2.03; same at SF10 is 10 % faster).
+- **Verdict:** the join-query gap is closed by `split-count=1`; ours is now faster than upstream in sum at both scale
+  factors and on every one of the five join queries except q10 (equal). Maintainer's item: **IMPROVEMENTS DONE**.
