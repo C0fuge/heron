@@ -342,3 +342,49 @@ q19 2.58 / 2.56, q20 2.69 / 2.67, q21 4.72 / 7.18, q22 1.79 / 1.81.
   not a new gap. SF1: everything within 0.13 s except q16 (+0.3 s, 2.33 vs 2.03; same at SF10 is 10 % faster).
 - **Verdict:** the join-query gap is closed by `split-count=1`; ours is now faster than upstream in sum at both scale
   factors and on every one of the five join queries except q10 (equal). Maintainer's item: **IMPROVEMENTS DONE**.
+
+## After, server profile `speed` (session 99, 2026-11-03)
+
+The maintainer's improvement item asked for the proof with both server profiles; session 98 ran only `default`. Run
+[41599165320](https://github.com/C0fuge/heron/actions/runs/41599165320) (jobs 125793544271 SF1, 125793544663 SF10;
+`-DresourceProfile=speed`, server `f06b5834e76e`, ours = main at 877ed58 (plugin code = aa608f3, shipped default
+`split-count=1`, no session properties) on Trino 455, up = upstream branch head on Trino 446; 3 rounds, warm = median of
+rounds 2-3). Every answer that came back is exact in every round; upstream again fails q09, q18, q21 at SF10 (Trino's 4 GB
+per-node limit, HashBuilderOperator; q18 answered once in round 2, so "correct in all rounds" stays 19/22).
+
+| | ours (new default) | up | before (session 94 speed): ours / up |
+|---|---|---|---|
+| SF1 correct | 22/22 | 22/22 | 22/22 / 22/22 |
+| SF1 sum cold / **warm medians** s | 76.5 / **60.0** | 89.7 / **71.2** | 53.5 / 43.7 vs 46.7 (faster runner) |
+| SF1 Trino / server peak MB | 4949 / 983 | 4181 / 825 | |
+| SF10 correct | 22/22 | 19/22 | 22/22 / 19/22 |
+| SF10 sum warm medians s, all 22 | 329.1 | - | 362.8 / - |
+| SF10 sum warm medians s, **19 common** | **250.8** | **311.4** | 277.6 / 313.9 |
+| SF10 Trino / server peak MB | 8508 / 1558 | 9790 / 1527 | 9194 / 1901 / 9576 / 1011 |
+
+Ours is 16 % faster than upstream at SF1 and 19 % faster on the common SF10 queries (before: 6 % resp. 12 %).
+
+The five join queries, SF10 warm medians s, speed profile:
+
+| q | before: ours | before: up | **after: ours** | **after: up** |
+|---|---|---|---|---|
+| q03 | 18.43 | 19.52 | **14.79** | 15.75 |
+| q10 | 22.25 | 18.70 | **14.82** | 15.35 |
+| q12 | 13.34 | 15.77 | **14.50** | 13.89 |
+| q17 | 24.79 | 26.35 | **23.54** | 26.38 |
+| q20 | 20.53 | 12.31 | **14.06** | 14.68 |
+
+SF10 per query, warm medians s (ours / up): q01 10.96 / 26.76, q02 4.65 / 7.56, q04 12.47 / 11.88, q05 18.02 / 22.07,
+q06 12.79 / 12.79, q07 17.49 / 31.19, q08 14.84 / 26.88, q09 16.42 / fail, q11 3.41 / 5.42, q13 7.37 / 10.66,
+q14 14.69 / 17.53, q15 30.30 / 27.59, q16 3.70 / 3.58, q18 27.05 / fail, q19 14.96 / 17.14, q21 34.85 / fail,
+q22 3.46 / 4.33. Planning time 0.02-0.23 s ours, 0.02-0.23 s upstream.
+
+SF1 per query, warm medians s (ours / up): q01 2.20 / 4.08, q02 2.34 / 2.43, q03 2.84 / 2.88, q04 2.33 / 2.39,
+q05 3.49 / 4.12, q06 2.30 / 2.23, q07 3.10 / 4.39, q08 2.90 / 4.08, q09 3.08 / 4.75, q10 2.75 / 2.80, q11 1.86 / 2.12,
+q12 2.56 / 2.50, q13 2.08 / 2.33, q14 2.48 / 2.44, q15 3.29 / 3.25, q16 2.12 / 1.96, q17 2.90 / 3.77, q18 3.78 / 4.71,
+q19 2.67 / 2.53, q20 2.68 / 2.61, q21 4.47 / 7.06, q22 1.79 / 1.75.
+
+- **Where upstream is still faster (SF10 speed):** q15 (+10 %; also in the default job; ours reads 300000 rows vs 4.6 M, so
+  it is time spent after the scan, not the connector's read), q04 (+5 %), q12 (+4 %), q16 (+3 %). SF1: all within 0.16 s.
+- **Verdict:** same picture as the default profile - with `split-count=1` ours is faster than upstream in sum at both scale
+  factors and on four of the five join queries (q12 within 4 %). The speed profile does not change the conclusion.

@@ -90,6 +90,12 @@ Kept up to date after every work session so work can be resumed from this reposi
 > join queries at SF10: q03 14.8 vs 15.7, q10 15.1 vs 15.0, q12 15.4 vs 17.0, q17 19.6 vs 30.2, q20 14.4 vs 15.8 s. Tables in
 > `docs/CONNECTOR-COMPARE.md` "After: proof with `split-count=1` as the default" (session 94 numbers kept as "before"). Only
 > q15 / q19 (+15 %, noisy rounds; equal in run 41579205198) were slower than upstream at SF10. No open item left from this request.
+>
+> **Session 99: speed-profile proof added** (the item asked for default + speed; session 98 ran default only). Run 41599165320
+> (`profiles=speed`, SF1 + SF10, ours = shipped default vs upstream, server f06b5834e76e, every answer exact): SF1 22/22 vs 22/22,
+> warm sum **60.0 vs 71.2 s**; SF10 22/22 vs 19/22, 19 common queries **250.8 vs 311.4 s** (before: 277.6 vs 313.9). Join
+> queries SF10: q03 14.8 vs 15.8, q10 14.8 vs 15.4, q12 14.5 vs 13.9, q17 23.5 vs 26.4, q20 14.1 vs 14.7 s. Tables in
+> `docs/CONNECTOR-COMPARE.md` "After, server profile `speed`". IMPROVEMENTS DONE stands for both profiles.
 
 
 > **Maintainer, 2026-11-02 - CONNECTOR COMPARISON (take it first; finish mode lifted for this item only).** Compare the
@@ -1490,3 +1496,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   common 252.1 vs 320.9 s) and on the five join queries except q10 (equal). `docs/CONNECTOR-COMPARE.md` "After" section added,
   verdict updated; Next steps item marked **IMPROVEMENTS DONE**; the session-94 open question on the join gap removed
   (answered). Docs only, no CI run started. ~10 min.
+- 2026-11-03 session 99: no open item; the improvement item's proof lacked the `speed` server profile, so ran connector-compare
+  41599165320 (`profiles=speed`, SF1 + SF10, ours446 off; jobs 125793544271 / 125793544663, both green, every answer exact):
+  ours faster in sum at both SFs (SF1 60.0 vs 71.2 s, SF10 19 common 250.8 vs 311.4 s). `docs/CONNECTOR-COMPARE.md` section
+  added, STATUS item annotated. No code change. ~70 min of Actions minutes. No new server build in `e2e-assets`.
