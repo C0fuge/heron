@@ -1546,3 +1546,5 @@ Kept up to date after every work session so work can be resumed from this reposi
   2026-11-02); last runs green (41599165320, 41586916003). Stopped without changes; no CI run.
 - 2026-11-05 session 122: no open item, no new maintainer note, no new server build in `e2e-assets` (newest f06b5834e76e,
   2026-11-02); last runs green (41599165320, 41586916003). Stopped without changes; no CI run.
+- 2026-11-05 session 123: no open item, no new maintainer note, no new server build in `e2e-assets` (newest f06b5834e76e,
+  2026-11-02); last runs green (41599165320, 41586916003). Stopped without changes; no CI run.
