@@ -58,6 +58,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Maintainer, 2026-11-06 16:30 - NEW SERVER BUILD `server-1.0.0-deafc861cce3` (kestrel items 29-34: SASL HDFS, plain-name resolution, node-local copies, log hygiene) - full regression first, before anything else.** Pin it as the e2e/m4 server (asset digests from the release SHA256SUMS; deepscan the assets as usual) and run the complete e2e suite with BOTH server profiles (default and `-DresourceProfile=speed`): every TPC-H query SF1 and SF10 (answers vs the reference), pushdown checks, metadata, prepared statements, auth modes, cluster mode (3 servers) if the suite has it. Compare times with the previous server run in this repo (same runner class). Report pass/fail per check, any wrong answer (critical), regressions >10 %; write "SERVER deafc861cce3 CHECKED" in the Log with the run ids. No new features in this session.
+
 > **Maintainer, 2026-11-03 00:45 - IMPROVEMENT from the connector comparison (take it first).** Ours is slower than
 > upstream on join queries that read the same rows: SF10 q03 19.2 vs 13.0 s, q10 16.4 vs 12.8, q12 15.1 vs 11.8, q17
 > 28.0 vs 22.1, q20 18.8 vs 11.9 (also on Trino 446, so not the Trino version). Find out why: compare the plans (join
