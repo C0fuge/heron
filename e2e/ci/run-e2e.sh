@@ -108,6 +108,11 @@ if [ "$ICEBERG" = 1 ]; then
   SERVER_EXTRA=("${ICEBERG_SERVER_ARGS[@]}")
   SERVER_CP_EXTRA=$ICEBERG_SERVER_CP
 fi
+# SERVER_PROFILE=speed (or another resource profile): start every server with -DresourceProfile=<profile>
+if [ -n "${SERVER_PROFILE:-}" ] && [ "$SERVER_PROFILE" != default ]; then
+  SERVER_EXTRA+=(-DresourceProfile="$SERVER_PROFILE")
+fi
+echo "server profile: ${SERVER_PROFILE:-default}"
 
 HOSTS="$(seq -s, -f 'flight%g' 1 "$SERVERS")"
 # auth.sh replaces these (TLS + a login module) for its own server restarts
