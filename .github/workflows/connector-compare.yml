@@ -34,6 +34,9 @@ on:
       ours446:
         description: 'Also run ours built for Trino 446 (default-profile jobs)'
         default: 'true'
+      upstream:
+        description: 'Also run the upstream connector (false = ours only, e.g. a server regression run)'
+        default: 'true'
 
 permissions:
   contents: read
@@ -56,6 +59,7 @@ jobs:
       VARIANTS: ${{ inputs.variants }}
       PLANS: ${{ inputs.plans }}
       OURS446: ${{ inputs.ours446 }}
+      UPSTREAM: ${{ inputs.upstream }}
     steps:
       - uses: actions/checkout@v5
       - name: Free disk
@@ -83,6 +87,7 @@ jobs:
           mvn -B -ntp -P trino-455 -Ddep.trino.version=446 -Dmaven.compiler.release=21 -DskipTests clean package
           cp trino-arrow-flight/target/trino-arrow-flight-*.zip "$RUNNER_TEMP/zips/ours446.zip"
       - name: Build upstream connector (flight-trino, its own pom, JDK 21)
+        if: inputs.upstream != 'false'
         env:
           UPSTREAM_REF: ${{ inputs.upstream-ref }}
         run: |
@@ -122,7 +127,8 @@ jobs:
       - name: Compare
         run: |
           cat "$RUNNER_TEMP/versions.txt"
-          PASSES="ours:455:$RUNNER_TEMP/zips/ours.zip up:446:$RUNNER_TEMP/zips/up.zip"
+          PASSES="ours:455:$RUNNER_TEMP/zips/ours.zip"
+          [ "$UPSTREAM" != false ] && PASSES="$PASSES up:446:$RUNNER_TEMP/zips/up.zip"
           [ "$PROFILE" = default ] && [ "$OURS446" != false ] && PASSES="$PASSES ours446:446:$RUNNER_TEMP/zips/ours446.zip"
           for v in $VARIANTS; do PASSES="$PASSES ${v%%:*}:455:$RUNNER_TEMP/zips/ours.zip:${v#*:}"; done
           if [ -n "$PLANS" ]; then export EXPLAIN_QUERIES="$PLANS" PLAN_LOG=1; fi
