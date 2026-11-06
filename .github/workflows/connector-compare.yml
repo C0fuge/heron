@@ -15,7 +15,7 @@ on:
         default: 'both'
       server-build:
         description: 'Flight server build from e2e-assets'
-        default: 'f06b5834e76e'
+        default: 'deafc861cce3'
       upstream-ref:
         description: 'Upstream branch or commit (VadimSurpin/arrow-flight-server)'
         default: 'feat/trino-flight-connector'
