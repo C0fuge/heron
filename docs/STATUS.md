@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `0e457de30f25` since session 95, `a9e43ca5e296` in session 87-94, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). Input `auth` (session 88, `e2e/ci/auth.sh`):
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `deafc861cce3` since session 135, `0e457de30f25` in session 95-134, `a9e43ca5e296` in session 87-94, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). Input `auth` (session 88, `e2e/ci/auth.sh`):
   TLS + LDAP / JWT login check, default `auto` = at the end of 3-server runs. `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
@@ -60,18 +60,33 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 > **Maintainer, 2026-11-06 16:30 - NEW SERVER BUILD `server-1.0.0-deafc861cce3` (kestrel items 29-34: SASL HDFS, plain-name resolution, node-local copies, log hygiene) - full regression first, before anything else.** Pin it as the e2e/m4 server (asset digests from the release SHA256SUMS; deepscan the assets as usual) and run the complete e2e suite with BOTH server profiles (default and `-DresourceProfile=speed`): every TPC-H query SF1 and SF10 (answers vs the reference), pushdown checks, metadata, prepared statements, auth modes, cluster mode (3 servers) if the suite has it. Compare times with the previous server run in this repo (same runner class). Report pass/fail per check, any wrong answer (critical), regressions >10 %; write "SERVER deafc861cce3 CHECKED" in the Log with the run ids. No new features in this session.
 >
-> **Session 134 (2026-11-06 13:15-13:47 UTC): BLOCKED - the build is not in `e2e-assets`.** No asset named
-> `*deafc861cce3*` (polled every 30 s for 30 min); newest server build there is still f06b5834e76e, `SHA256SUMS` last
-> updated 2026-11-02. Nothing was run. Prepared (no plugin change, `[skip ci]`): `e2e.yml` input `server-profile`
-> (empty/default = no flag, `speed` = `-DresourceProfile=speed` on every server) and `connector-compare.yml` input
-> `upstream` (`false` = ours only). **Next session, once the jar, plugins, libs and auth tars of deafc861cce3 and an
-> updated `SHA256SUMS` are in the release:** (1) deepscan the assets and record their digests from `SHA256SUMS`;
-> (2) pin deafc861cce3 as the default of `e2e.yml` (two places), `run-e2e.sh` and `connector-compare.yml`;
-> (3) dispatch e2e `server-build=deafc861cce3 servers=both` with `server-profile=` (default) and with `server-profile=speed`
-> (SF1, 1 + 3 servers, failover, types, Iceberg, auth), plus `result-mode=complete servers=3`; (4) dispatch
-> `connector-compare` `server-build=deafc861cce3 sf=both profiles=both upstream=false ours446=false` for SF1 + SF10 answers and
-> times; compare ours' times with runs 41586926044 (default) and 41599165320 (speed) on f06b5834e76e (same runner class);
-> flag regressions >10 % and any wrong answer.
+> **Session 135 (2026-11-06 13:50-14:40 UTC): SERVER deafc861cce3 CHECKED - all green, no wrong answer, no time
+> regression >10 %.** Assets appeared in `e2e-assets` at 13:48-13:50 UTC; all four match `SHA256SUMS` (jar b540c81ffd56,
+> plugins 727b49ee4341, libs 55ec52673dcb, auth f7169cbedd9b; the tars hold only jars + `SHA256SUMS`/`DEPENDENCIES.txt`).
+> Pinned as default in `e2e.yml`, `run-e2e.sh`, `connector-compare.yml`, `run-compare.sh` (commit "pin server build").
+> Runs (all success):
+>
+> | check | run | result |
+> |---|---|---|
+> | e2e default profile, 1 + 3 servers (TPC-H SF1 22 q vs reference, types, Iceberg, metadata, failover, coordinator-down, TLS + LDAP/JWT auth) | 42229031309 | pass |
+> | e2e `server-profile=speed`, 1 + 3 servers (same checks) | 42229034598 | pass |
+> | e2e `result-mode=complete`, 3 servers | 42229038422 | pass |
+> | connector-compare ours only, SF1 + SF10, default + speed, 3 rounds | 42229042004 | 22/22 exact in every round, all 4 jobs |
+>
+> Times (sum of warm medians, ours, vs f06b5834e76e runs 41586926044 default / 41599165320 speed; GitHub hosted runners,
+> CPU model not compared, so read small differences as noise):
+>
+> | | f06b5834e76e | **deafc861cce3** | Trino peak MB | server peak MB |
+> |---|---|---|---|---|
+> | SF1 default | 60.8 | **44.2** (-27 %) | 3392 -> 4922 | 979 -> 1011 |
+> | SF1 speed | 60.0 | **39.1** (-35 %) | 4949 -> 5299 | 983 -> 1126 (+15 %) |
+> | SF10 default | 332.7 | **273.4** (-18 %) | 8333 -> 8545 | 1814 -> 1895 |
+> | SF10 speed | 329.1 | **164.4** (-50 %) | 8508 -> 9254 | 1558 -> **3983 (+156 %)** |
+>
+> No query is >10 % slower; the only slower one is SF10 default q01 11.83 vs 10.85 s (+9 %). Biggest gains: SF10 speed q01
+> 2.86 vs 10.96, q06 1.81 vs 12.79, q15 2.88 vs 30.30 s; SF10 default q15 21.93 vs 33.62, q19 12.32 vs 16.85 s.
+> **Watch:** server peak memory with `resourceProfile=speed` at SF10 is 2.6x the previous build (see Open questions).
+> No plugin change; nothing else open from this note.
 
 > **Maintainer, 2026-11-03 00:45 - IMPROVEMENT from the connector comparison (take it first).** Ours is slower than
 > upstream on join queries that read the same rows: SF10 q03 19.2 vs 13.0 s, q10 16.4 vs 12.8, q12 15.1 vs 11.8, q17
@@ -946,13 +961,10 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
-- **Server deafc861cce3 assets missing (session 134, 2026-11-06).** The note asks for a full regression on
-  `server-1.0.0-deafc861cce3`, but `e2e-assets` has no asset with that id (newest f06b5834e76e). Please upload the jar,
-  `flight-plugins-`, `flight-server-libs-`, `flight-auth-1.0.0-deafc861cce3` tars and the updated `SHA256SUMS`; the next
-  session runs the regression as listed under Next steps.
-- **Server f06b5834e76e (session 95).** The kestrel pre-release used by the connector comparison is newer than the CI default
-  0e457de30f25 (made default this session as the note above asked). Should the e2e suite run on f06b5834e76e and make it the
-  default, or does it stay a comparison-only build?
+- **Server deafc861cce3: memory with `resourceProfile=speed` (session 135).** In connector-compare SF10 the server's
+  peak memory was 3983 MB with `speed` vs 1558 MB on f06b5834e76e (default profile 1895 vs 1814 MB; SF1 speed 1126 vs
+  983 MB), while the speed run was twice as fast. Expected from the new build (e.g. node-local copies / caching), or should
+  it be checked against the stand's memory limits before speed is used there?
 - **Server (deployment): login-module jars must precede the server jar on the classpath (session 88).** The a9e43ca5e296
   server jar bundles nimbus-jose-jwt **10.0.1**; with `-cp server.jar:libs/*:auth/jwt/*` the jwt module (built against 10.10)
   runs on 10.0.1 and the server stops at startup: `NullPointerException ... ImmutableCollections$Set12.contains` from
@@ -1590,3 +1602,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-11-06 session 134: maintainer's new top item (full regression on server deafc861cce3) is blocked: the build is not
   in `e2e-assets` (polled 30 min). Added opt-in inputs `e2e.yml` `server-profile` and `connector-compare.yml` `upstream`
   for that regression; commits `[skip ci]`, no CI run. Open question added; next-session steps under the note.
+- 2026-11-06 session 135: **SERVER deafc861cce3 CHECKED.** Assets landed in `e2e-assets` 13:48-13:50 UTC, digests = `SHA256SUMS`;
+  pinned as default (e2e + connector-compare). Runs 42229031309 (e2e default, 1 + 3 servers), 42229034598 (e2e speed),
+  42229038422 (complete mode, 3 servers), 42229042004 (compare SF1 + SF10, default + speed): all green, 22/22 exact
+  everywhere, auth/failover/types/Iceberg OK; no query >10 % slower (SF10 default q01 +9 %); sums -18 % to -50 %. Server peak
+  memory SF10 speed 3983 vs 1558 MB -> Open question. Tables under the note in Next steps.
