@@ -59,6 +59,19 @@ Kept up to date after every work session so work can be resumed from this reposi
 ## Next steps
 
 > **Maintainer, 2026-11-06 16:30 - NEW SERVER BUILD `server-1.0.0-deafc861cce3` (kestrel items 29-34: SASL HDFS, plain-name resolution, node-local copies, log hygiene) - full regression first, before anything else.** Pin it as the e2e/m4 server (asset digests from the release SHA256SUMS; deepscan the assets as usual) and run the complete e2e suite with BOTH server profiles (default and `-DresourceProfile=speed`): every TPC-H query SF1 and SF10 (answers vs the reference), pushdown checks, metadata, prepared statements, auth modes, cluster mode (3 servers) if the suite has it. Compare times with the previous server run in this repo (same runner class). Report pass/fail per check, any wrong answer (critical), regressions >10 %; write "SERVER deafc861cce3 CHECKED" in the Log with the run ids. No new features in this session.
+>
+> **Session 134 (2026-11-06 13:15-13:47 UTC): BLOCKED - the build is not in `e2e-assets`.** No asset named
+> `*deafc861cce3*` (polled every 30 s for 30 min); newest server build there is still f06b5834e76e, `SHA256SUMS` last
+> updated 2026-11-02. Nothing was run. Prepared (no plugin change, `[skip ci]`): `e2e.yml` input `server-profile`
+> (empty/default = no flag, `speed` = `-DresourceProfile=speed` on every server) and `connector-compare.yml` input
+> `upstream` (`false` = ours only). **Next session, once the jar, plugins, libs and auth tars of deafc861cce3 and an
+> updated `SHA256SUMS` are in the release:** (1) deepscan the assets and record their digests from `SHA256SUMS`;
+> (2) pin deafc861cce3 as the default of `e2e.yml` (two places), `run-e2e.sh` and `connector-compare.yml`;
+> (3) dispatch e2e `server-build=deafc861cce3 servers=both` with `server-profile=` (default) and with `server-profile=speed`
+> (SF1, 1 + 3 servers, failover, types, Iceberg, auth), plus `result-mode=complete servers=3`; (4) dispatch
+> `connector-compare` `server-build=deafc861cce3 sf=both profiles=both upstream=false ours446=false` for SF1 + SF10 answers and
+> times; compare ours' times with runs 41586926044 (default) and 41599165320 (speed) on f06b5834e76e (same runner class);
+> flag regressions >10 % and any wrong answer.
 
 > **Maintainer, 2026-11-03 00:45 - IMPROVEMENT from the connector comparison (take it first).** Ours is slower than
 > upstream on join queries that read the same rows: SF10 q03 19.2 vs 13.0 s, q10 16.4 vs 12.8, q12 15.1 vs 11.8, q17
@@ -933,6 +946,10 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **Server deafc861cce3 assets missing (session 134, 2026-11-06).** The note asks for a full regression on
+  `server-1.0.0-deafc861cce3`, but `e2e-assets` has no asset with that id (newest f06b5834e76e). Please upload the jar,
+  `flight-plugins-`, `flight-server-libs-`, `flight-auth-1.0.0-deafc861cce3` tars and the updated `SHA256SUMS`; the next
+  session runs the regression as listed under Next steps.
 - **Server f06b5834e76e (session 95).** The kestrel pre-release used by the connector comparison is newer than the CI default
   0e457de30f25 (made default this session as the note above asked). Should the e2e suite run on f06b5834e76e and make it the
   default, or does it stay a comparison-only build?
@@ -1570,3 +1587,6 @@ Kept up to date after every work session so work can be resumed from this reposi
   2026-11-02); last runs green (41599165320, 41586916003). Stopped without changes; no CI run.
 - 2026-11-06 session 133: no open item, no new maintainer note, no new server build in `e2e-assets` (newest f06b5834e76e,
   2026-11-02); last runs green (41599165320, 41586916003). Stopped without changes; no CI run.
+- 2026-11-06 session 134: maintainer's new top item (full regression on server deafc861cce3) is blocked: the build is not
+  in `e2e-assets` (polled 30 min). Added opt-in inputs `e2e.yml` `server-profile` and `connector-compare.yml` `upstream`
+  for that regression; commits `[skip ci]`, no CI run. Open question added; next-session steps under the note.
