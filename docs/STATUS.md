@@ -1607,7 +1607,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   42229038422 (complete mode, 3 servers), 42229042004 (compare SF1 + SF10, default + speed): all green, 22/22 exact
   everywhere, auth/failover/types/Iceberg OK; no query >10 % slower (SF10 default q01 +9 %); sums -18 % to -50 %. Server peak
   memory SF10 speed 3983 vs 1558 MB -> Open question. Tables under the note in Next steps.
-- 2026-11-06/07 sessions 136-155 (idle checks, merged into one line): no open item, no new maintainer note since
-  session 135, no new server build in `e2e-assets` (newest deafc861cce3, 13:48-13:50 UTC; last checked 2026-11-07 21:51 UTC); last runs green (42229031309,
+- 2026-11-06/08 sessions 136-156 (idle checks, merged into one line): no open item, no new maintainer note since
+  session 135, no new server build in `e2e-assets` (newest deafc861cce3, 13:48-13:50 UTC; last checked 2026-11-08 03:53 UTC); last runs green (42229031309,
   42229034598, 42229038422, 42229042004). Stopped without changes; no CI run. Later idle sessions should extend this line
   instead of adding new ones.
