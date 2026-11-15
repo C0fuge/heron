@@ -58,6 +58,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Maintainer, 2026-11-16 01:45 - FIRST: UPSTREAM Trino partial aggregation pushdown.** upstream `VadimSurpin/arrow-flight-server` (read-only, never push there) branch `feat/trino-partial-aggregation-pushdown`: partial aggregation SPI patch (`f1bb88c7cc46`), partial count states pushed to Flight (`f12131169bce`), partial numeric aggregates (`c2d40930534f`), numeric min/max (`f96e771ac6e2`), count input types (`398affcf5c6c`); also DuckDB result streaming / streaming buffer on its server (`821f627ba757`, `2e86e98ad599`). {rule} Measure TPC-H SF1/SF10 before/after on `server-1.0.0-2c169a53db3b`, both server profiles.
+
 > **Maintainer, 2026-11-06 16:30 - NEW SERVER BUILD `server-1.0.0-deafc861cce3` (kestrel items 29-34: SASL HDFS, plain-name resolution, node-local copies, log hygiene) - full regression first, before anything else.** Pin it as the e2e/m4 server (asset digests from the release SHA256SUMS; deepscan the assets as usual) and run the complete e2e suite with BOTH server profiles (default and `-DresourceProfile=speed`): every TPC-H query SF1 and SF10 (answers vs the reference), pushdown checks, metadata, prepared statements, auth modes, cluster mode (3 servers) if the suite has it. Compare times with the previous server run in this repo (same runner class). Report pass/fail per check, any wrong answer (critical), regressions >10 %; write "SERVER deafc861cce3 CHECKED" in the Log with the run ids. No new features in this session.
 >
 > **Session 135 (2026-11-06 13:50-14:40 UTC): SERVER deafc861cce3 CHECKED - all green, no wrong answer, no time
