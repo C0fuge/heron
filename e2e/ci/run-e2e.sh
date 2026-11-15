@@ -558,20 +558,28 @@ if [ -n "$TYPES" ]; then
   for t in $(docker exec trino trino --catalog flight --output-format TSV --execute "SHOW TABLES FROM types" \
       2> "$OUT/nanagg/columns.err"); do
     docker exec trino trino --catalog flight --output-format TSV --execute "SHOW COLUMNS FROM types.\"$t\"" \
-        2>> "$OUT/nanagg/columns.err" | awk -F'\t' -v t="$t" '$2 == "double" { print t "\t" $1 }' >> "$OUT/nanagg/columns.tsv"
+        2>> "$OUT/nanagg/columns.err" | awk -F'\t' -v t="$t" '$2 == "double" { d[++n] = $1 } $2 == "boolean" && b == "" { b = $1 }
+          END { for (i = 1; i <= n; i++) print t "\t" d[i] "\t" b }' >> "$OUT/nanagg/columns.tsv"
   done
-  while IFS=$'\t' read -r t c; do
+  # Numbers equal within 1e-9 relative (DOUBLE sums differ in the last digits by summation order); NaN/Infinity exact.
+  same_rows() { awk -v a="$1" -v b="$2" 'BEGIN { n = split(a, x, /[ \t]+/); if (n != split(b, y, /[ \t]+/)) exit 1
+      for (i = 1; i <= n; i++) if (x[i] != y[i]) { if (x[i] !~ /^-?[0-9]/ || y[i] !~ /^-?[0-9]/) exit 1
+        d = x[i] - y[i]; m = (x[i] < 0 ? -x[i] : x[i]); if ((d < 0 ? -d : d) > 1e-9 * m) exit 1 } }'; }
+  while IFS=$'\t' read -r t c k; do
     [ -n "$t" ] || continue
     for g in global grouped; do
       sql="SELECT min(\"$c\"), max(\"$c\"), count(\"$c\"), sum(\"$c\") FROM types.\"$t\""
-      [ "$g" = grouped ] && sql="SELECT \"$c\" IS NULL, min(\"$c\"), max(\"$c\"), count(\"$c\") FROM types.\"$t\" GROUP BY 1 ORDER BY 1"
+      if [ "$g" = grouped ]; then
+        [ -n "$k" ] || continue  # a plain BOOLEAN column as key, so the aggregation is pushed (an expression key is not)
+        sql="SELECT \"$k\", min(\"$c\"), max(\"$c\"), count(\"$c\") FROM types.\"$t\" GROUP BY 1 ORDER BY 1"
+      fi
       for p in true false; do
         docker exec trino trino --catalog flight --output-format TSV --session "flight.aggregation_pushdown_enabled=$p" \
           --execute "$sql" > "$OUT/nanagg/$t.$c.$g.$p.tsv" 2> "$OUT/nanagg/$t.$c.$g.$p.err" \
           || { echo "ERROR $(grep -v 'jline\|dumb terminal' "$OUT/nanagg/$t.$c.$g.$p.err" | head -c 200)" >> "$OUT/nanagg/$t.$c.$g.$p.tsv"; }
       done
       on="$(tr '\n' ' ' < "$OUT/nanagg/$t.$c.$g.true.tsv")"; off="$(tr '\n' ' ' < "$OUT/nanagg/$t.$c.$g.false.tsv")"
-      if [ "$on" = "$off" ] && ! grep -q ERROR "$OUT/nanagg/$t.$c.$g.false.tsv"; then
+      if same_rows "$on" "$off" && ! grep -q ERROR "$OUT/nanagg/$t.$c.$g.false.tsv"; then
         printf '%s.%s %s\tOK\t%s\n' "$t" "$c" "$g" "${on:0:200}"
       else
         printf '%s.%s %s\tFAIL\tpushed: %s | trino: %s\n' "$t" "$c" "$g" "${on:0:200}" "${off:0:200}"; status=1
