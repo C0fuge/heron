@@ -567,7 +567,8 @@ if [ -n "$TYPES" ]; then
       [ "$g" = grouped ] && sql="SELECT \"$c\" IS NULL, min(\"$c\"), max(\"$c\"), count(\"$c\") FROM types.\"$t\" GROUP BY 1 ORDER BY 1"
       for p in true false; do
         docker exec trino trino --catalog flight --output-format TSV --session "flight.aggregation_pushdown_enabled=$p" \
-          --execute "$sql" > "$OUT/nanagg/$t.$c.$g.$p.tsv" 2>&1 || echo "ERROR" >> "$OUT/nanagg/$t.$c.$g.$p.tsv"
+          --execute "$sql" > "$OUT/nanagg/$t.$c.$g.$p.tsv" 2> "$OUT/nanagg/$t.$c.$g.$p.err" \
+          || { echo "ERROR $(grep -v 'jline\|dumb terminal' "$OUT/nanagg/$t.$c.$g.$p.err" | head -c 200)" >> "$OUT/nanagg/$t.$c.$g.$p.tsv"; }
       done
       on="$(tr '\n' ' ' < "$OUT/nanagg/$t.$c.$g.true.tsv")"; off="$(tr '\n' ' ' < "$OUT/nanagg/$t.$c.$g.false.tsv")"
       if [ "$on" = "$off" ] && ! grep -q ERROR "$OUT/nanagg/$t.$c.$g.false.tsv"; then
