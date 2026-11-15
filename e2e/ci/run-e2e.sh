@@ -547,6 +547,35 @@ if [ -n "$TYPES" ]; then
       duckdb==1.4.1 trino==0.333.0 && exec python -I "$@"' types "$REPO/e2e/ci/types_check.py" "$WORK/s3/lake/parquet/types" \
     127.0.0.1:8080 "$OUT/types-summary.tsv" || status=1
   save_logs
+
+  # Pushed min/max/sum/count on every DOUBLE column of schema types must equal Trino's own aggregation of the plain
+  # scan (aggregation pushdown off). The types data holds NaN and +-Infinity; DuckDB orders NaN above every value, so a
+  # pushed max() would return NaN where Trino's max() skips it (STATUS session 297).
+  log "nanagg: double aggregates pushed vs Trino's own (types schema)"
+  mkdir -p "$OUT/nanagg"
+  printf 'column\tresult\tdetail\n' > "$OUT/nanagg-summary.tsv"
+  docker exec trino trino --catalog flight --output-format TSV --execute "SELECT table_name, column_name FROM
+      information_schema.columns WHERE table_schema = 'types' AND data_type = 'double' ORDER BY 1, 2" \
+    > "$OUT/nanagg/columns.tsv" 2> "$OUT/nanagg/columns.err" || true
+  while IFS=$'\t' read -r t c; do
+    [ -n "$t" ] || continue
+    for g in global grouped; do
+      sql="SELECT min(\"$c\"), max(\"$c\"), count(\"$c\"), sum(\"$c\") FROM types.\"$t\""
+      [ "$g" = grouped ] && sql="SELECT \"$c\" IS NULL, min(\"$c\"), max(\"$c\"), count(\"$c\") FROM types.\"$t\" GROUP BY 1 ORDER BY 1"
+      for p in true false; do
+        docker exec trino trino --catalog flight --output-format TSV --session "flight.aggregation_pushdown_enabled=$p" \
+          --execute "$sql" > "$OUT/nanagg/$t.$c.$g.$p.tsv" 2>&1 || echo "ERROR" >> "$OUT/nanagg/$t.$c.$g.$p.tsv"
+      done
+      on="$(tr '\n' ' ' < "$OUT/nanagg/$t.$c.$g.true.tsv")"; off="$(tr '\n' ' ' < "$OUT/nanagg/$t.$c.$g.false.tsv")"
+      if [ "$on" = "$off" ] && ! grep -q ERROR "$OUT/nanagg/$t.$c.$g.false.tsv"; then
+        printf '%s.%s %s\tOK\t%s\n' "$t" "$c" "$g" "${on:0:200}"
+      else
+        printf '%s.%s %s\tFAIL\tpushed: %s | trino: %s\n' "$t" "$c" "$g" "${on:0:200}" "${off:0:200}"; status=1
+      fi >> "$OUT/nanagg-summary.tsv"
+    done
+  done < "$OUT/nanagg/columns.tsv"
+  [ -s "$OUT/nanagg/columns.tsv" ] || { echo "nanagg: FAIL no double column found in schema types"; status=1; }
+  cat "$OUT/nanagg-summary.tsv"
 fi
 
 if [ "$ICEBERG" = 1 ]; then
