@@ -59,6 +59,17 @@ Kept up to date after every work session so work can be resumed from this reposi
 ## Next steps
 
 > **Maintainer, 2026-11-16 01:45 - FIRST: UPSTREAM Trino partial aggregation pushdown.** upstream `VadimSurpin/arrow-flight-server` (read-only, never push there) branch `feat/trino-partial-aggregation-pushdown`: partial aggregation SPI patch (`f1bb88c7cc46`), partial count states pushed to Flight (`f12131169bce`), partial numeric aggregates (`c2d40930534f`), numeric min/max (`f96e771ac6e2`), count input types (`398affcf5c6c`); also DuckDB result streaming / streaming buffer on its server (`821f627ba757`, `2e86e98ad599`). {rule} Measure TPC-H SF1/SF10 before/after on `server-1.0.0-2c169a53db3b`, both server profiles.
+>
+> **Session 297 (2026-11-15 22:37- UTC): reviewed, blocked on two maintainer inputs; one correctness fix taken from it.**
+> Review in `docs/UPSTREAM-PARTIAL-AGG.md`. Upstream's partial aggregation needs a **patched Trino engine** (fork of 446:
+> new SPI `applyPartialAggregation` + planner rule; "no effect on stock Trino"). Its patch applies cleanly to Trino 455
+> (`git apply --check`), not to 477/483. Our production runs stock Trino 455, so adopting it = deploying a self-built
+> Trino -> Open question. The note's `{rule}` placeholder came through unfilled (instruction missing) and server
+> `server-1.0.0-2c169a53db3b` is not in `e2e-assets` (newest deafc861cce3), so no before/after measurement was possible.
+> **Fix taken from upstream's MAX/NaN note:** our stock `applyAggregation` pushed `max(double)`; DuckDB returns NaN when the
+> column holds NaN, Trino's `max` skips NaN. `max` on DOUBLE is no longer pushed (commit b6d92bf, unit test
+> `ArrowFlightMetadataAggregateTest`); new e2e block `nanagg` compares pushed vs Trino's own min/max/count/sum on every
+> DOUBLE column of schema `types`. CI runs: see the Log line of session 297.
 
 > **Maintainer, 2026-11-06 16:30 - NEW SERVER BUILD `server-1.0.0-deafc861cce3` (kestrel items 29-34: SASL HDFS, plain-name resolution, node-local copies, log hygiene) - full regression first, before anything else.** Pin it as the e2e/m4 server (asset digests from the release SHA256SUMS; deepscan the assets as usual) and run the complete e2e suite with BOTH server profiles (default and `-DresourceProfile=speed`): every TPC-H query SF1 and SF10 (answers vs the reference), pushdown checks, metadata, prepared statements, auth modes, cluster mode (3 servers) if the suite has it. Compare times with the previous server run in this repo (same runner class). Report pass/fail per check, any wrong answer (critical), regressions >10 %; write "SERVER deafc861cce3 CHECKED" in the Log with the run ids. No new features in this session.
 >
@@ -963,6 +974,13 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **Upstream partial aggregation pushdown needs a patched Trino (session 297).** Upstream's feature (branch
+  `feat/trino-partial-aggregation-pushdown`) only works on a Trino built with its engine patch (`flight-connector.patch`,
+  base 446; applies cleanly to 455, not to 477/483). Should production move to a self-built Trino 455 with that patch? If
+  yes, the plugin would add `applyPartialAggregation` next to the stock `applyAggregation` path (kept for stock Trino),
+  and CI would build the patched Trino (~30+ min, cached). If no, the item is closed as "not applicable to stock Trino".
+  Also: the 2026-11-16 note contains an unfilled `{rule}` placeholder - what was meant there? And server
+  `server-1.0.0-2c169a53db3b` (for the before/after times) is not in `e2e-assets` yet.
 - **Server deafc861cce3: memory with `resourceProfile=speed` (session 135).** In connector-compare SF10 the server's
   peak memory was 3983 MB with `speed` vs 1558 MB on f06b5834e76e (default profile 1895 vs 1814 MB; SF1 speed 1126 vs
   983 MB), while the speed run was twice as fast. Expected from the new build (e.g. node-local copies / caching), or should
