@@ -367,7 +367,7 @@ public class ArrowFlightMetadata
                 false));
     }
 
-    private static Optional<AggregateColumn> translateAggregate(AggregateFunction aggregate, Map<String, ColumnHandle> assignments, String outputName)
+    static Optional<AggregateColumn> translateAggregate(AggregateFunction aggregate, Map<String, ColumnHandle> assignments, String outputName)
     {
         if (aggregate.isDistinct() || aggregate.getFilter().isPresent() || !aggregate.getSortItems().isEmpty()) {
             return Optional.empty();
@@ -405,6 +405,11 @@ public class ArrowFlightMetadata
             case "min", "max" -> {
                 kind = function.equals("min") ? AggregateColumn.Function.MIN : AggregateColumn.Function.MAX;
                 expected = isGroupable(inputType) && !inputType.equals(BOOLEAN) ? inputType : null;
+                if (kind == AggregateColumn.Function.MAX && inputType.equals(DOUBLE)) {
+                    // DuckDB (and the endpoint merge) order NaN above every value, so a pushed max() returns NaN where
+                    // Trino's max() skips NaN when any other value exists. min() agrees: NaN is the largest for both.
+                    expected = null;
+                }
             }
             default -> {
                 return Optional.empty();
