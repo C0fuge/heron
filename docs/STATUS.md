@@ -1642,4 +1642,5 @@ Kept up to date after every work session so work can be resumed from this reposi
   `max()` on DOUBLE no longer pushed (DuckDB NaN > everything; Trino's max skips NaN) + unit test + e2e block `nanagg`.
   Runs: build 43770745180 green; e2e 43770594792 / 43771961206 / 43773754773 failed on the new block's own bugs (fixed,
   43771964010 hit a DuckDB extension 429); evidence 43774850707 (old plugin: only max(c_double) wrong) and 43774847878 (main,
-  1 + 3 servers) green. Temporary branch `claude/nanagg-before` used for the evidence run, deleted.
+  1 + 3 servers) green. Temporary branch `claude/nanagg-before` (evidence only, not to merge) could not be deleted from the
+  session (push delete and API refused): maintainer may delete it.
