@@ -554,9 +554,12 @@ if [ -n "$TYPES" ]; then
   log "nanagg: double aggregates pushed vs Trino's own (types schema)"
   mkdir -p "$OUT/nanagg"
   printf 'column\tresult\tdetail\n' > "$OUT/nanagg-summary.tsv"
-  docker exec trino trino --catalog flight --output-format TSV --execute "SELECT table_name, column_name FROM
-      information_schema.columns WHERE table_schema = 'types' AND data_type = 'double' ORDER BY 1, 2" \
-    > "$OUT/nanagg/columns.tsv" 2> "$OUT/nanagg/columns.err" || true
+  : > "$OUT/nanagg/columns.tsv"
+  for t in $(docker exec trino trino --catalog flight --output-format TSV --execute "SHOW TABLES FROM types" \
+      2> "$OUT/nanagg/columns.err"); do
+    docker exec trino trino --catalog flight --output-format TSV --execute "SHOW COLUMNS FROM types.\"$t\"" \
+        2>> "$OUT/nanagg/columns.err" | awk -F'\t' -v t="$t" '$2 == "double" { print t "\t" $1 }' >> "$OUT/nanagg/columns.tsv"
+  done
   while IFS=$'\t' read -r t c; do
     [ -n "$t" ] || continue
     for g in global grouped; do
@@ -574,7 +577,7 @@ if [ -n "$TYPES" ]; then
       fi >> "$OUT/nanagg-summary.tsv"
     done
   done < "$OUT/nanagg/columns.tsv"
-  [ -s "$OUT/nanagg/columns.tsv" ] || { echo "nanagg: FAIL no double column found in schema types"; status=1; }
+  [ -s "$OUT/nanagg/columns.tsv" ] || { echo "nanagg: FAIL no double column found in schema types: $(head -c 500 "$OUT/nanagg/columns.err")"; status=1; }
   cat "$OUT/nanagg-summary.tsv"
 fi
 
