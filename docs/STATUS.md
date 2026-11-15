@@ -69,7 +69,11 @@ Kept up to date after every work session so work can be resumed from this reposi
 > **Fix taken from upstream's MAX/NaN note:** our stock `applyAggregation` pushed `max(double)`; DuckDB returns NaN when the
 > column holds NaN, Trino's `max` skips NaN. `max` on DOUBLE is no longer pushed (commit b6d92bf, unit test
 > `ArrowFlightMetadataAggregateTest`); new e2e block `nanagg` compares pushed vs Trino's own min/max/count/sum on every
-> DOUBLE column of schema `types`. CI runs: see the Log line of session 297.
+> DOUBLE column of schema `types` (global and grouped by a BOOLEAN column; DOUBLE sums within 1e-9 relative). Evidence: old
+> plugin + check, run 43774850707: only `max(c_double)` differs (pushed NaN vs Trino Infinity; grouped NaN vs 1.797E308);
+> fixed main, run 43774847878 (1 + 3 servers, full suite): green. Build run 43770745180 green.
+> **Remaining (needs maintainer):** decision on the patched Trino and the `{rule}` text (Open questions); measurement once
+> 2c169a53db3b is in `e2e-assets`. Upstream server streaming commits (821f627, 2e86e98) reach us with that build.
 
 > **Maintainer, 2026-11-06 16:30 - NEW SERVER BUILD `server-1.0.0-deafc861cce3` (kestrel items 29-34: SASL HDFS, plain-name resolution, node-local copies, log hygiene) - full regression first, before anything else.** Pin it as the e2e/m4 server (asset digests from the release SHA256SUMS; deepscan the assets as usual) and run the complete e2e suite with BOTH server profiles (default and `-DresourceProfile=speed`): every TPC-H query SF1 and SF10 (answers vs the reference), pushdown checks, metadata, prepared statements, auth modes, cluster mode (3 servers) if the suite has it. Compare times with the previous server run in this repo (same runner class). Report pass/fail per check, any wrong answer (critical), regressions >10 %; write "SERVER deafc861cce3 CHECKED" in the Log with the run ids. No new features in this session.
 >
@@ -1632,3 +1636,10 @@ Kept up to date after every work session so work can be resumed from this reposi
   42229034598, 42229038422, 42229042004). Stopped without changes; no CI run. Later idle sessions should extend this line
   instead of adding new ones. Session 266 noticed `main` history had been rewritten between 2026-11-12 16:51 (old
   tip 787697d, session 236) and 2026-11-14 (STATUS-only difference, no code lost); CLAUDE.md says never force-push `main`.
+- 2026-11-15 session 297 (22:37-23:45 UTC): maintainer's new top item (upstream partial aggregation pushdown). Reviewed
+  upstream (read only), `docs/UPSTREAM-PARTIAL-AGG.md`: needs a patched Trino (patch applies to 455, not 477/483) -> Open
+  question; `{rule}` placeholder in the note unfilled; server 2c169a53db3b not in `e2e-assets`, no measurement. Fixed from it:
+  `max()` on DOUBLE no longer pushed (DuckDB NaN > everything; Trino's max skips NaN) + unit test + e2e block `nanagg`.
+  Runs: build 43770745180 green; e2e 43770594792 / 43771961206 / 43773754773 failed on the new block's own bugs (fixed,
+  43771964010 hit a DuckDB extension 429); evidence 43774850707 (old plugin: only max(c_double) wrong) and 43774847878 (main,
+  1 + 3 servers) green. Temporary branch `claude/nanagg-before` used for the evidence run, deleted.
