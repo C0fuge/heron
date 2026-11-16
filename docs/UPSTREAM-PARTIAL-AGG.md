@@ -67,3 +67,21 @@ adopt only what is missing or measured better, never weaken our own features". H
 
 Checked by reading the strings of `server-1.0.0-d2e27119fda4`'s `DuckDbAdapter`/`AppConfig` classes (no code run).
 Before/after measurement of the two taken fixes: see STATUS Log, session 300.
+
+## Final verdict (session 307, 2026-11-16): UPSTREAM 2026-11 DONE a11a36c
+
+Maintainer's decision (2026-11-16 18:45): **freeze** the patched Trino series. Stock Trino + `applyAggregation` stays the
+default and recommended deployment; `trino-patches/483`, `patched-trino.yml`, the e2e block `partialagg` and
+`applyPartialAggregation` are kept as they are (inactive on stock Trino); no 455 port, no decimal partial states.
+
+| upstream commit | final verdict |
+|---|---|
+| `f1bb88c` | PORTED to Trino 483 (`trino-patches/483`, 80ebbbf / 1827529), measured not faster than full pushdown (sessions 302/303), FROZEN |
+| `f121311` | IMPLEMENTED on the patched path (c0a7da3 / a11a36c), FROZEN; zero-endpoint note taken on the stock path (cd043ad) |
+| `c2d4093` | IMPLEMENTED for non-decimal SUM/AVG (c0a7da3), FROZEN; decimal states not done (maintainer: no) |
+| `f96e771` | IMPLEMENTED on the patched path (c0a7da3), FROZEN; NaN note taken on the stock path (b6d92bf) |
+| `398affc` | NOT NEEDED (ours already pushes `count(x)` for every mapped type) |
+| `821f627` | NOT NEEDED here (server side; d2e27119fda4 has `duckDbStreamResults`) |
+| `2e86e98` | NOT NEEDED here (server side; d2e27119fda4 has `duckDbStreamingBufferSize`) |
+
+Measurements: `docs/CONNECTOR-COMPARE.md` and STATUS sessions 300-305.

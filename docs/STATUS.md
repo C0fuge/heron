@@ -65,6 +65,20 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 > **Maintainer, 2026-11-16 18:45 - answer: FREEZE the patched Trino series** (keep trino-patches/, the patched-trino CI and `applyPartialAggregation` as they are; stock path stays the default). Measured stock vs patched 483: no gain, more transfer and up to 1.2 GB more Trino memory - not adopted by the efficiency criterion. No 455 port, no decimal states. Close the upstream review (`UPSTREAM 2026-11 DONE` with the per-commit lines) and go back to finish mode.
 
+> **Session 307 (2026-11-16 15:50- UTC): UPSTREAM 2026-11 DONE a11a36c - review closed, patched-Trino series frozen
+> as the maintainer decided (18:45).** No code change: `trino-patches/`, `patched-trino.yml`, the e2e `partialagg` block
+> and `applyPartialAggregation` stay as they are (only active on a patched engine; stock `applyAggregation` is the default
+> and the recommended deployment). No 455 port, no decimal partial states. Final verdict per upstream commit in the Log
+> line of session 307 and in `docs/UPSTREAM-PARTIAL-AGG.md` ("Final verdict"). Last green runs on a11a36c (= current plugin
+> code): build 43827569387, e2e stock 1 + 3 servers 43827569346, patched 483 1 + 3 servers 43827577799, patched `speed`
+> 43834715534; latest build (code-free commits since) 43835428997. Open questions on the series (freeze/remove, 483 vs 455)
+> answered and removed. No CI run this session (docs only, `[skip ci]`).
+>
+> **Next steps (session 307): finish mode** - no new features. (1) Nothing open from the maintainer's notes; the routine
+> only keeps CI green and answers new maintainer notes (a new server build -> pin + full regression as in session 135).
+> (2) Remaining Open questions are server-side / stand-side and wait for the maintainer. (3) If a Trino version bump or a
+> stock-path change touches `ConnectorMetadata`, keep the patched-483 e2e (`patched-trino=1`) green too (frozen, not removed).
+
 > **Maintainer, 2026-11-16 07:00 - CORRECTION of the 06:40 answer (2): patched Trino is allowed - yes.** Like marten patches StarRocks, heron may patch Trino (and any other software in the path) when that is measurably more effective; efficiency is the criterion. Plan: keep the stock-Trino path (`applyAggregation`) working and tested as now; add upstream's partial aggregation pushdown (`applyPartialAggregation` + engine patch `flight-connector.patch`) as a patch series on a Trino tag built in CI (cached), like marten's series on StarRocks 4.1.4. Port the patch to the newest supported version (483 preferred, then 477; 455 only if porting is not feasible - record why). Measure TPC-H SF1/SF10 stock vs patched Trino on `server-1.0.0-d2e27119fda4` (both server profiles, 22/22 answers equal); if patched is faster, it becomes the recommended deployment and the offline package gets the patched Trino build too. Large item: several sessions are fine, leave a precise next step each time.
 
 > **Maintainer, 2026-11-16 06:40 - unblock.** Server for the before/after measurement: use **`server-1.0.0-d2e27119fda4`** (newest, 2c169a53db3b + kestrel items 49 / 50; egret HDFS acceptance SHIP) - now in this repo's test-assets release (jar, flight-plugins, flight-server-libs, flight-auth, SHA256SUMS); it replaces 2c169a53db3b in the earlier note. Rule: ours vs theirs per feature - read the upstream commits, compare with what this connector already does, adopt only what is missing or measured better on the same runner class (TPC-H answers unchanged, all 22 queries), never weaken our own features; native Arrow Flight path only (JDBC stays the baseline). Write `UPSTREAM 2026-11 DONE <sha>` or `UPSTREAM 2026-11 NOT NEEDED` with one line per upstream commit in the Log. **Answers (session 297 questions):** (1) the `{rule}` in the 2026-11-16 01:45 note was a placeholder my script failed to fill - the rule is the text above. (2) Patched Trino: **no** - production stays on stock Trino; close upstream's partial aggregation pushdown as `NOT APPLICABLE (needs a patched engine)`, keep any correctness fix you took from it (max(double), empty global aggregation row). Then finish the remaining part of the review (DuckDB result streaming / streaming buffer: server side, note only) and measure on the server above.
@@ -1101,17 +1115,6 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
-- **Patched Trino series: freeze or remove? (session 302, updated 303).** Measured stock vs patched 483: TPC-H SF1/SF10
-  both profiles identical plans and times; non-decimal aggregation set on 1 server (session 302) and on a **3-server
-  cluster** (session 303, runs 43843703257 / 43843708138): partial = full pushdown in time or slower, more transfer and up to
-  1.2 GB more Trino memory on high-cardinality GROUP BY. By the efficiency criterion it is not adopted. **Proposal:** freeze
-  it as is (trino-patches/, patched-trino CI, `applyPartialAggregation` - only active on a patched engine, stock path
-  unchanged and tested) and stop further work (no decimal states, no 455 port). Say "remove" if you prefer it deleted.
-- **Patched Trino version (session 301; moot unless the 3-server check of session 303 shows a gain).** The partial-aggregation patch series exists for Trino **483** (the maintainer's
-  order: 483 first). Production runs Trino **455**. If the measurement shows patched 483 faster, is moving production to
-  a patched 483 acceptable, or is a 455 port wanted too (upstream's 446 patch applies to 455 with `git apply --check`; the
-  overlay build would work the same way)? Deployment = overwrite `lib/io.trino_trino-spi-483.jar` and
-  `lib/io.trino_trino-main-483.jar` on every node (exact names, see `trino-patches/README.md`).
 - **Server deafc861cce3: memory with `resourceProfile=speed` (session 135).** In connector-compare SF10 the server's
   peak memory was 3983 MB with `speed` vs 1558 MB on f06b5834e76e (default profile 1895 vs 1814 MB; SF1 speed 1126 vs
   983 MB), while the speed run was twice as fast. Expected from the new build (e.g. node-local copies / caching), or should
@@ -1812,3 +1815,13 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-11-16 session 305: SF10 default q01 watch rerun, connector-compare 43870753170 (q01 q06, 5 rounds, ABA): q01 8.95 s
   d2e27119fda4 vs 8.91/8.83 s deafc861cce3, q06 10.82 vs 10.90/12.39 s; equal, watch closed. No plugin code change.
 - 2026-11-16 session 306: no new maintainer note; Next steps all wait on Open questions (patched-Trino freeze/remove). Last runs green (43870753170). No change, stopped early.
+- 2026-11-16 session 307: **UPSTREAM 2026-11 DONE a11a36c** (maintainer 18:45: freeze patched series). Per upstream commit:
+  `f1bb88c` engine SPI patch - ported as `trino-patches/483` (80ebbbf, 1827529), measured not faster (runs 43829210540,
+  43837898252, 43843703257, 43843708138), FROZEN, not the recommended deployment; `f121311` partial COUNT states - in
+  `applyPartialAggregation` (c0a7da3, a11a36c), frozen; its zero-endpoint global COUNT note taken on the stock path (cd043ad);
+  `c2d4093` partial SUM/AVG states - non-decimal in c0a7da3, frozen; decimal states NOT DONE (maintainer: no); `f96e771`
+  MIN/MAX states - in c0a7da3, frozen; its NaN note taken on the stock path (b6d92bf, no DOUBLE max pushdown); `398affc`
+  COUNT input types - NOT NEEDED (ours pushes `count(x)` for every mapped type); `821f627` / `2e86e98` DuckDB result
+  streaming / streaming buffer - NOT NEEDED here (server side, present in d2e27119fda4 as `duckDbStreamResults` /
+  `duckDbStreamingBufferSize`). Measured cost of the taken fixes: none (run 43808943657). Open questions on the series
+  removed; Next steps = finish mode. No code change, no CI run.
