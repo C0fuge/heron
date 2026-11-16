@@ -151,8 +151,8 @@ jobs:
             gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "$RUNNER_TEMP/assets/$name"
           done
           cd "$RUNNER_TEMP/assets" && ls -l && grep -v ' START-NOTES\.md$' SHA256SUMS | sha256sum --check --ignore-missing
-      - name: DuckDB for SF10 data and reference
-        if: matrix.sf != 1
+      - name: DuckDB for SF10 data and reference (and the agg query set's reference)
+        if: matrix.sf != 1 || inputs.query-set == 'agg'
         run: pip install --quiet duckdb==1.4.1
       - name: SF10 data cache
         if: matrix.sf != 1
