@@ -330,6 +330,7 @@ public class ArrowFlightMetadata
         try {
             ConnectorMetadata.class.getMethod("applyPartialAggregation", ConnectorSession.class, ConnectorTableHandle.class,
                     List.class, Map.class, List.class, List.class);
+            Logger.get(ArrowFlightMetadata.class).info("Partial aggregation SPI present (patched Trino): partial aggregation pushdown available");
             return true;
         }
         catch (NoSuchMethodException e) {
@@ -367,6 +368,7 @@ public class ArrowFlightMetadata
         if (partialSpi && ArrowFlightSessionProperties.isPartialAggregationPushdownEnabled(session) && partialCandidate(aggregation.get())) {
             // Left to applyPartialAggregation, which the patched planner calls after splitting it into PARTIAL/FINAL
             // (same aggregation over the same scan): Trino then merges per-split states in its distributed FINAL.
+            log.debug("%s: aggregation left to applyPartialAggregation: %s", table, aggregation.get());
             return Optional.empty();
         }
         return Optional.of(aggregationResult((ArrowFlightTableHandle) table, aggregation.get()));
@@ -389,8 +391,10 @@ public class ArrowFlightMetadata
                 || !ArrowFlightSessionProperties.isPartialAggregationPushdownEnabled(session)) {
             return Optional.empty();
         }
-        return translatePartialAggregation((ArrowFlightTableHandle) table, aggregates, assignments, groupingSets, intermediateTypes)
-                .map(aggregation -> aggregationResult((ArrowFlightTableHandle) table, aggregation));
+        Optional<Aggregation> aggregation = translatePartialAggregation((ArrowFlightTableHandle) table, aggregates, assignments,
+                groupingSets, intermediateTypes);
+        log.debug("%s: applyPartialAggregation %s states %s -> %s", table, aggregates, intermediateTypes, aggregation);
+        return aggregation.map(a -> aggregationResult((ArrowFlightTableHandle) table, a));
     }
 
     static Optional<Aggregation> translatePartialAggregation(

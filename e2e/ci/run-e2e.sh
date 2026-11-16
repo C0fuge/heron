@@ -187,7 +187,10 @@ start_trino() {
     [ "${2:-}" = probe ] || echo -XX:+ExitOnOutOfMemoryError
     printf '%s\n' -Djdk.attach.allowAttachSelf=true --add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true
   } > "$WORK/etc/jvm.config"
+  # metadata decisions (pushdown / partial aggregation) in the Trino log
+  printf '%s\n' io.trino=INFO pro.surpin.trino.arrowflight.ArrowFlightMetadata=DEBUG > "$WORK/etc/log.properties"
   docker run -d --name trino --network $NET -p 127.0.0.1:8080:8080 \
+    -v "$WORK/etc/log.properties":/etc/trino/log.properties:ro \
     -v "$WORK/plugin":/usr/lib/trino/plugin/arrow-flight:ro \
     -v "$WORK/etc/catalog/flight.properties":/etc/trino/catalog/flight.properties:ro \
     -v "$WORK/etc/catalog/flighth.properties":/etc/trino/catalog/flighth.properties:ro \
@@ -633,6 +636,8 @@ if [ "$PARTIALAGG" = 1 ]; then
     printf 'EXPLAIN grouped\tOK\tpartial scan in the plan\n' >> "$OUT/partialagg-summary.tsv"
   else
     printf 'EXPLAIN grouped\tFAIL\tno partial scan: %s\n' "$(tr '\n' ' ' < "$OUT/partialagg/explain.txt" | head -c 300)" >> "$OUT/partialagg-summary.tsv"; status=1
+    sed 's/\\n/\n/g' "$OUT/partialagg/explain.txt" | head -60
+    docker logs trino 2>&1 | grep -E 'Partial aggregation SPI|applyPartialAggregation|left to applyPartial' | head -20
   fi
   partialagg_n=0
   while IFS= read -r sql; do
