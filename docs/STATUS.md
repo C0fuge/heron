@@ -55,6 +55,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   (`--hosts a,b,c`) form a cluster with backup locations.
 - Patched Trino (session 301): `trino-patches/<v>/*.patch`, built by `trino-patches/build-overlay.sh` (cached in CI);
   e2e input `patched-trino=1` (with `trino=483`) and connector-compare input `patched-trino=483` use image `trino-patched:483`.
+- connector-compare input `servers=3` (session 303): every pass on a fresh 3-server cluster (flight1..3, catalog at flight1).
 - Trino: `trinodb/trino:455` (and 477/483) image, plugin dir mounted at `/usr/lib/trino/plugin/arrow-flight`,
   catalog `connector.name=arrow_flight`, JVM flags from README.
 
@@ -136,11 +137,22 @@ Kept up to date after every work session so work can be resumed from this reposi
 >   lets the server return final groups; partial only adds per-endpoint state rows for Trino to merge. The patch series,
 >   CI image and plugin code stay (default-on only on a patched engine; stock unchanged) - Open question whether to keep.
 >
-> **Next steps (session 303):** (1) partial can only pay off where full pushdown is impossible or single-threaded on the
-> server: measure the agg set on a **3-server cluster** (connector-compare is single-server; add `servers=3` to
-> run-compare.sh or time the e2e `partialagg` block) - if partial still does not win there, propose to the maintainer
-> to stop the series (Open question). (2) Decimal SUM/AVG states only if (1) shows a gain. (3) old item: same-job server
-> comparison deafc861cce3 vs d2e27119fda4 (connector-compare `server-build` per pass).
+> **Session 303 (2026-11-16 09:51-10:40 UTC): 3-server check done - partial aggregation pushdown does not win on a
+> cluster either.** connector-compare got input `servers=3` (run-compare.sh `SERVERS=3`: per pass a fresh cluster
+> flight1..3, catalog at flight1, per-server memory peaks in the report). Agg set, patched 483, server d2e27119fda4, all
+> 6/6 exact: SF1 default (run 43843703257) warm sum stock 9.5 / partial 9.6 / full (partial off) 8.9 s; SF1 speed 8.5 /
+> 8.6 / 8.3; SF10 default (run 43843708138) 60.6 / 64.2 / 63.8. The split is real (partial reads one state row per
+> endpoint: qa01 3 rows vs 1), but partial never leads beyond noise and on the 1.5M-group qa04 it moves 39% more bytes and
+> needs 1258 MB Trino memory vs 1 MB (slower in all 3 jobs). SF10 speed not run (3 x ~4 GB server + Trino > 16 GB runner).
+> Caveat: the 3 servers share one 4-vCPU runner, so this is the per-endpoint path, not real scale-out. Table in
+> `docs/CONNECTOR-COMPARE.md`. Per the 07:00 criterion: **not adopted**; proposal to freeze the series is in Open questions.
+>
+> **Next steps (session 304):** (1) same-job server comparison deafc861cce3 vs d2e27119fda4 (connector-compare:
+> `server-build` per pass, e.g. a pass field or a second server dir; TPC-H SF1 + SF10, both profiles) to settle the
+> "Watch" of session 300. (2) Decimal SUM/AVG partial states: dropped (no gain from partial anywhere) unless the maintainer
+> answers the Open question otherwise. (3) If the maintainer says "remove" for the patched series: delete
+> `trino-patches/`, `patched-trino.yml`, the e2e `partialagg` block and `applyPartialAggregation` (+ its tests) in one
+> commit, e2e 455 + 483 green.
 
 > **Maintainer, 2026-11-16 01:45 - FIRST: UPSTREAM Trino partial aggregation pushdown.** upstream `VadimSurpin/arrow-flight-server` (read-only, never push there) branch `feat/trino-partial-aggregation-pushdown`: partial aggregation SPI patch (`f1bb88c7cc46`), partial count states pushed to Flight (`f12131169bce`), partial numeric aggregates (`c2d40930534f`), numeric min/max (`f96e771ac6e2`), count input types (`398affcf5c6c`); also DuckDB result streaming / streaming buffer on its server (`821f627ba757`, `2e86e98ad599`). {rule} Measure TPC-H SF1/SF10 before/after on `server-1.0.0-2c169a53db3b`, both server profiles.
 >
@@ -1071,11 +1083,12 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
-- **Patched Trino series: keep or stop? (session 302).** Measured on stock vs patched 483 (TPC-H SF1/SF10 both profiles:
-  identical plans, equal times; non-decimal aggregation set: partial = full pushdown in time, more transfer and Trino
-  memory on high-cardinality GROUP BY). By the efficiency criterion it is not adopted for deployment. Next session checks
-  a 3-server cluster; if no gain there either, may the series (trino-patches/, patched-trino CI, `applyPartialAggregation`)
-  be frozen as is, or removed?
+- **Patched Trino series: freeze or remove? (session 302, updated 303).** Measured stock vs patched 483: TPC-H SF1/SF10
+  both profiles identical plans and times; non-decimal aggregation set on 1 server (session 302) and on a **3-server
+  cluster** (session 303, runs 43843703257 / 43843708138): partial = full pushdown in time or slower, more transfer and up to
+  1.2 GB more Trino memory on high-cardinality GROUP BY. By the efficiency criterion it is not adopted. **Proposal:** freeze
+  it as is (trino-patches/, patched-trino CI, `applyPartialAggregation` - only active on a patched engine, stock path
+  unchanged and tested) and stop further work (no decimal states, no 455 port). Say "remove" if you prefer it deleted.
 - **Patched Trino version (session 301; moot unless the 3-server check of session 303 shows a gain).** The partial-aggregation patch series exists for Trino **483** (the maintainer's
   order: 483 first). Production runs Trino **455**. If the measurement shows patched 483 faster, is moving production to
   a patched 483 acceptable, or is a 455 port wanted too (upstream's 446 patch applies to 455 with `git apply --check`; the
@@ -1770,3 +1783,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   the way: DuckDB on SF1, statements need ';' - runs 43835156106 / 43835428715 failed/cancelled for that) -> run
   43837898252 (4 jobs, 6/6): partial not faster than full pushdown, more bytes + Trino memory on high-cardinality GROUP BY.
   Verdict: stock Trino stays recommended; Open question on keeping the series; next: 3-server agg check.
+- 2026-11-16 session 303: connector-compare `servers=3` (cluster per pass); agg set patched 483 on 3 servers, runs
+  43843703257 (SF1 default + speed) and 43843708138 (SF10 default), 6/6 exact everywhere: partial pushdown not faster than
+  full pushdown (SF1 9.6 vs 8.9 s, SF10 64.2 vs 63.8 s), qa04 1258 MB Trino memory vs 1 MB. Verdict unchanged; Open question
+  now proposes to freeze the series. No plugin code change.

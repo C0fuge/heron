@@ -409,3 +409,21 @@ all are decimal or have no aggregates). On the agg set (`query-set=agg`, `e2e/co
 takes the partial scan for all six queries; it is not faster than full pushdown, and on the 1.5M-group qa04 it moves
 more data (SF10 480 vs 345 MB) and needs ~1 GB Trino memory instead of ~1 MB (qa04 slower with partial in all 4 jobs). The only partial lead, SF10 default
 qa01/qa02 (15.6/9.5 s vs 16.9/10.9 full), is matched by ours 455 without partial (15.6/9.4 s): noise. Verdict: stock Trino stays recommended.
+
+### Agg set on a 3-server cluster (session 303, 2026-11-16)
+
+connector-compare `servers=3` (new): per pass a fresh cluster flight1..flight3 (`--hosts flight1,flight2,flight3`, same
+S3 bucket, catalog at flight1), server d2e27119fda4, 3 rounds, all on one 4-vCPU runner (the three servers share its CPUs,
+so this checks the per-endpoint path, not scale-out). Sum of warm medians (s), every pass 6/6 exact; server peak = per server.
+
+| run | job | ours 455 | ours483 stock | ours483p partial | ours483pf partial off | Trino peak MB (stock / partial / off) |
+|---|---|---|---|---|---|---|
+| 43843703257 | SF1 default | 9.8 | 9.5 | 9.6 | 8.9 | 1183 / 1542 / 1055 |
+| 43843703257 | SF1 speed | 8.9 | 8.5 | 8.6 | 8.3 | 1371 / 1634 / 1302 |
+| 43843708138 | SF10 default | 60.4 | 60.6 | 64.2 | 63.8 | 1369 / 3434 / 1849 |
+
+The cluster really splits the scan: the partial pass reads one state row per endpoint (qa01 3 rows on 3 servers vs 1;
+SF1 speed qa01 8 rows = more endpoints per server). Partial is never ahead of full pushdown beyond noise; on the
+1.5M-group qa04 it again moves more data (SF10 480 vs 345 MB) and Trino memory 1258 MB vs 1 MB (SF1 48 vs 1 MB), qa04 slower
+with partial in all 3 jobs (SF1 default 2.16 vs 1.86 s). SF10 speed was not run (3 x ~4 GB server peak + Trino would not fit
+the 16 GB runner). Verdict unchanged: no gain from partial aggregation pushdown, on one server or on a cluster.
