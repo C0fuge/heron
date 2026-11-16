@@ -65,6 +65,20 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 > **Maintainer, 2026-11-16 18:45 - answer: FREEZE the patched Trino series** (keep trino-patches/, the patched-trino CI and `applyPartialAggregation` as they are; stock path stays the default). Measured stock vs patched 483: no gain, more transfer and up to 1.2 GB more Trino memory - not adopted by the efficiency criterion. No 455 port, no decimal states. Close the upstream review (`UPSTREAM 2026-11 DONE` with the per-commit lines) and go back to finish mode.
 
+> **Session 309 (2026-11-16 20:50-22:10 UTC): new server build 6f0aa5a026fa (in e2e-assets since 15:37, no maintainer
+> note) regression-tested and pinned as default** (e2e.yml, connector-compare.yml, run-e2e.sh, run-compare.sh; commit
+> 13c7acc). e2e full suite 1 + 3 servers (types, failover, auth, Iceberg): default profile 43954114349, `speed` 43954119852 -
+> green. A/B vs d2e27119fda4 (connector-compare 43954195113, `server-build2=d2e27119fda4`, ABA, ours only, 3 rounds, 22/22
+> exact everywhere), sum of warm medians new vs old/old2: SF1 default 66.5 vs 58.7/55.3 s, SF1 speed 38.4 vs 38.4/38.2,
+> SF10 default 339.8 vs 336.5/338.5, SF10 speed 175.7 vs 170.3/171.1. Peaks unchanged (SF10 server default 2014 vs
+> 1942/2003 MB, speed 4048 vs 3857/4018 MB). **Watch:** only SF1 default is slower (+16%, spread over q03/q05/q07/q08/q20,
+> execution not planning); the other three cells are within 3%, so likely runner noise. Next step 1 re-checks it.
+>
+> **Next steps (session 309): finish mode** - (1) re-check SF1 default on the new pin: connector-compare
+> `sf=1 profiles=default server-build2=d2e27119fda4 upstream=false ours446=false rounds=5`; if ours stays >10% slower in ABA,
+> note it in Open questions as a server-side regression for the maintainer (plugin unchanged, not a plugin item). (2)-(3) as in
+> session 307 below.
+
 > **Session 307 (2026-11-16 15:50- UTC): UPSTREAM 2026-11 DONE a11a36c - review closed, patched-Trino series frozen
 > as the maintainer decided (18:45).** No code change: `trino-patches/`, `patched-trino.yml`, the e2e `partialagg` block
 > and `applyPartialAggregation` stay as they are (only active on a patched engine; stock `applyAggregation` is the default
@@ -1826,3 +1840,4 @@ Kept up to date after every work session so work can be resumed from this reposi
   `duckDbStreamingBufferSize`). Measured cost of the taken fixes: none (run 43808943657). Open questions on the series
   removed; Next steps = finish mode. No code change, no CI run.
 - 2026-11-16 (cloud session 308, 19:51 UTC): idle - finish mode, no new maintainer note since the 18:45 freeze, last runs green (build 43835428997, connector-compare 43870753170). No code change, no CI run.
+- 2026-11-16 (cloud session 309, 20:50-22:10 UTC): new server build 6f0aa5a026fa pinned (13c7acc) after e2e 43954114349 (default) / 43954119852 (speed), 1 + 3 servers, green; A/B vs d2e27119fda4 connector-compare 43954195113 (22/22 exact): SF1 default 66.5 vs 58.7/55.3 s (watch), SF1 speed 38.4 vs 38.4/38.2, SF10 default 339.8 vs 336.5/338.5, SF10 speed 175.7 vs 170.3/171.1. No plugin code change.
