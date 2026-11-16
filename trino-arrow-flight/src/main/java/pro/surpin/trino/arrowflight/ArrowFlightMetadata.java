@@ -410,16 +410,27 @@ public class ArrowFlightMetadata
         return translateAggregation(handle, aggregates, assignments, groupingSets, Optional.of(intermediateTypes));
     }
 
-    /** True if every aggregate has a partial state this connector produces (then the patched planner's rule takes it). */
+    /**
+     * True if the patched planner's rule will take this aggregation: at least one aggregate (the rule skips a GROUP BY
+     * without aggregates, which then stays here: e2e run 43826068308) and a partial state for every aggregate.
+     */
     static boolean partialCandidate(Aggregation aggregation)
     {
-        return aggregation.getAggregates().stream().allMatch(a -> partialStateType(a).isPresent());
+        return !aggregation.getAggregates().isEmpty()
+                && aggregation.getAggregates().stream().allMatch(a -> partialStateType(a).isPresent());
     }
 
-    private static AggregationApplicationResult<ConnectorTableHandle> aggregationResult(ArrowFlightTableHandle handle, Aggregation aggregation)
+    static AggregationApplicationResult<ConnectorTableHandle> aggregationResult(ArrowFlightTableHandle handle, Aggregation aggregation)
     {
         ImmutableList.Builder<ConnectorExpression> projections = ImmutableList.builder();
         ImmutableList.Builder<Assignment> resultAssignments = ImmutableList.builder();
+        if (aggregation.isPartial()) {
+            // The patched planner builds the new scan from these assignments alone (stock Trino keeps the grouping
+            // columns of the old scan): without them it fails with "did not return a grouping column" (e2e run 43826068308).
+            for (ArrowFlightColumnHandle group : aggregation.getGroupingColumns()) {
+                resultAssignments.add(new Assignment(group.getColumnName(), group, group.getColumnType()));
+            }
+        }
         for (AggregateColumn aggregate : aggregation.getAggregates()) {
             ArrowFlightColumnHandle output = aggregate.getOutput();
             projections.add(new Variable(output.getColumnName(), output.getColumnType()));

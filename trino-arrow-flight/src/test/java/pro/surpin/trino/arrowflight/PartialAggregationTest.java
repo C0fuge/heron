@@ -65,6 +65,29 @@ class PartialAggregationTest
     }
 
     @Test
+    void partialResultAssignsTheGroupingColumnsStockResultDoesNot()
+    {
+        List<AggregateFunction> aggregates = List.of(function("count", BIGINT), function("sum", BIGINT, VALUE));
+        Aggregation partial = ArrowFlightMetadata.translatePartialAggregation(TABLE, aggregates, SCAN, List.of(List.of(KEY)),
+                List.of(BIGINT, BIGINT)).orElseThrow();
+        // the patched planner builds the new scan from the result's assignments only
+        assertEquals(List.of("k", "afagg0", "afagg1"), ArrowFlightMetadata.aggregationResult(TABLE, partial).getAssignments().stream()
+                .map(io.trino.spi.connector.Assignment::getVariable).toList());
+        assertEquals(2, ArrowFlightMetadata.aggregationResult(TABLE, partial).getProjections().size());
+        Aggregation stock = ArrowFlightMetadata.translateAggregation(TABLE, aggregates, SCAN, List.of(List.of(KEY)), Optional.empty()).orElseThrow();
+        assertEquals(List.of("afagg0", "afagg1"), ArrowFlightMetadata.aggregationResult(TABLE, stock).getAssignments().stream()
+                .map(io.trino.spi.connector.Assignment::getVariable).toList());
+    }
+
+    @Test
+    void groupByWithoutAggregatesStaysOnTheStockPath()
+    {
+        // the patched rule skips aggregations without aggregates: applyAggregation must keep them
+        assertFalse(ArrowFlightMetadata.partialCandidate(ArrowFlightMetadata.translateAggregation(TABLE, List.of(), SCAN,
+                List.of(List.of(KEY)), Optional.empty()).orElseThrow()));
+    }
+
+    @Test
     void declinesWholeRequestOnAnyStateItCannotProduce()
     {
         // engine asks for another state type (e.g. a Trino version with a different AVG state layout)
