@@ -65,6 +65,8 @@ jobs:
           # the jars in the image are the patched ones
           cmp <(docker exec trino cat /usr/lib/trino/lib/trino-spi-$TRINO_VERSION.jar) "$D/trino-spi-$TRINO_VERSION.jar"
           cmp <(docker exec trino cat /usr/lib/trino/lib/trino-main-$TRINO_VERSION.jar) "$D/trino-main-$TRINO_VERSION.jar"
+          # DOUBLE sums are rounded: their last bit depends on the reduction order (run 43820766056: 1.072862302099999E9
+          # vs 1.0728623020999988E9 between two stock-path runs)
           # stock aggregation paths answer exactly as on stock Trino (the built-in tpch connector has no
           # applyPartialAggregation, so the new rule must decline everything)
           fail=0
@@ -72,8 +74,8 @@ jobs:
             a=$(q trino "$sql"); b=$(q stock "$sql")
             if [ "$a" = "$b" ]; then echo "same: $sql"; else echo "DIFF: $sql"; echo "$a" | head; echo "$b" | head; fail=1; fi
           done <<'SQL'
-          SELECT count(*), sum(quantity), min(shipdate), max(extendedprice), avg(discount) FROM tpch.tiny.lineitem
-          SELECT returnflag, linestatus, count(*), sum(extendedprice), avg(quantity) FROM tpch.tiny.lineitem GROUP BY 1, 2 ORDER BY 1, 2
+          SELECT count(*), round(sum(quantity), 2), min(shipdate), max(extendedprice), round(avg(discount), 9) FROM tpch.tiny.lineitem
+          SELECT returnflag, linestatus, count(*), round(sum(extendedprice), 2), round(avg(quantity), 9) FROM tpch.tiny.lineitem GROUP BY 1, 2 ORDER BY 1, 2
           SELECT count(*), max(orderkey), sum(quantity) FROM tpch.tiny.lineitem WHERE orderkey < 0
           SELECT o.orderpriority, count(DISTINCT o.custkey) FROM tpch.tiny.orders o JOIN tpch.tiny.lineitem l ON l.orderkey = o.orderkey GROUP BY 1 ORDER BY 1
           SQL
