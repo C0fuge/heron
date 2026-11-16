@@ -40,6 +40,9 @@ on:
       before-ref:
         description: 'Also run ours built from this commit as pass "before" (before/after of a plugin change; empty = no)'
         default: ''
+      patched-trino:
+        description: 'Trino version with a patch series (trino-patches/): adds passes ours<v> (stock image) and ours<v>p (patched image); empty = no'
+        default: ''
 
 permissions:
   contents: read
@@ -64,6 +67,7 @@ jobs:
       OURS446: ${{ inputs.ours446 }}
       UPSTREAM: ${{ inputs.upstream }}
       BEFORE_REF: ${{ inputs.before-ref }}
+      PATCHED_TRINO: ${{ inputs.patched-trino }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -99,6 +103,21 @@ jobs:
         run: |
           mvn -B -ntp -P trino-455 -Ddep.trino.version=446 -Dmaven.compiler.release=21 -DskipTests clean package
           cp trino-arrow-flight/target/trino-arrow-flight-*.zip "$RUNNER_TEMP/zips/ours446.zip"
+      - name: Patched Trino jars (cache)
+        if: inputs.patched-trino != ''
+        uses: actions/cache@v4
+        with:
+          path: trino-patches/target/${{ inputs.patched-trino }}
+          key: trino-overlay-${{ inputs.patched-trino }}-${{ hashFiles(format('trino-patches/{0}/*.patch', inputs.patched-trino), 'trino-patches/build-overlay.sh') }}
+      - name: Build this connector + patched Trino image (Trino ${{ inputs.patched-trino }})
+        if: inputs.patched-trino != ''
+        run: |
+          V="$PATCHED_TRINO"
+          mvn -B -ntp -P "trino-$V" -DskipTests clean package
+          cp trino-arrow-flight/target/trino-arrow-flight-*.zip "$RUNNER_TEMP/zips/ours$V.zip"
+          [ -f "trino-patches/target/$V/trino-main-$V.jar" ] || trino-patches/build-overlay.sh "$V"
+          docker build -q -t "trino-patched:$V" -f "trino-patches/target/$V/Containerfile" "trino-patches/target/$V"
+          echo "trino-patched:$V patch series $(cat trino-patches/target/$V/PATCHES.sha256)" | tee -a "$RUNNER_TEMP/versions.txt"
       - name: Build upstream connector (flight-trino, its own pom, JDK 21)
         if: inputs.upstream != 'false'
         env:
@@ -145,6 +164,10 @@ jobs:
           [ "$UPSTREAM" != false ] && PASSES="$PASSES up:446:$RUNNER_TEMP/zips/up.zip"
           [ "$PROFILE" = default ] && [ "$OURS446" != false ] && PASSES="$PASSES ours446:446:$RUNNER_TEMP/zips/ours446.zip"
           for v in $VARIANTS; do PASSES="$PASSES ${v%%:*}:455:$RUNNER_TEMP/zips/ours.zip:${v#*:}"; done
+          if [ -n "$PATCHED_TRINO" ]; then
+            V="$PATCHED_TRINO"
+            PASSES="$PASSES ours$V:$V:$RUNNER_TEMP/zips/ours$V.zip ours${V}p:${V}p:$RUNNER_TEMP/zips/ours$V.zip"
+          fi
           if [ -n "$PLANS" ]; then export EXPLAIN_QUERIES="$PLANS" PLAN_LOG=1; fi
           echo "passes: $PASSES"
           nproc; free -g; lscpu | grep 'Model name'

@@ -3,7 +3,7 @@
 # upstream server repo's flight-trino connector, against the same Flight server on the same runner, TPC-H at scale SF.
 #
 #   ASSETS=<e2e-assets dir> WORK=<dir> OUT=<dir> SF=1|10 PROFILE=default|speed \
-#   PASSES="ours:455:<zip> up:446:<zip> [ours446:446:<zip>] [name:455:<zip>:prop=value,prop=value]" \
+#   PASSES="ours:455:<zip> up:446:<zip> [ours446:446:<zip>] [name:455:<zip>:prop=value,prop=value] [p:483p:<zip>]" \
 #   [QUERIES="q03 q10"] e2e/compare/run-compare.sh
 #
 # A 4th pass field sets catalog session properties for every query of that pass (e.g. ours-nostats with
@@ -86,6 +86,9 @@ start_server() {
   docker logs flight1 2>&1 | tail -50; return 1
 }
 
+# Trino version "483p" = image trino-patched:483 (trino-patches/build-overlay.sh, built by connector-compare.yml)
+trino_image() { case "$1" in *p) echo "trino-patched:${1%p}" ;; *) echo "trinodb/trino:$1" ;; esac; }
+
 start_trino() {  # version plugin-dir catalog-file
   docker rm -f trino >/dev/null 2>&1 || true
   mkdir -p "$WORK/etc"
@@ -102,7 +105,7 @@ EOF
   docker run -d --name trino --network $NET -p 127.0.0.1:8080:8080 \
     -v "$2":/usr/lib/trino/plugin/arrow-flight:ro -v "$3":/etc/trino/catalog/flight.properties:ro \
     -v "$WORK/etc/jvm.config":/etc/trino/jvm.config:ro -v "$WORK/etc/config.properties":/etc/trino/config.properties:ro \
-    -v "$QDIR":/queries:ro "trinodb/trino:$1" >/dev/null
+    -v "$QDIR":/queries:ro "$(trino_image "$1")" >/dev/null
   for _ in $(seq 1 90); do
     docker exec trino trino --execute 'SELECT 1' >/dev/null 2>&1 && return 0
     docker ps -q -f name=trino -f status=running | grep -q . || break
