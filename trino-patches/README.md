@@ -33,7 +33,9 @@ recompiles only the touched sources against the published `trino-main`/`trino-sp
 file version) and replaces those classes in copies of the stock jars. Output in `trino-patches/target/<version>/`:
 the two jars, `Containerfile` (`FROM trinodb/trino:<version>` + the two jars), `classes.txt`, `PATCHES.sha256`.
 A full Trino build would produce the same two jars plus byte-identical copies of every other jar, at ~30+ min per
-version. Deployment = replace `lib/trino-spi-<v>.jar` and `lib/trino-main-<v>.jar` of the stock server on every node.
+version. Deployment = overwrite `lib/io.trino_trino-spi-<v>.jar` and `lib/io.trino_trino-main-<v>.jar` of the stock server
+on every node with the two jars **under those exact names** (a copy under another name sits next to the stock jar on
+`lib/*` and the stock classes win: seen in CI, run 43825546546).
 
 CI: `.github/workflows/patched-trino.yml` (build, cached by version + patch hash; smoke test vs stock image);
 `e2e.yml` input `patched-trino=1` runs the full suite on the patched image.

@@ -85,8 +85,18 @@ unzip -l "$OUT/trino-main-$V.jar" | grep -q 'io/trino/sql/planner/iterative/rule
 javap -cp "$OUT/trino-spi-$V.jar" io.trino.spi.connector.ConnectorMetadata | grep -q applyPartialAggregation
 javap -cp "$OUT/trino-spi-$V.jar" io.trino.spi.connector.ConnectorTableHandle | grep -q producesPartialAggregation
 
+# The server names its jars <groupId>_<artifactId>-<version>.jar (io.trino_trino-spi-483.jar): replace those files.
+# A jar under another name would sit next to the stock one on lib/* and the stock classes would win (seen in CI).
 cat > "$OUT/Containerfile" <<EOF
 FROM trinodb/trino:$V
-COPY trino-spi-$V.jar trino-main-$V.jar /usr/lib/trino/lib/
+USER root
+COPY trino-spi-$V.jar trino-main-$V.jar /tmp/overlay/
+RUN set -e; for a in trino-spi trino-main; do \\
+      t=\$(ls /usr/lib/trino/lib | grep -E "^(io\\.trino_)?\$a-$V\\.jar\$"); \\
+      [ "\$(echo "\$t" | wc -l)" = 1 ] && [ -n "\$t" ]; \\
+      cp /tmp/overlay/\$a-$V.jar "/usr/lib/trino/lib/\$t"; chown trino:trino "/usr/lib/trino/lib/\$t"; \\
+      echo "replaced lib/\$t"; \\
+    done; rm -rf /tmp/overlay
+USER trino:trino
 EOF
 log "done: $OUT"

@@ -70,10 +70,13 @@ jobs:
             '  System.out.println("applyPartialAggregation: " + java.util.Arrays.stream(c.getMethods()).anyMatch(m -> m.getName().equals("applyPartialAggregation")));' \
             '} }' > "$RUNNER_TEMP/P.java"
           docker cp "$RUNNER_TEMP/P.java" trino:/tmp/P.java
-          docker exec trino sh -c 'cd /tmp && java -cp "/usr/lib/trino/lib/*" P.java' || true
+          docker exec trino sh -c 'cd /tmp && java -cp "/usr/lib/trino/lib/*" P.java' | tee "$RUNNER_TEMP/probe.txt"
+          # the server must resolve the patched SPI (run 43825546546: a second jar under another name lost to the stock one)
+          grep -q 'applyPartialAggregation: true' "$RUNNER_TEMP/probe.txt"
+          [ "$(docker exec trino sh -c 'ls /usr/lib/trino/lib | grep -cE "trino-(spi|main)-[0-9]+\.jar"')" = 2 ]
           # the jars in the image are the patched ones
-          cmp <(docker exec trino cat /usr/lib/trino/lib/trino-spi-$TRINO_VERSION.jar) "$D/trino-spi-$TRINO_VERSION.jar"
-          cmp <(docker exec trino cat /usr/lib/trino/lib/trino-main-$TRINO_VERSION.jar) "$D/trino-main-$TRINO_VERSION.jar"
+          cmp <(docker exec trino cat /usr/lib/trino/lib/io.trino_trino-spi-$TRINO_VERSION.jar) "$D/trino-spi-$TRINO_VERSION.jar"
+          cmp <(docker exec trino cat /usr/lib/trino/lib/io.trino_trino-main-$TRINO_VERSION.jar) "$D/trino-main-$TRINO_VERSION.jar"
           # DOUBLE sums are rounded: their last bit depends on the reduction order (run 43820766056: 1.072862302099999E9
           # vs 1.0728623020999988E9 between two stock-path runs)
           # stock aggregation paths answer exactly as on stock Trino (the built-in tpch connector has no
