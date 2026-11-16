@@ -25,6 +25,8 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 ASSETS="${ASSETS:?}"; PLUGIN_ZIP="${PLUGIN_ZIP:?}"; OUT="${OUT:?}"
 TRINO_VERSION="${TRINO_VERSION:-455}"; RESULT_MODE="${RESULT_MODE:-partial}"
+# TRINO_IMAGE: e.g. a patched Trino built by trino-patches/build-overlay.sh (e2e.yml input patched-trino)
+TRINO_IMAGE="${TRINO_IMAGE:-trinodb/trino:$TRINO_VERSION}"
 SERVERS="${SERVERS:-1}"; SERVER_HEAP="${SERVER_HEAP:-2g}"; SERVER_BUILD="${SERVER_BUILD:-d2e27119fda4}"
 FAILOVER_QUERIES="${FAILOVER_QUERIES:-q01 q03 q05 q06 q18}"
 ICEBERG_FAILOVER_QUERIES="${ICEBERG_FAILOVER_QUERIES:-q01 q03 q18}"  # all in ICEBERG_QUERIES
@@ -146,7 +148,7 @@ wait_server() {  # name
 for h in ${HOSTS//,/ }; do start_server "$h"; done
 for h in ${HOSTS//,/ }; do wait_server "$h"; done
 
-log "trino $TRINO_VERSION"
+log "trino $TRINO_VERSION (image $TRINO_IMAGE)"
 mkdir -p "$WORK/etc/catalog"
 cat > "$WORK/etc/catalog/flight.properties" <<CAT
 connector.name=arrow_flight
@@ -192,7 +194,7 @@ start_trino() {
     "${EXTRA_CATALOG_MOUNTS[@]}" \
     -v "$WORK/etc/jvm.config":/etc/trino/jvm.config:ro \
     -v "$REPO/e2e/ci/queries":/queries:ro -v "$REPO/e2e/ci/profile-queries":/profile-queries:ro \
-    "trinodb/trino:$TRINO_VERSION" >/dev/null
+    "$TRINO_IMAGE" >/dev/null
   for i in $(seq 1 90); do
     docker exec trino trino --execute 'SELECT 1' >/dev/null 2>&1 && break
     docker ps -q -f name=trino -f status=running | grep -q . || break

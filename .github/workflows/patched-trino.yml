@@ -1,0 +1,87 @@
+name: patched-trino
+
+# Builds Trino with the patch series trino-patches/<version>/*.patch (trino-patches/build-overlay.sh: the touched
+# classes are recompiled against the published jars and replaced in stock trino-spi/trino-main) and smoke-tests the
+# image (server starts, the new SPI method and planner rule are loaded, stock queries answer). The full suite on the
+# patched engine: e2e.yml with input patched-trino=1. Cached by version + patch hash.
+on:
+  workflow_dispatch:
+    inputs:
+      trino:
+        description: 'Trino version with a patch series under trino-patches/'
+        default: '483'
+  push:
+    branches: [main, 'claude/**']
+    paths:
+      - 'trino-patches/**'
+      - '.github/workflows/patched-trino.yml'
+
+concurrency:
+  group: patched-trino-${{ github.ref }}-${{ inputs.trino }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  overlay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TRINO_VERSION: ${{ inputs.trino || '483' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Patched Trino jars (cache)
+        id: overlay-cache
+        uses: actions/cache@v4
+        with:
+          path: trino-patches/target/${{ env.TRINO_VERSION }}
+          key: trino-overlay-${{ env.TRINO_VERSION }}-${{ hashFiles(format('trino-patches/{0}/*.patch', env.TRINO_VERSION), 'trino-patches/build-overlay.sh') }}
+      - name: Build overlay
+        if: steps.overlay-cache.outputs.cache-hit != 'true'
+        run: trino-patches/build-overlay.sh "$TRINO_VERSION"
+      - name: Smoke test
+        run: |
+          D="trino-patches/target/$TRINO_VERSION"
+          cat "$D/classes.txt"
+          docker build -q -t "trino-patched:$TRINO_VERSION" -f "$D/Containerfile" "$D"
+          # patched and stock image side by side (the patched image is FROM the stock one: no extra pull)
+          docker run -d --name trino "trino-patched:$TRINO_VERSION" >/dev/null
+          docker run -d --name stock "trinodb/trino:$TRINO_VERSION" >/dev/null
+          for c in trino stock; do
+            for i in $(seq 1 90); do
+              docker exec $c trino --execute 'SELECT 1' >/dev/null 2>&1 && break
+              docker ps -q -f name=$c -f status=running | grep -q . || { docker logs $c | tail -50; exit 1; }
+              sleep 2
+            done
+          done
+          q() { docker exec "$1" trino --output-format TSV --execute "$2"; }
+          q trino "SELECT node_version FROM system.runtime.nodes"
+          # the jars in the image are the patched ones
+          cmp <(docker exec trino cat /usr/lib/trino/lib/trino-spi-$TRINO_VERSION.jar) "$D/trino-spi-$TRINO_VERSION.jar"
+          cmp <(docker exec trino cat /usr/lib/trino/lib/trino-main-$TRINO_VERSION.jar) "$D/trino-main-$TRINO_VERSION.jar"
+          # stock aggregation paths answer exactly as on stock Trino (the built-in tpch connector has no
+          # applyPartialAggregation, so the new rule must decline everything)
+          fail=0
+          while IFS= read -r sql; do
+            a=$(q trino "$sql"); b=$(q stock "$sql")
+            if [ "$a" = "$b" ]; then echo "same: $sql"; else echo "DIFF: $sql"; echo "$a" | head; echo "$b" | head; fail=1; fi
+          done <<'SQL'
+          SELECT count(*), sum(quantity), min(shipdate), max(extendedprice), avg(discount) FROM tpch.tiny.lineitem
+          SELECT returnflag, linestatus, count(*), sum(extendedprice), avg(quantity) FROM tpch.tiny.lineitem GROUP BY 1, 2 ORDER BY 1, 2
+          SELECT count(*), max(orderkey), sum(quantity) FROM tpch.tiny.lineitem WHERE orderkey < 0
+          SELECT o.orderpriority, count(DISTINCT o.custkey) FROM tpch.tiny.orders o JOIN tpch.tiny.lineitem l ON l.orderkey = o.orderkey GROUP BY 1 ORDER BY 1
+          SQL
+          q trino "EXPLAIN SELECT returnflag, count(*) FROM tpch.tiny.lineitem GROUP BY returnflag" | head -30
+          [ $fail = 0 ]
+      - name: Upload patched jars
+        uses: actions/upload-artifact@v6
+        with:
+          name: trino-patched-${{ env.TRINO_VERSION }}
+          path: trino-patches/target/${{ env.TRINO_VERSION }}/
+          retention-days: 7

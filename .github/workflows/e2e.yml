@@ -48,6 +48,9 @@ on:
       profile-settings:
         description: 'Profile settings: default and/or comma-separated session settings, space-separated'
         default: 'default flight.split_count=16'
+      patched-trino:
+        description: 'Run on Trino patched with trino-patches/<trino>/ (trino-patches/build-overlay.sh): 0 or 1'
+        default: '0'
   push:
     branches: [main, 'claude/**']
     paths:
@@ -59,7 +62,7 @@ on:
       - '.github/workflows/e2e.yml'
 
 concurrency:
-  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}-${{ inputs.iceberg-core-site }}-${{ inputs.heap-probe }}-${{ inputs.profile }}-${{ inputs.result-compression }}-${{ inputs.slow-link }}-${{ inputs.auth }}-${{ inputs.server-profile }}
+  group: e2e-${{ github.ref }}-${{ inputs.trino }}-${{ inputs.result-mode }}-${{ inputs.server-build }}-${{ inputs.iceberg-warehouse }}-${{ inputs.iceberg-core-site }}-${{ inputs.heap-probe }}-${{ inputs.profile }}-${{ inputs.result-compression }}-${{ inputs.slow-link }}-${{ inputs.auth }}-${{ inputs.server-profile }}-${{ inputs.patched-trino }}
   cancel-in-progress: true
 
 # e2e-assets is a published pre-release, so a read token can list and download its assets.
@@ -89,6 +92,7 @@ jobs:
       SLOW_LINK: ${{ inputs.slow-link || '0' }}
       AUTH: ${{ inputs.auth || 'auto' }}
       SERVER_PROFILE: ${{ inputs.server-profile }}
+      PATCHED_TRINO: ${{ inputs.patched-trino || '0' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -98,6 +102,20 @@ jobs:
           cache: maven
       - name: Build plugin
         run: mvn -B -ntp -P trino-$TRINO_VERSION -DskipTests clean package
+      - name: Patched Trino jars (cache)
+        if: env.PATCHED_TRINO == '1'
+        id: overlay-cache
+        uses: actions/cache@v4
+        with:
+          path: trino-patches/target/${{ env.TRINO_VERSION }}
+          key: trino-overlay-${{ env.TRINO_VERSION }}-${{ hashFiles(format('trino-patches/{0}/*.patch', env.TRINO_VERSION), 'trino-patches/build-overlay.sh') }}
+      - name: Patched Trino image
+        if: env.PATCHED_TRINO == '1'
+        run: |
+          [ -f "trino-patches/target/$TRINO_VERSION/trino-main-$TRINO_VERSION.jar" ] || trino-patches/build-overlay.sh "$TRINO_VERSION"
+          docker build -q -t "trino-patched:$TRINO_VERSION" -f "trino-patches/target/$TRINO_VERSION/Containerfile" "trino-patches/target/$TRINO_VERSION"
+          echo "TRINO_IMAGE=trino-patched:$TRINO_VERSION" >> "$GITHUB_ENV"
+          echo "patch series $(cat trino-patches/target/$TRINO_VERSION/PATCHES.sha256)"
       - name: Download e2e assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -133,6 +151,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: e2e-${{ env.TRINO_VERSION }}-${{ env.SERVER_BUILD }}-${{ env.RESULT_MODE }}-${{ env.RESULT_COMPRESSION }}-${{ env.SLOW_LINK }}-${{ env.AUTH }}-${{ env.SERVER_PROFILE || 'default' }}-${{ matrix.servers }}srv
+          name: e2e-${{ env.TRINO_VERSION }}-${{ env.SERVER_BUILD }}-${{ env.RESULT_MODE }}-${{ env.RESULT_COMPRESSION }}-${{ env.SLOW_LINK }}-${{ env.AUTH }}-${{ env.SERVER_PROFILE || 'default' }}${{ env.PATCHED_TRINO == '1' && '-patched' || '' }}-${{ matrix.servers }}srv
           path: ${{ runner.temp }}/out/
           retention-days: 7
