@@ -149,12 +149,22 @@ Kept up to date after every work session so work can be resumed from this reposi
 > Caveat: the 3 servers share one 4-vCPU runner, so this is the per-endpoint path, not real scale-out. Table in
 > `docs/CONNECTOR-COMPARE.md`. Per the 07:00 criterion: **not adopted**; proposal to freeze the series is in Open questions.
 >
-> **Next steps (session 304):** (1) same-job server comparison deafc861cce3 vs d2e27119fda4 (connector-compare:
-> `server-build` per pass, e.g. a pass field or a second server dir; TPC-H SF1 + SF10, both profiles) to settle the
-> "Watch" of session 300. (2) Decimal SUM/AVG partial states: dropped (no gain from partial anywhere) unless the maintainer
-> answers the Open question otherwise. (3) If the maintainer says "remove" for the patched series: delete
-> `trino-patches/`, `patched-trino.yml`, the e2e `partialagg` block and `applyPartialAggregation` (+ its tests) in one
-> commit, e2e 455 + 483 green.
+> **Session 304 (2026-11-16 10:51-12:15 UTC): same-job server comparison deafc861cce3 vs d2e27119fda4 - no server
+> regression; the session-300 "Watch" was runner variance.** connector-compare got input `server-build2` (passes
+> `old-<b>` before and `old2-<b>` after `ours`, same plugin zip, ABA order on one runner; pass field 5 = server build).
+> Run 43852765801 (stock Trino 455, plugin main, 1 server, 3 rounds, 22/22 exact in every pass), sum of warm medians s,
+> d2e27119fda4 vs deafc861cce3 (old / old2): SF1 default 51.2 vs 51.6 / 51.3; SF1 speed 39.7 vs 39.5 / 40.0; SF10 default
+> 343.0 vs 340.0 / 341.6; SF10 speed 139.8 vs 142.1 / 143.8. Server peak MB: SF10 default 1928 vs 1965 / 1972, SF10 speed
+> 4190 vs 4085 / 4067. Rows/bytes read identical on all queries. Only per-query outlier: SF10 default q01 13.5 vs 10.4 /
+> 10.7 s (execution 12.0 vs 9.0 / 9.1; fully pushed aggregation, i.e. server time; q06 13.3 vs 12.2 / 12.0), speed q01
+> equal (2.5 vs 2.4 / 2.5) - one pass, so a watch item, not a finding. Table in `docs/CONNECTOR-COMPARE.md`.
+>
+> **Next steps (session 305):** (1) SF10 default q01 watch: connector-compare `server-build2=deafc861cce3 sf=10
+> profiles=default queries="q01 q06" rounds=5`; if d2e27119fda4 stays >10 % slower on q01, write it to Open questions as a
+> server-side item (no plugin change possible: the whole aggregation runs in DuckDB). (2) Decimal SUM/AVG partial states:
+> dropped unless the maintainer answers the Open question otherwise. (3) If the maintainer says "remove" for the patched
+> series: delete `trino-patches/`, `patched-trino.yml`, the e2e `partialagg` block and `applyPartialAggregation` (+ its
+> tests) in one commit, e2e 455 + 483 green.
 
 > **Maintainer, 2026-11-16 01:45 - FIRST: UPSTREAM Trino partial aggregation pushdown.** upstream `VadimSurpin/arrow-flight-server` (read-only, never push there) branch `feat/trino-partial-aggregation-pushdown`: partial aggregation SPI patch (`f1bb88c7cc46`), partial count states pushed to Flight (`f12131169bce`), partial numeric aggregates (`c2d40930534f`), numeric min/max (`f96e771ac6e2`), count input types (`398affcf5c6c`); also DuckDB result streaming / streaming buffer on its server (`821f627ba757`, `2e86e98ad599`). {rule} Measure TPC-H SF1/SF10 before/after on `server-1.0.0-2c169a53db3b`, both server profiles.
 >
@@ -1789,3 +1799,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   43843703257 (SF1 default + speed) and 43843708138 (SF10 default), 6/6 exact everywhere: partial pushdown not faster than
   full pushdown (SF1 9.6 vs 8.9 s, SF10 64.2 vs 63.8 s), qa04 1258 MB Trino memory vs 1 MB. Verdict unchanged; Open question
   now proposes to freeze the series. No plugin code change.
+- 2026-11-16 session 304: connector-compare input `server-build2` (A/B of two server builds in one job, ABA order). Run
+  43852765801 (4 jobs, 22/22 exact in every pass): d2e27119fda4 = deafc861cce3 within noise (SF1 default 51.2 vs 51.6/51.3 s,
+  SF1 speed 39.7 vs 39.5/40.0, SF10 default 343.0 vs 340.0/341.6, SF10 speed 139.8 vs 142.1/143.8); session-300 Watch
+  closed as runner variance; one watch left: SF10 default q01 13.5 vs 10.4/10.7 s. No plugin code change.

@@ -427,3 +427,22 @@ SF1 speed qa01 8 rows = more endpoints per server). Partial is never ahead of fu
 1.5M-group qa04 it again moves more data (SF10 480 vs 345 MB) and Trino memory 1258 MB vs 1 MB (SF1 48 vs 1 MB), qa04 slower
 with partial in all 3 jobs (SF1 default 2.16 vs 1.86 s). SF10 speed was not run (3 x ~4 GB server peak + Trino would not fit
 the 16 GB runner). Verdict unchanged: no gain from partial aggregation pushdown, on one server or on a cluster.
+
+## Server deafc861cce3 vs d2e27119fda4 in one job (session 304, 2026-11-16)
+
+connector-compare `server-build2=deafc861cce3` (new input): passes `old-deafc861cce3`, `ours` (d2e27119fda4),
+`old2-deafc861cce3` in that order on the same runner, same plugin zip (main, stock Trino 455), 1 server, 3 rounds. Run
+43852765801, every pass 22/22 exact, rows and bytes read identical on every query. Sum of warm medians (s):
+
+| job | d2e27119fda4 | deafc861cce3 (old) | deafc861cce3 (old2) | server peak MB (d2e / old / old2) | Trino peak MB (d2e / old / old2) |
+|---|---|---|---|---|---|
+| SF1 default | 51.2 | 51.6 | 51.3 | 1036 / 960 / 1009 | 5188 / 3809 / 4439 |
+| SF1 speed | 39.7 | 39.5 | 40.0 | 1110 / 1176 / 1159 | 4495 / 3388 / 5083 |
+| SF10 default | 343.0 | 340.0 | 341.6 | 1928 / 1965 / 1972 | 8958 / 9144 / 8663 |
+| SF10 speed | 139.8 | 142.1 | 143.8 | 4190 / 4085 / 4067 | 9606 / 9268 / 9611 |
+
+The two builds are equal within noise; the gap between session 135 (deafc861cce3) and session 300 (d2e27119fda4) was the
+runner. The speed-profile server memory (~4.1 GB at SF10) is the same on both. Single outlier: SF10 default q01 (fully
+pushed aggregation, i.e. DuckDB time) 13.49 s on d2e27119fda4 vs 10.43 / 10.71 s (Trino execution 11.96 vs 9.04 / 9.13);
+with `speed` q01 is equal (2.46 vs 2.42 / 2.53). One pass only -> rerun with more rounds before calling it a regression.
+
