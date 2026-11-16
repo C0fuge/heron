@@ -75,6 +75,15 @@ Kept up to date after every work session so work can be resumed from this reposi
 > **Remaining (needs maintainer):** decision on the patched Trino and the `{rule}` text (Open questions); measurement once
 > 2c169a53db3b is in `e2e-assets`. Upstream server streaming commits (821f627, 2e86e98) reach us with that build.
 
+> **Session 298 (2026-11-16 00:19-01:05 UTC): still blocked; one more defensive fix from upstream's review.** Server
+> 2c169a53db3b is still not in `e2e-assets` (newest deafc861cce3) and the Open question is unanswered, so no measurement.
+> Upstream's "global COUNT over zero endpoints" note applied to ours: a pushed global aggregation (no GROUP BY) returned
+> **no row** if the server answered with no endpoint / no row, where Trino returns one row (count 0, rest NULL). The page
+> source now emits that row (commit cd043ad, unit test `AggregationReaderTest.globalAggregationOverNoRowsIsOneRowWith...`),
+> new e2e block `emptyagg` (pushed vs Trino's own on three never-matching predicates). Old plugin + check, run 43779983103:
+> green on 1 and 3 servers, i.e. server deafc861cce3 always sends one endpoint with a row, so the bug is not reachable today
+> (defensive fix for servers that prune endpoints). Fixed main: build 43780011533, e2e 43780011459 (1 + 3 servers) green.
+
 > **Maintainer, 2026-11-06 16:30 - NEW SERVER BUILD `server-1.0.0-deafc861cce3` (kestrel items 29-34: SASL HDFS, plain-name resolution, node-local copies, log hygiene) - full regression first, before anything else.** Pin it as the e2e/m4 server (asset digests from the release SHA256SUMS; deepscan the assets as usual) and run the complete e2e suite with BOTH server profiles (default and `-DresourceProfile=speed`): every TPC-H query SF1 and SF10 (answers vs the reference), pushdown checks, metadata, prepared statements, auth modes, cluster mode (3 servers) if the suite has it. Compare times with the previous server run in this repo (same runner class). Report pass/fail per check, any wrong answer (critical), regressions >10 %; write "SERVER deafc861cce3 CHECKED" in the Log with the run ids. No new features in this session.
 >
 > **Session 135 (2026-11-06 13:50-14:40 UTC): SERVER deafc861cce3 CHECKED - all green, no wrong answer, no time
@@ -1644,3 +1653,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   43771964010 hit a DuckDB extension 429); evidence 43774850707 (old plugin: only max(c_double) wrong) and 43774847878 (main,
   1 + 3 servers) green. Temporary branch `claude/nanagg-before` (evidence only, not to merge) could not be deleted from the
   session (push delete and API refused): maintainer may delete it.
+- 2026-11-16 session 298: upstream partial-agg item still blocked (no 2c169a53db3b in `e2e-assets`, Open question unanswered).
+  Defensive fix: pushed global aggregation returns its one row (count 0, rest NULL) when the server sends no endpoint/row
+  (cd043ad + unit test + e2e block `emptyagg`). Runs: evidence (old plugin) 43779983103 green - not reachable with
+  deafc861cce3; build 43780011533 and e2e 43780011459 (1 + 3 servers) green.
