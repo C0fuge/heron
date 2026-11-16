@@ -103,13 +103,16 @@ Kept up to date after every work session so work can be resumed from this reposi
 >   Trino's own on 5 queries. First real patched run 43826068308 (1 server): **TPC-H 22/22, types, nanagg, emptyagg,
 >   failover-free checks all OK**, but grouped partial aggregation failed the query ("Partial aggregation did not return
 >   a grouping column": the patched rule builds the scan only from the result's assignments) and a GROUP BY without
->   aggregates lost its pushdown (patched rule skips it). Both fixed in a11a36c (+2 unit tests); rerun: see Log.
+>   aggregates lost its pushdown (patched rule skips it). Both fixed in a11a36c (+2 unit tests). Rerun 43827577799:
+>   **1 server green** (EXPLAIN shows the partial scan, partialagg 5/5 partial = stock = Trino, 22/22, all other blocks
+>   OK); its 3-server job was still running at session end.
 > - connector-compare input `patched-trino=483` (passes ours483 = stock image, ours483p = patched image, same zip).
 >
-> **Next steps (session 302):** (1) check the e2e run on a11a36c (`gh run list --workflow e2e.yml`, inputs trino=483
-> patched-trino=1, 1 + 3 servers): `partialagg-summary` all OK incl. "EXPLAIN grouped OK", 22/22; fix what fails. Also
-> run it with `server-profile=speed`. (2) Measure: connector-compare `sf=both profiles=both upstream=false ours446=false
-> patched-trino=483` (passes ours=455 stock, ours483 stock, ours483p patched) on d2e27119fda4; 22/22 equal required;
+> **Next steps (session 302):** (1) check the 3-server job of e2e 43827577799 (patched 483, a11a36c: failover/auth checks
+> with partial states); fix what fails. Also run it with `server-profile=speed`. (2) Measurement **already dispatched**:
+> connector-compare 43829210540 (`sf=both profiles=both upstream=false ours446=false patched-trino=483 plans="q01 q03 q04 q06
+> q13 q18"`; passes ours=455 stock, ours483 stock, ours483p patched) on d2e27119fda4; read the report at the end of each
+> job's "Compare" step (MCP `get_job_logs`); 22/22 equal required;
 > compare ours483 vs ours483p per query (q01/q06 are decimal sums -> stock path; partial helps grouped
 > count/min/max/int sums, e.g. q04/q13/q18 sub-aggregations, and key-range splits for aggregations on 1 server). Use
 > `plans=` to confirm which queries take the partial path. (3) If patched wins: decimal SUM/AVG states (Trino's
@@ -1730,5 +1733,5 @@ Kept up to date after every work session so work can be resumed from this reposi
   classes). Plugin `applyPartialAggregation` + states + range splits for partial aggregations (c0a7da3), stock path
   unchanged: build 43821798143 / 43823901886 (stock e2e 455) green, stock 483 e2e 43820670408 green. First real patched
   e2e 43826068308 (1 server): 22/22 + all checks OK except partialagg (grouping columns missing from the partial result;
-  GROUP BY without aggregates lost pushdown) -> fixed a11a36c, rerun dispatched (see Next steps). connector-compare input
-  `patched-trino` added (681cfc9), not run yet.
+  GROUP BY without aggregates lost pushdown) -> fixed a11a36c; rerun 43827577799 1 server green (3 servers running at
+  session end). connector-compare input `patched-trino` (681cfc9); stock vs patched measurement run 43829210540 dispatched.
