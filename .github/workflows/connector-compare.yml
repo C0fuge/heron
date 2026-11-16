@@ -46,6 +46,9 @@ on:
       query-set:
         description: 'tpch = TPC-H q01..q22; agg = e2e/compare/queries-agg (non-decimal scan aggregations; with patched-trino adds pass ours<v>pf = patched image, partial pushdown off)'
         default: 'tpch'
+      servers:
+        description: 'Flight servers per pass: 1, or 3 = cluster flight1..3 (backup locations; catalog points at flight1)'
+        default: '1'
 
 permissions:
   contents: read
@@ -72,6 +75,7 @@ jobs:
       BEFORE_REF: ${{ inputs.before-ref }}
       PATCHED_TRINO: ${{ inputs.patched-trino }}
       QUERY_SET: ${{ inputs.query-set }}
+      SERVERS: ${{ inputs.servers }}
     steps:
       - uses: actions/checkout@v5
         with:

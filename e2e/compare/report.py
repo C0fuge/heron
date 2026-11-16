@@ -87,6 +87,10 @@ def main():
         data[p] = dict(meta=read_meta(d), times=times, rounds=rounds, answers=answers, sums=sums, stats=stats, mem=mem,
                        dir=d)
 
+    def server_mem(m):  # one server: its peak; a cluster: per-server peaks joined by '+'
+        hosts = sorted(k for k in m if k.startswith("flight"))
+        return " + ".join(mb(m.get(h)) for h in hosts) if hosts else "-"
+
     def ok(p, q):
         a = data[p]["answers"]
         return bool(a) and all(a[rr].get(q, {}).get("result") == "OK" for rr in a)
@@ -107,7 +111,7 @@ def main():
     if ran:
         queries = [q for q in queries if q in ran]   # QUERIES subset
     any_meta = next((data[p]["meta"] for p in passes), {})
-    print(f"## SF{any_meta.get('sf', '?')}, server profile {any_meta.get('profile', '?')}\n")
+    print(f"## SF{any_meta.get('sf', '?')}, server profile {any_meta.get('profile', '?')}, servers {any_meta.get('servers', '1')}\n")
     print("| pass | Trino | JVM | plugin zip (sha256) | note |\n|---|---|---|---|---|")
     for p in passes:
         m = data[p]["meta"]
@@ -127,7 +131,7 @@ def main():
         sw = sum(warm(p, q) or 0 for q in queries)
         swc = sum(warm(p, q) or 0 for q in common)
         print(f"| {p} | {n_ok}/{len(queries)} | {ck}/{len(queries)} | {sc:.1f} | {sw:.1f} | {swc:.1f} | "
-              f"{mb(dd['mem'].get('trino'))} | {mb(dd['mem'].get('flight1'))} |")
+              f"{mb(dd['mem'].get('trino'))} | {server_mem(dd['mem'])} |")
     print("\nPer query: cold / warm median seconds, answer (OK = all rounds equal to the reference), rows and MB the "
           "connector read from the server (Trino physical input, last round), Trino peak user memory MB.\n")
     head = "| query | ref rows | ref checksum |" + "".join(f" {p} cold | {p} warm | {p} answer | {p} rows read | "

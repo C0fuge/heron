@@ -4,7 +4,11 @@
 #
 #   ASSETS=<e2e-assets dir> WORK=<dir> OUT=<dir> SF=1|10 PROFILE=default|speed \
 #   PASSES="ours:455:<zip> up:446:<zip> [ours446:446:<zip>] [name:455:<zip>:prop=value,prop=value] [p:483p:<zip>]" \
-#   [QUERIES="q03 q10"] [QUERY_SET=tpch|agg] e2e/compare/run-compare.sh
+#   [QUERIES="q03 q10"] [QUERY_SET=tpch|agg] [SERVERS=1|3] e2e/compare/run-compare.sh
+#
+# SERVERS=3 starts a cluster flight1..flight3 (--hosts flight1,flight2,flight3, backup locations, every server reads the
+# same S3 bucket) per pass instead of one server; the catalog still points at flight1 (the coordinator for the plugin).
+# SERVER_HEAP applies to each server; memory.txt lists every server's peak.
 #
 # QUERY_SET=agg times e2e/compare/queries-agg/qa*.sql instead of TPC-H: non-decimal count/sum/min/max/avg directly over
 # a scan, i.e. the aggregations the patched Trino's partial aggregation pushdown takes (TPC-H's scan aggregations are all
@@ -29,7 +33,8 @@ ASSETS="${ASSETS:?}"; WORK="${WORK:?}"; OUT="${OUT:?}"; SF="${SF:-1}"; PROFILE="
 PASSES="${PASSES:?}"; SERVER_BUILD="${SERVER_BUILD:-d2e27119fda4}"; ROUNDS="${ROUNDS:-3}"
 TRINO_XMX="${TRINO_XMX:-8G}"; TRINO_QUERY_MEM="${TRINO_QUERY_MEM:-4GB}"; SERVER_HEAP="${SERVER_HEAP:-3g}"
 QUERY_TIMEOUT="${QUERY_TIMEOUT:-900}"  # seconds per query
-QUERY_SET="${QUERY_SET:-tpch}"
+QUERY_SET="${QUERY_SET:-tpch}"; SERVERS="${SERVERS:-1}"
+HOSTS="$(seq -s, -f 'flight%g' 1 "$SERVERS")"; HOST_LIST="${HOSTS//,/ }"
 if [ "$QUERY_SET" = agg ]; then
   EXPLAIN_QUERIES="${EXPLAIN_QUERIES:-qa01 qa02 qa03 qa04 qa05 qa06}"
 else
@@ -76,27 +81,32 @@ docker network create $NET >/dev/null
 docker run -d --name s3 --network $NET -v "$WORK/s3":/data \
   rclone/rclone:1.68.2 serve s3 /data --addr :9000 --auth-key "$S3_KEY,$S3_SECRET" >/dev/null
 
-start_server() {
-  docker rm -f flight1 >/dev/null 2>&1 || true
-  SERVER_CWD="$WORK/flight1-$(date +%s%N)"; mkdir -p "$SERVER_CWD"  # fresh cwd; the old one holds root-owned DuckDB temp files
-  local extra=(); [ "$PROFILE" = default ] || extra=(-DresourceProfile="$PROFILE")
-  docker run -d --name flight1 --network $NET \
-    -v "$WORK/server":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro -v "$SERVER_CWD":/work -w /work \
-    -e LANG=C.UTF-8 -e FLIGHT_S3_ACCESS_KEY="$S3_KEY" -e FLIGHT_S3_SECRET_KEY="$S3_SECRET" \
-    -e FLIGHT_AUTH_PROVIDER=token -e FLIGHT_AUTH_TOKEN="$TOKEN" \
-    eclipse-temurin:21-jdk \
-    java -Xmx"$SERVER_HEAP" --add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true \
-         -DdataDir=s3://lake/parquet -Ds3Endpoint=http://s3:9000 -Ds3UrlStyle=path -Ds3Region=us-east-1 \
-         -Darrowflight.plugins.dir=/app/plugins -Darrowflight.duckdb.extensionDir=/ext/duckdb-home/extensions \
-         "${extra[@]}" \
-         -cp "/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
-         --port 32010 --localhost flight1 --hosts flight1 >/dev/null
-  for _ in $(seq 1 90); do
-    docker logs flight1 2>&1 | grep -q 'Server Arrow Flight SQL started' && return 0
-    docker ps -q -f name=flight1 -f status=running | grep -q . || break
-    sleep 2
+start_server() {  # all of $HOSTS; a cluster member starts only once every --hosts member has joined
+  local h extra=(); [ "$PROFILE" = default ] || extra=(-DresourceProfile="$PROFILE")
+  for h in $HOST_LIST; do
+    docker rm -f "$h" >/dev/null 2>&1 || true
+    local cwd="$WORK/$h-$(date +%s%N)"; mkdir -p "$cwd"  # fresh cwd; the old one holds root-owned DuckDB temp files
+    docker run -d --name "$h" --network $NET \
+      -v "$WORK/server":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro -v "$cwd":/work -w /work \
+      -e LANG=C.UTF-8 -e FLIGHT_S3_ACCESS_KEY="$S3_KEY" -e FLIGHT_S3_SECRET_KEY="$S3_SECRET" \
+      -e FLIGHT_AUTH_PROVIDER=token -e FLIGHT_AUTH_TOKEN="$TOKEN" \
+      eclipse-temurin:21-jdk \
+      java -Xmx"$SERVER_HEAP" --add-opens=java.base/java.nio=ALL-UNNAMED -Darrow.enable_unsafe_memory_access=true \
+           -DdataDir=s3://lake/parquet -Ds3Endpoint=http://s3:9000 -Ds3UrlStyle=path -Ds3Region=us-east-1 \
+           -Darrowflight.plugins.dir=/app/plugins -Darrowflight.duckdb.extensionDir=/ext/duckdb-home/extensions \
+           "${extra[@]}" \
+           -cp "/app/server.jar:/app/libs/*" pro.surpin.data.arrowflight.server.HadoopArrowFlightServer \
+           --port 32010 --localhost "$h" --hosts "$HOSTS" >/dev/null
   done
-  docker logs flight1 2>&1 | tail -50; return 1
+  for h in $HOST_LIST; do
+    local up=0
+    for _ in $(seq 1 90); do
+      docker logs "$h" 2>&1 | grep -q 'Server Arrow Flight SQL started' && { up=1; break; }
+      docker ps -q -f name="$h" -f status=running | grep -q . || break
+      sleep 2
+    done
+    [ "$up" = 1 ] || { echo "server $h did not start:"; docker logs "$h" 2>&1 | tail -50; return 1; }
+  done
 }
 
 # Trino version "483p" = image trino-patched:483 (trino-patches/build-overlay.sh, built by connector-compare.yml)
@@ -129,7 +139,7 @@ EOF
 
 # Peak memory of both containers: cgroup v2 memory.peak, else the largest 1 s docker stats sample.
 sampler() {
-  while :; do docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' trino flight1 2>/dev/null; sleep 1; done
+  while :; do docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' trino $HOST_LIST 2>/dev/null; sleep 1; done
 }
 to_bytes() { numfmt --from=iec-i "$(echo "$1" | sed 's/B$//; s/iB$/Ki/; s/KiKi/Ki/')" 2>/dev/null || echo 0; }
 mem_peak() {  # container samples-file
@@ -159,7 +169,7 @@ run_pass() {  # name trino-version plugin-zip [session props a=b,c=d]
     *)   printf 'connector.name=arrow_flight\narrow-flight.host=flight1\narrow-flight.port=32010\narrow-flight.bearer-token=%s\n' "$TOKEN" > "$catalog" ;;
   esac
   log "pass $name: Trino $version, profile $PROFILE, sf$SF"
-  { echo "pass=$name"; echo "trino=$version"; echo "profile=$PROFILE"; echo "sf=$SF"; echo "server=$SERVER_BUILD"
+  { echo "pass=$name"; echo "trino=$version"; echo "profile=$PROFILE"; echo "sf=$SF"; echo "server=$SERVER_BUILD"; echo "servers=$SERVERS"
     echo "zip=$(basename "$zip") $(sha256sum "$zip" | cut -c1-12)"; [ -z "$props" ] || echo "note=session $props"
   } > "$dir/meta.txt"
   if ! start_server; then echo "server did not start" >> "$dir/meta.txt"; return 0; fi
@@ -198,7 +208,8 @@ run_pass() {  # name trino-version plugin-zip [session props a=b,c=d]
     log "$name round $r: $(grep -c $'\tOK\t' "$dir/answers-r$r.tsv") OK, $(awk -F'\t' -v r="$r" '$2 == r { s += $3 } END { printf "%.1f", s }' "$dir/times.tsv") s"
   done
   kill "$spid" 2>/dev/null || true
-  { echo "trino $(mem_peak trino "$dir/mem-samples.txt")"; echo "flight1 $(mem_peak flight1 "$dir/mem-samples.txt")"; } > "$dir/memory.txt"
+  { echo "trino $(mem_peak trino "$dir/mem-samples.txt")"
+    for h in $HOST_LIST; do echo "$h $(mem_peak "$h" "$dir/mem-samples.txt")"; done; } > "$dir/memory.txt"
   # EXPLAIN after the timed rounds (the cold round stays cold): the plan fragment that reaches the server
   mkdir -p "$dir/explain"
   for q in $EXPLAIN_QUERIES; do
@@ -210,8 +221,9 @@ run_pass() {  # name trino-version plugin-zip [session props a=b,c=d]
       grep -v -e 'Layout:' -e '^\s*│\?\s*\$hashvalue' "$dir/explain/$q.txt" | sed 's/^"//; s/"$//' | cut -c1-260 || true
     fi
   done
-  docker logs trino > "$dir/trino.log" 2>&1 || true; docker logs flight1 > "$dir/flight1.log" 2>&1 || true
-  docker rm -f trino flight1 >/dev/null 2>&1 || true
+  docker logs trino > "$dir/trino.log" 2>&1 || true
+  for h in $HOST_LIST; do docker logs "$h" > "$dir/$h.log" 2>&1 || true; done
+  docker rm -f trino $HOST_LIST >/dev/null 2>&1 || true
 }
 
 for p in $PASSES; do
