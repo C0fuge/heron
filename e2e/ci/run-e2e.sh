@@ -590,6 +590,32 @@ if [ -n "$TYPES" ]; then
   cat "$OUT/nanagg-summary.tsv"
 fi
 
+# A pushed global aggregation over no qualifying row must still return one row (count 0, the rest NULL), also when the
+# server prunes every file and answers with no endpoint (STATUS session 298). Pushed vs Trino's own aggregation.
+log "emptyagg: global aggregates over no row, pushed vs Trino's own"
+mkdir -p "$OUT/emptyagg"
+printf 'query\tresult\tdetail\n' > "$OUT/emptyagg-summary.tsv"
+emptyagg_n=0
+while IFS= read -r sql; do
+  emptyagg_n=$((emptyagg_n + 1))
+  for p in true false; do
+    docker exec trino trino --catalog flight --output-format TSV --session "flight.aggregation_pushdown_enabled=$p" \
+      --execute "$sql" > "$OUT/emptyagg/$emptyagg_n.$p.tsv" 2> "$OUT/emptyagg/$emptyagg_n.$p.err" \
+      || echo "ERROR $(grep -v 'jline\|dumb terminal' "$OUT/emptyagg/$emptyagg_n.$p.err" | head -c 200)" >> "$OUT/emptyagg/$emptyagg_n.$p.tsv"
+  done
+  on="$(tr '\n' ' ' < "$OUT/emptyagg/$emptyagg_n.true.tsv")"; off="$(tr '\n' ' ' < "$OUT/emptyagg/$emptyagg_n.false.tsv")"
+  if [ "$on" = "$off" ] && [ -n "$off" ] && ! grep -q ERROR "$OUT/emptyagg/$emptyagg_n.false.tsv"; then
+    printf '%s\tOK\t%s\n' "$sql" "$on"
+  else
+    printf '%s\tFAIL\tpushed: [%s] | trino: [%s]\n' "$sql" "${on:0:200}" "${off:0:200}"; status=1
+  fi >> "$OUT/emptyagg-summary.tsv"
+done <<'SQL'
+SELECT count(*), count(l_quantity), sum(l_quantity), min(l_shipdate), max(l_extendedprice), avg(l_discount) FROM tpch.lineitem WHERE l_orderkey < 0
+SELECT count(*), sum(o_totalprice), min(o_orderdate) FROM tpch.orders WHERE o_orderdate < DATE '1900-01-01'
+SELECT count(*) FROM tpch.nation WHERE n_nationkey > 1000
+SQL
+cat "$OUT/emptyagg-summary.tsv"
+
 if [ "$ICEBERG" = 1 ]; then
   iceberg_check
   save_logs
