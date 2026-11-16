@@ -4,4 +4,4 @@ FROM lineitem
 WHERE l_shipdate >= DATE '1995-01-01'
 GROUP BY l_suppkey
 ORDER BY count(*) DESC, l_suppkey
-LIMIT 50
+LIMIT 50;

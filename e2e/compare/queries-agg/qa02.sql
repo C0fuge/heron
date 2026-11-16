@@ -3,4 +3,4 @@ SELECT l_returnflag, l_linestatus, count(*), sum(l_linenumber), sum(l_orderkey),
        round(avg(l_linenumber), 6)
 FROM lineitem
 GROUP BY l_returnflag, l_linestatus
-ORDER BY l_returnflag, l_linestatus
+ORDER BY l_returnflag, l_linestatus;
