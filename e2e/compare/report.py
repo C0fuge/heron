@@ -112,10 +112,10 @@ def main():
         queries = [q for q in queries if q in ran]   # QUERIES subset
     any_meta = next((data[p]["meta"] for p in passes), {})
     print(f"## SF{any_meta.get('sf', '?')}, server profile {any_meta.get('profile', '?')}, servers {any_meta.get('servers', '1')}\n")
-    print("| pass | Trino | JVM | plugin zip (sha256) | note |\n|---|---|---|---|---|")
+    print("| pass | Trino | server | JVM | plugin zip (sha256) | note |\n|---|---|---|---|---|---|")
     for p in passes:
         m = data[p]["meta"]
-        print(f"| {p} | {m.get('trino', '')} | {m.get('trino_jvm', '')} | {m.get('zip', '')} | {m.get('note', '')} |")
+        print(f"| {p} | {m.get('trino', '')} | {m.get('server', '')} | {m.get('trino_jvm', '')} | {m.get('zip', '')} | {m.get('note', '')} |")
     common = [q for q in queries if all(ok(p, q) for p in passes if data[p]["rounds"])]
     print(f"\nQueries answered correctly (all rounds) by every pass that ran: {len(common)}/{len(queries)}.\n")
     print("| pass | correct (all rounds) | checksum = reference (round 1) | sum cold s | sum warm medians s | "

@@ -16,6 +16,9 @@ on:
       server-build:
         description: 'Flight server build from e2e-assets'
         default: 'd2e27119fda4'
+      server-build2:
+        description: 'Second Flight server build: adds passes old-<build> before and old2-<build> after ours (same plugin zip; A/B of two servers in one job, ABA order); empty = no'
+        default: ''
       upstream-ref:
         description: 'Upstream branch or commit (VadimSurpin/arrow-flight-server)'
         default: 'feat/trino-flight-connector'
@@ -66,6 +69,7 @@ jobs:
       SF: ${{ matrix.sf }}
       PROFILE: ${{ matrix.profile }}
       SERVER_BUILD: ${{ inputs.server-build }}
+      SERVER_BUILD2: ${{ inputs.server-build2 }}
       ROUNDS: ${{ inputs.rounds }}
       QUERIES: ${{ inputs.queries }}
       VARIANTS: ${{ inputs.variants }}
@@ -150,6 +154,7 @@ jobs:
             case "$name" in
               *"$SERVER_BUILD"*.jar|*"$SERVER_BUILD".tar.zst|SHA256SUMS) ;;
               test-data-sf1-types.tar.zst) [ "$SF" = 1 ] || continue ;;
+              *.jar|*.tar.zst) [ -n "$SERVER_BUILD2" ] && [[ "$name" == *"$SERVER_BUILD2"* ]] || continue ;;
               *) continue ;;
             esac
             gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "$RUNNER_TEMP/assets/$name"
@@ -168,6 +173,7 @@ jobs:
         run: |
           cat "$RUNNER_TEMP/versions.txt"
           PASSES="ours:455:$RUNNER_TEMP/zips/ours.zip"
+          [ -z "$SERVER_BUILD2" ] || PASSES="old-$SERVER_BUILD2:455:$RUNNER_TEMP/zips/ours.zip::$SERVER_BUILD2 $PASSES old2-$SERVER_BUILD2:455:$RUNNER_TEMP/zips/ours.zip::$SERVER_BUILD2"
           [ -n "$BEFORE_REF" ] && PASSES="$PASSES before:455:$RUNNER_TEMP/zips/before.zip"
           [ "$UPSTREAM" != false ] && PASSES="$PASSES up:446:$RUNNER_TEMP/zips/up.zip"
           [ "$PROFILE" = default ] && [ "$OURS446" != false ] && PASSES="$PASSES ours446:446:$RUNNER_TEMP/zips/ours446.zip"

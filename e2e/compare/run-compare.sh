@@ -6,6 +6,10 @@
 #   PASSES="ours:455:<zip> up:446:<zip> [ours446:446:<zip>] [name:455:<zip>:prop=value,prop=value] [p:483p:<zip>]" \
 #   [QUERIES="q03 q10"] [QUERY_SET=tpch|agg] [SERVERS=1|3] e2e/compare/run-compare.sh
 #
+# A 5th pass field names the Flight server build for that pass (default SERVER_BUILD), e.g.
+# "old-deafc861cce3:455:<zip>::deafc861cce3": server A vs server B in one job on the same runner (its assets must be in
+# ASSETS too).
+#
 # SERVERS=3 starts a cluster flight1..flight3 (--hosts flight1,flight2,flight3, backup locations, every server reads the
 # same S3 bucket) per pass instead of one server; the catalog still points at flight1 (the coordinator for the plugin).
 # SERVER_HEAP applies to each server; memory.txt lists every server's peak.
@@ -48,12 +52,18 @@ mkdir -p "$OUT" "$WORK"
 log() { echo "== $(date -u +%T) $*"; }
 S3_KEY="ci$(openssl rand -hex 8)"; S3_SECRET="$(openssl rand -hex 24)"; TOKEN="$(openssl rand -hex 24)"
 
-log "server $SERVER_BUILD"
-mkdir -p "$WORK/server"
-cp "$ASSETS/arrow-flight-server-1.0.0-$SERVER_BUILD-linux.jar" "$WORK/server/server.jar"
-tar --zstd -xf "$ASSETS/flight-plugins-1.0.0-$SERVER_BUILD.tar.zst" -C "$WORK/server"
-tar --zstd -xf "$ASSETS/flight-server-libs-1.0.0-$SERVER_BUILD.tar.zst" -C "$WORK/server"
-find "$WORK/server" -maxdepth 3 -name 'START-NOTES*' -exec grep -n -i -A3 'resourceProfile' {} \; | head -40 || true
+setup_server() {  # build -> $WORK/server-<build> (jar, plugins, libs), once per build
+  local d="$WORK/server-$1"
+  [ -d "$d" ] && return 0
+  log "server $1"
+  mkdir -p "$d"
+  cp "$ASSETS/arrow-flight-server-1.0.0-$1-linux.jar" "$d/server.jar"
+  tar --zstd -xf "$ASSETS/flight-plugins-1.0.0-$1.tar.zst" -C "$d"
+  tar --zstd -xf "$ASSETS/flight-server-libs-1.0.0-$1.tar.zst" -C "$d"
+  sha256sum "$d/server.jar" | cut -c1-12 | sed "s/^/server $1 jar sha256 /"
+}
+setup_server "$SERVER_BUILD"
+find "$WORK/server-$SERVER_BUILD" -maxdepth 3 -name 'START-NOTES*' -exec grep -n -i -A3 'resourceProfile' {} \; | head -40 || true
 EXT_DIR="$WORK/duckdb/extensions/v1.5.6/linux_amd64"; mkdir -p "$EXT_DIR"
 curl -fsSL http://extensions.duckdb.org/v1.5.6/linux_amd64/httpfs.duckdb_extension.gz | gunzip > "$EXT_DIR/httpfs.duckdb_extension"
 
@@ -81,13 +91,13 @@ docker network create $NET >/dev/null
 docker run -d --name s3 --network $NET -v "$WORK/s3":/data \
   rclone/rclone:1.68.2 serve s3 /data --addr :9000 --auth-key "$S3_KEY,$S3_SECRET" >/dev/null
 
-start_server() {  # all of $HOSTS; a cluster member starts only once every --hosts member has joined
-  local h extra=(); [ "$PROFILE" = default ] || extra=(-DresourceProfile="$PROFILE")
+start_server() {  # build; all of $HOSTS; a cluster member starts only once every --hosts member has joined
+  local h extra=() srv="$WORK/server-$1"; [ "$PROFILE" = default ] || extra=(-DresourceProfile="$PROFILE")
   for h in $HOST_LIST; do
     docker rm -f "$h" >/dev/null 2>&1 || true
     local cwd="$WORK/$h-$(date +%s%N)"; mkdir -p "$cwd"  # fresh cwd; the old one holds root-owned DuckDB temp files
     docker run -d --name "$h" --network $NET \
-      -v "$WORK/server":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro -v "$cwd":/work -w /work \
+      -v "$srv":/app:ro -v "$WORK/duckdb":/ext/duckdb-home:ro -v "$cwd":/work -w /work \
       -e LANG=C.UTF-8 -e FLIGHT_S3_ACCESS_KEY="$S3_KEY" -e FLIGHT_S3_SECRET_KEY="$S3_SECRET" \
       -e FLIGHT_AUTH_PROVIDER=token -e FLIGHT_AUTH_TOKEN="$TOKEN" \
       eclipse-temurin:21-jdk \
@@ -158,8 +168,8 @@ query_stats() {  # source -> "rows bytes peak_user_mem planning analysis executi
     || echo "? ? ? ? ? ?"
 }
 
-run_pass() {  # name trino-version plugin-zip [session props a=b,c=d]
-  local name=$1 version=$2 zip=$3 props=${4:-} dir="$OUT/$1" catalog="$WORK/$1.properties"
+run_pass() {  # name trino-version plugin-zip [session props a=b,c=d] [server build]
+  local name=$1 version=$2 zip=$3 props=${4:-} build=${5:-$SERVER_BUILD} dir="$OUT/$1" catalog="$WORK/$1.properties"
   local sess=() kv
   for kv in ${props//,/ }; do sess+=(--session "flight.$kv"); done
   mkdir -p "$dir" "$WORK/plugin-$name"
@@ -169,10 +179,11 @@ run_pass() {  # name trino-version plugin-zip [session props a=b,c=d]
     *)   printf 'connector.name=arrow_flight\narrow-flight.host=flight1\narrow-flight.port=32010\narrow-flight.bearer-token=%s\n' "$TOKEN" > "$catalog" ;;
   esac
   log "pass $name: Trino $version, profile $PROFILE, sf$SF"
-  { echo "pass=$name"; echo "trino=$version"; echo "profile=$PROFILE"; echo "sf=$SF"; echo "server=$SERVER_BUILD"; echo "servers=$SERVERS"
+  { echo "pass=$name"; echo "trino=$version"; echo "profile=$PROFILE"; echo "sf=$SF"; echo "server=$build"; echo "servers=$SERVERS"
     echo "zip=$(basename "$zip") $(sha256sum "$zip" | cut -c1-12)"; [ -z "$props" ] || echo "note=session $props"
   } > "$dir/meta.txt"
-  if ! start_server; then echo "server did not start" >> "$dir/meta.txt"; return 0; fi
+  setup_server "$build"
+  if ! start_server "$build"; then echo "server did not start" >> "$dir/meta.txt"; return 0; fi
   if ! start_trino "$version" "$WORK/plugin-$name" "$catalog"; then
     echo "trino did not start" >> "$dir/meta.txt"; docker logs trino > "$dir/trino.log" 2>&1 || true; return 0
   fi
@@ -227,8 +238,8 @@ run_pass() {  # name trino-version plugin-zip [session props a=b,c=d]
 }
 
 for p in $PASSES; do
-  IFS=: read -r name version zip props <<< "$p"
-  if [ -n "$zip" ] && [ -f "$zip" ]; then run_pass "$name" "$version" "$zip" "$props"
+  IFS=: read -r name version zip props build <<< "$p"
+  if [ -n "$zip" ] && [ -f "$zip" ]; then run_pass "$name" "$version" "$zip" "$props" "$build"
   else mkdir -p "$OUT/$name"; printf 'pass=%s\ntrino=%s\nnot built\n' "$name" "$version" > "$OUT/$name/meta.txt"; fi
 done
 python3 "$REPO/e2e/compare/report.py" "$OUT" "$REF" | tee "$OUT/report.md"
