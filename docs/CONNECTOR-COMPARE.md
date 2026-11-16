@@ -388,3 +388,21 @@ q19 2.67 / 2.53, q20 2.68 / 2.61, q21 4.47 / 7.06, q22 1.79 / 1.75.
   it is time spent after the scan, not the connector's read), q04 (+5 %), q12 (+4 %), q16 (+3 %). SF1: all within 0.16 s.
 - **Verdict:** same picture as the default profile - with `split-count=1` ours is faster than upstream in sum at both scale
   factors and on four of the five join queries (q12 within 4 %). The speed profile does not change the conclusion.
+
+## Stock vs patched Trino 483 (session 302, 2026-11-16)
+
+Server d2e27119fda4, one server, 3 rounds, sum of warm medians (s); every pass exact (TPC-H 22/22, agg set 6/6).
+
+| run | set | job | ours 455 | ours483 stock | ours483p patched (partial on) | ours483pf patched, partial off |
+|---|---|---|---|---|---|---|
+| 43829210540 | TPC-H | SF1 default | 40.5 | 38.4 | 36.4 | - |
+| 43829210540 | TPC-H | SF1 speed | 38.8 | 36.5 | 36.5 | - |
+| 43829210540 | TPC-H | SF10 default | 332.1 | 328.5 | 331.3 | - |
+| 43829210540 | TPC-H | SF10 speed | 124.1 | 115.1 | 114.2 | - |
+| 43837898252 | agg | SF1 default | 7.9 | 7.4 | 7.7 | 7.3 |
+| 43837898252 | agg | SF10 speed | 19.0 | 18.6 | 18.7 | 18.9 |
+
+TPC-H plans and rows read are identical on stock and patched 483 (no TPC-H scan aggregation is a partial candidate:
+all are decimal or have no aggregates). On the agg set (`query-set=agg`, `e2e/compare/queries-agg`) the patched engine
+takes the partial scan for all six queries; it is not faster than full pushdown, and on the 1.5M-group qa04 it moves
+more data (SF10 480 vs 345 MB) and needs ~1 GB Trino memory instead of ~1 MB. Verdict: stock Trino stays recommended.

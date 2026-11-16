@@ -108,16 +108,38 @@ Kept up to date after every work session so work can be resumed from this reposi
 >   OK); its 3-server job was still running at session end.
 > - connector-compare input `patched-trino=483` (passes ours483 = stock image, ours483p = patched image, same zip).
 >
-> **Next steps (session 302):** (1) check the 3-server job of e2e 43827577799 (patched 483, a11a36c: failover/auth checks
-> with partial states); fix what fails. Also run it with `server-profile=speed`. (2) Measurement **already dispatched**:
-> connector-compare 43829210540 (`sf=both profiles=both upstream=false ours446=false patched-trino=483 plans="q01 q03 q04 q06
-> q13 q18"`; passes ours=455 stock, ours483 stock, ours483p patched) on d2e27119fda4; read the report at the end of each
-> job's "Compare" step (MCP `get_job_logs`); 22/22 equal required;
-> compare ours483 vs ours483p per query (q01/q06 are decimal sums -> stock path; partial helps grouped
-> count/min/max/int sums, e.g. q04/q13/q18 sub-aggregations, and key-range splits for aggregations on 1 server). Use
-> `plans=` to confirm which queries take the partial path. (3) If patched wins: decimal SUM/AVG states (Trino's
-> VARBINARY LongDecimalWithOverflow(AndLong)State layout) are the next big gain for TPC-H (q01, q18 use decimal sums);
-> then offline package with the patched jars. (4) old item: same-job server comparison deafc861cce3 vs d2e27119fda4.
+> **Session 302 (2026-11-16 08:51-09:50 UTC): patched Trino 483 measured - NOT faster; stock stays recommended.**
+> - Correctness: e2e patched 483 (a11a36c) 3 servers green (43827577799, failover/auth with partial states); with
+>   `server-profile=speed` 1 + 3 servers green (43834715534).
+> - TPC-H (connector-compare 43829210540, d2e27119fda4, 22/22 exact in every pass, sum of warm medians s):
+>   | | ours 455 | ours483 stock | ours483p patched |
+>   |---|---|---|---|
+>   | SF1 default | 40.5 | 38.4 | 36.4 |
+>   | SF1 speed | 38.8 | 36.5 | 36.5 |
+>   | SF10 default | 332.1 | 328.5 | 331.3 |
+>   | SF10 speed | 124.1 | 115.1 | 114.2 |
+>   Stock and patched 483 have **identical plans and identical rows read on all 22 queries** (EXPLAIN differs only in
+>   afexpr hashes): every TPC-H aggregation directly over a scan is a decimal sum/avg or has no aggregates, so none is a
+>   partial candidate; the per-query differences are runner noise. Trino 483 itself reads half the rows of 455 on q17
+>   (SF10 62.0M vs 120.0M rows, 7.0 vs 11.3 s speed) and less on q20 - a Trino version effect, not the patch.
+> - New: connector-compare input `query-set=agg` (`e2e/compare/queries-agg/qa01..qa06`: non-decimal count/sum/min/max/avg
+>   over lineitem/orders/partsupp, global / 4-5 groups / 10k groups / 1.5M groups; DuckDB reference generated in the job)
+>   and, with `patched-trino`, pass `ours<v>pf` = patched image with `partial_aggregation_pushdown_enabled=false`, i.e.
+>   partial vs full pushdown on the same engine. Run 43837898252 (6/6 exact in every pass; EXPLAIN: all six take the
+>   `partial` scan in ours483p, full pushdown in ours483pf): SF1 default warm sum 7.4 stock / 7.7 partial / 7.3 full;
+>   SF10 speed 18.6 / 18.7 / 18.9. Partial never wins beyond noise; on the 1.5M-group qa04 it moves 39% more bytes
+>   (SF10 480 vs 345 MB) and needs 995 MB Trino memory instead of 1 MB (Trino peak 3370 vs 1487-1816 MB); SF1 qa04
+>   1.77 s vs 1.47 s full. SF1 speed (133199020687) and SF10 default (133199021215) jobs of the same run: see Log.
+> - **Verdict (efficiency criterion of the 07:00 note): not measurably more effective -> stock Trino stays the
+>   recommended deployment; no offline package with patched jars.** Full pushdown (stock `applyAggregation`) already
+>   lets the server return final groups; partial only adds per-endpoint state rows for Trino to merge. The patch series,
+>   CI image and plugin code stay (default-on only on a patched engine; stock unchanged) - Open question whether to keep.
+>
+> **Next steps (session 303):** (1) partial can only pay off where full pushdown is impossible or single-threaded on the
+> server: measure the agg set on a **3-server cluster** (connector-compare is single-server; add `servers=3` to
+> run-compare.sh or time the e2e `partialagg` block) - if partial still does not win there, propose to the maintainer
+> to stop the series (Open question). (2) Decimal SUM/AVG states only if (1) shows a gain. (3) old item: same-job server
+> comparison deafc861cce3 vs d2e27119fda4 (connector-compare `server-build` per pass).
 
 > **Maintainer, 2026-11-16 01:45 - FIRST: UPSTREAM Trino partial aggregation pushdown.** upstream `VadimSurpin/arrow-flight-server` (read-only, never push there) branch `feat/trino-partial-aggregation-pushdown`: partial aggregation SPI patch (`f1bb88c7cc46`), partial count states pushed to Flight (`f12131169bce`), partial numeric aggregates (`c2d40930534f`), numeric min/max (`f96e771ac6e2`), count input types (`398affcf5c6c`); also DuckDB result streaming / streaming buffer on its server (`821f627ba757`, `2e86e98ad599`). {rule} Measure TPC-H SF1/SF10 before/after on `server-1.0.0-2c169a53db3b`, both server profiles.
 >
@@ -1048,7 +1070,12 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
-- **Patched Trino version (session 301).** The partial-aggregation patch series exists for Trino **483** (the maintainer's
+- **Patched Trino series: keep or stop? (session 302).** Measured on stock vs patched 483 (TPC-H SF1/SF10 both profiles:
+  identical plans, equal times; non-decimal aggregation set: partial = full pushdown in time, more transfer and Trino
+  memory on high-cardinality GROUP BY). By the efficiency criterion it is not adopted for deployment. Next session checks
+  a 3-server cluster; if no gain there either, may the series (trino-patches/, patched-trino CI, `applyPartialAggregation`)
+  be frozen as is, or removed?
+- **Patched Trino version (session 301; moot unless the 3-server check of session 303 shows a gain).** The partial-aggregation patch series exists for Trino **483** (the maintainer's
   order: 483 first). Production runs Trino **455**. If the measurement shows patched 483 faster, is moving production to
   a patched 483 acceptable, or is a 455 port wanted too (upstream's 446 patch applies to 455 with `git apply --check`; the
   overlay build would work the same way)? Deployment = overwrite `lib/io.trino_trino-spi-483.jar` and
