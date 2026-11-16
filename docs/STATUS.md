@@ -1825,3 +1825,4 @@ Kept up to date after every work session so work can be resumed from this reposi
   streaming / streaming buffer - NOT NEEDED here (server side, present in d2e27119fda4 as `duckDbStreamResults` /
   `duckDbStreamingBufferSize`). Measured cost of the taken fixes: none (run 43808943657). Open questions on the series
   removed; Next steps = finish mode. No code change, no CI run.
+- 2026-11-16 (cloud session 308, 19:51 UTC): idle - finish mode, no new maintainer note since the 18:45 freeze, last runs green (build 43835428997, connector-compare 43870753170). No code change, no CI run.
