@@ -70,7 +70,16 @@ Kept up to date after every work session so work can be resumed from this reposi
 > 43808940518 - green; pinned as default server. Before/after (connector-compare input `before-ref`, new; before =
 > 321baf4 = plugin without b6d92bf/cd043ad, same job, same runner), run 43808943657, sum of warm medians, 22/22 exact:
 > SF1 default 59.2 -> 53.6 s, SF1 speed 52.1 -> 51.8 s (noise: TPC-H has no DOUBLE max and no empty global aggregation,
-> plans identical); SF10: SF10_PLACEHOLDER
+> plans identical); SF10 default 338.9 -> 335.6 s, SF10 speed 164.7 -> 167.7 s (largest single-query swing q21 speed
+> 23.5 -> 26.0, q15 default 29.3 -> 33.8, both without DOUBLE max: runner noise). So the two taken fixes cost nothing on
+> TPC-H. Server peak: SF10 default 1882 MB, speed 4041 MB (deafc861cce3: 1895 / 3983).
+> **Watch (not proven):** vs session 135 on deafc861cce3 (other runner) ours is slower on SF1 (default 44.2 -> 53.6, speed
+> 39.1 -> 51.8) and SF10 default (273.4 -> 335.6), equal on SF10 speed (164.4 -> 167.7). Different runners, so no claim;
+> next step 1 measures both servers in one job.
+>
+> **Next steps (session 301):** (1) same-job server comparison deafc861cce3 vs d2e27119fda4 (connector-compare needs a
+> per-pass server build, e.g. input `before-server`; ours only, SF1 + SF10, both profiles) to confirm or clear the watch
+> above; report any regression >10 % to the maintainer. (2) Then the remaining older items below.
 
 > **Maintainer, 2026-11-16 01:45 - FIRST: UPSTREAM Trino partial aggregation pushdown.** upstream `VadimSurpin/arrow-flight-server` (read-only, never push there) branch `feat/trino-partial-aggregation-pushdown`: partial aggregation SPI patch (`f1bb88c7cc46`), partial count states pushed to Flight (`f12131169bce`), partial numeric aggregates (`c2d40930534f`), numeric min/max (`f96e771ac6e2`), count input types (`398affcf5c6c`); also DuckDB result streaming / streaming buffer on its server (`821f627ba757`, `2e86e98ad599`). {rule} Measure TPC-H SF1/SF10 before/after on `server-1.0.0-2c169a53db3b`, both server profiles.
 >
@@ -1668,3 +1677,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   deafc861cce3; Open question unanswered). Checked upstream's last correctness note against ours: decimal footer extrema
   cannot reach us (unfiltered min/max pushdown already gets `WHERE TRUE`, `ArrowFlightStatistics` ranges only integer/date),
   REAL is not pushed at all, so no NaN issue there. No code change, no CI run.
+- 2026-11-16 session 300 (05:13-06:20 UTC): UPSTREAM 2026-11 NOT NEEDED - f1bb88c, f121311, c2d4093, f96e771, 398affc:
+  not applicable (patched engine; production stays stock Trino), their correctness notes kept (b6d92bf, cd043ad);
+  821f627, 2e86e98: server side, already in d2e27119fda4. Server d2e27119fda4: e2e 43808937358 (default) and 43808940518
+  (speed), 1 + 3 servers, green -> pinned. Before/after 321baf4 vs main, connector-compare 43808943657 (new input
+  `before-ref`): 22/22 exact everywhere, no time change beyond noise. Watch: slower than session 135's deafc861cce3 numbers
+  on another runner; same-job check is next.
