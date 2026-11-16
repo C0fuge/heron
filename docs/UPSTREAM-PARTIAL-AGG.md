@@ -47,3 +47,21 @@ Upstream's MAX/NaN note applies to ours too: our `applyAggregation` pushed `max(
 when the column holds NaN, while Trino's `max` skips NaN. Session 297 stops pushing `max` on DOUBLE (min, sum, count,
 avg on DOUBLE and max on every other type stay pushed) and adds the e2e block `nanagg` (pushed vs non-pushed
 min/max/count/sum on every DOUBLE column of schema `types`, which contains NaN and +-Infinity). See STATUS Log.
+
+## Verdict per upstream commit (session 300, 2026-11-16)
+
+Maintainer's answers (2026-11-16 06:40): production stays on **stock Trino**; the rule is "ours vs theirs per feature,
+adopt only what is missing or measured better, never weaken our own features". Hence:
+
+| upstream commit | what | verdict |
+|---|---|---|
+| `f1bb88c` | engine SPI patch (`applyPartialAggregation`, planner rule) | NOT APPLICABLE (needs a patched engine) |
+| `f121311` | partial COUNT states pushed to Flight | NOT APPLICABLE (depends on f1bb88c); its "global COUNT over zero endpoints" note taken as cd043ad |
+| `c2d4093` | partial numeric aggregates (SUM/AVG states) | NOT APPLICABLE (depends on f1bb88c) |
+| `f96e771` | numeric MIN/MAX states, floating MAX via MIN(-v) | NOT APPLICABLE (depends on f1bb88c); its NaN note taken as b6d92bf (no `max` pushdown on DOUBLE) |
+| `398affc` | COUNT input types | NOT APPLICABLE (depends on f1bb88c); ours already pushes `count(x)` for every mapped type |
+| `821f627` | server: DuckDB `jdbc_stream_results` | NOT NEEDED here (server side): server d2e27119fda4 has its own `duckDbStreamResults` (`arrowflight.duckdb.streamResults`) |
+| `2e86e98` | server: DuckDB `streaming_buffer_size` 64MiB | NOT NEEDED here (server side): server d2e27119fda4 has its own validated `duckDbStreamingBufferSize` (`arrowflight.duckdb.streamingBuffer`) |
+
+Checked by reading the strings of `server-1.0.0-d2e27119fda4`'s `DuckDbAdapter`/`AppConfig` classes (no code run).
+Before/after measurement of the two taken fixes: see STATUS Log, session 300.
