@@ -298,6 +298,33 @@ final class AggregationReader
             return "Merger" + Arrays.toString(raws.toArray());
         }
     }
+    /** A global aggregation (no GROUP BY) returns exactly one row, also over no input. */
+    boolean isGlobal()
+    {
+        return aggregation.getGroupingColumns().isEmpty();
+    }
+
+    /**
+     * The raw row of a global aggregation over no rows: count 0, every other aggregate NULL (avg too, its count is
+     * 0). Used when the server answered with no endpoint or no row at all, where Trino expects one row.
+     */
+    Page emptyGlobalRawPage()
+    {
+        Block[] blocks = new Block[raws.size()];
+        for (int i = 0; i < raws.size(); i++) {
+            Raw raw = raws.get(i);
+            BlockBuilder builder = raw.type().createBlockBuilder(null, 1);
+            if (raw.role() == Role.COUNT || raw.role() == Role.AVG_COUNT) {
+                BIGINT.writeLong(builder, 0);
+            }
+            else {
+                builder.appendNull();
+            }
+            blocks[i] = builder.build();
+        }
+        return new Page(1, blocks);
+    }
+
     /**
      * True if the groups of this aggregation can be merged from streams sorted by the server:
      * every grouping column has a type whose server order equals Trino's (see

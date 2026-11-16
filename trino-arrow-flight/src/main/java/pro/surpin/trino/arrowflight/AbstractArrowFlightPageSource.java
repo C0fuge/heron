@@ -78,6 +78,8 @@ public abstract class AbstractArrowFlightPageSource
     // Hash merge of several endpoints' partial groups: filled one batch per readNextPage(), then drained page by page.
     private AggregationReader.Merger hashMerger;
     private boolean hashMergeRead;
+    // A global aggregation must return one row even when the server sent none (no endpoint, e.g. every file pruned).
+    private boolean aggregationRowSeen;
     private boolean finished;
     private long remainingRows;
     private long completedBytes;
@@ -468,6 +470,22 @@ public abstract class AbstractArrowFlightPageSource
     }
 
     private Page nextAggregationPage()
+    {
+        Page page = nextServerAggregationPage();
+        if (page != null) {
+            aggregationRowSeen |= page.getPositionCount() > 0;
+            return page;
+        }
+        boolean exhausted = hashMerger == null || hashMergeRead;
+        if (exhausted && !aggregationRowSeen && aggregationReader.isGlobal()) {
+            aggregationRowSeen = true;
+            log.debug("Global aggregation of %s: no row from %s endpoint(s), returning the empty-input row", table, endpoints.size());
+            return aggregationReader.finish(aggregationReader.emptyGlobalRawPage(), columns);
+        }
+        return null;
+    }
+
+    private Page nextServerAggregationPage()
     {
         if (sortedMerger != null) {
             Page raw = sortedMerger.nextPage();

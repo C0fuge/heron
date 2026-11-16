@@ -205,6 +205,41 @@ class AggregationReaderTest
         assertTrue(a.closed && b.closed);
     }
 
+    @Test
+    void globalAggregationOverNoRowsIsOneRowWithZeroCountsAndNulls()
+    {
+        // SELECT count(*), count(v), sum(v), min(v), max(d), avg(v) with no GROUP BY: like Trino over no input.
+        ArrowFlightColumnHandle count = new ArrowFlightColumnHandle("afagg0", BIGINT);
+        ArrowFlightColumnHandle countV = new ArrowFlightColumnHandle("afagg1", BIGINT);
+        ArrowFlightColumnHandle sum = new ArrowFlightColumnHandle("afagg2", BIGINT);
+        ArrowFlightColumnHandle min = new ArrowFlightColumnHandle("afagg3", BIGINT);
+        ArrowFlightColumnHandle max = new ArrowFlightColumnHandle("afagg4", DATE);
+        ArrowFlightColumnHandle avg = new ArrowFlightColumnHandle("afagg5", DOUBLE);
+        Aggregation global = new Aggregation(List.of(), List.of(
+                new AggregateColumn(AggregateColumn.Function.COUNT_STAR, Optional.empty(), count),
+                new AggregateColumn(AggregateColumn.Function.COUNT, Optional.of(VALUE), countV),
+                new AggregateColumn(AggregateColumn.Function.SUM, Optional.of(VALUE), sum),
+                new AggregateColumn(AggregateColumn.Function.MIN, Optional.of(VALUE), min),
+                new AggregateColumn(AggregateColumn.Function.MAX, Optional.of(DAY), max),
+                new AggregateColumn(AggregateColumn.Function.AVG, Optional.of(VALUE), avg)));
+        AggregationReader reader = reader(global);
+        assertTrue(reader.isGlobal());
+        assertFalse(reader(AGGREGATION).isGlobal());
+
+        // Trino's column order differs from the aggregate order.
+        List<ArrowFlightColumnHandle> requested = List.of(avg, max, count, sum, countV, min);
+        Page page = reader.finish(reader.emptyGlobalRawPage(), requested);
+
+        assertEquals(1, page.getPositionCount());
+        assertEquals(requested.size(), page.getChannelCount());
+        assertNull(readNativeValue(DOUBLE, page.getBlock(0), 0));
+        assertNull(readNativeValue(DATE, page.getBlock(1), 0));
+        assertEquals(0L, readNativeValue(BIGINT, page.getBlock(2), 0));
+        assertNull(readNativeValue(BIGINT, page.getBlock(3), 0));
+        assertEquals(0L, readNativeValue(BIGINT, page.getBlock(4), 0));
+        assertNull(readNativeValue(BIGINT, page.getBlock(5), 0));
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static Object[] row(Object... values)
