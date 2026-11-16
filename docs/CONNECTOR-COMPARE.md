@@ -400,9 +400,12 @@ Server d2e27119fda4, one server, 3 rounds, sum of warm medians (s); every pass e
 | 43829210540 | TPC-H | SF10 default | 332.1 | 328.5 | 331.3 | - |
 | 43829210540 | TPC-H | SF10 speed | 124.1 | 115.1 | 114.2 | - |
 | 43837898252 | agg | SF1 default | 7.9 | 7.4 | 7.7 | 7.3 |
+| 43837898252 | agg | SF1 speed | 11.3 | 10.6 | 11.1 | 10.7 |
+| 43837898252 | agg | SF10 default | 47.0 | 50.5 | 48.5 | 51.0 |
 | 43837898252 | agg | SF10 speed | 19.0 | 18.6 | 18.7 | 18.9 |
 
 TPC-H plans and rows read are identical on stock and patched 483 (no TPC-H scan aggregation is a partial candidate:
 all are decimal or have no aggregates). On the agg set (`query-set=agg`, `e2e/compare/queries-agg`) the patched engine
 takes the partial scan for all six queries; it is not faster than full pushdown, and on the 1.5M-group qa04 it moves
-more data (SF10 480 vs 345 MB) and needs ~1 GB Trino memory instead of ~1 MB. Verdict: stock Trino stays recommended.
+more data (SF10 480 vs 345 MB) and needs ~1 GB Trino memory instead of ~1 MB (qa04 slower with partial in all 4 jobs). The only partial lead, SF10 default
+qa01/qa02 (15.6/9.5 s vs 16.9/10.9 full), is matched by ours 455 without partial (15.6/9.4 s): noise. Verdict: stock Trino stays recommended.

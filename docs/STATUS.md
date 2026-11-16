@@ -129,7 +129,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 >   `partial` scan in ours483p, full pushdown in ours483pf): SF1 default warm sum 7.4 stock / 7.7 partial / 7.3 full;
 >   SF10 speed 18.6 / 18.7 / 18.9. Partial never wins beyond noise; on the 1.5M-group qa04 it moves 39% more bytes
 >   (SF10 480 vs 345 MB) and needs 995 MB Trino memory instead of 1 MB (Trino peak 3370 vs 1487-1816 MB); SF1 qa04
->   1.77 s vs 1.47 s full. SF1 speed (133199020687) and SF10 default (133199021215) jobs of the same run: see Log.
+>   1.77 s vs 1.47 s full. SF1 speed 10.6 / 11.1 / 10.7; SF10 default 50.5 / 48.5 / 51.0 (partial ahead only on qa01/qa02, where ours 455
+>   without partial is as fast: noise); qa04 slower with partial in all 4 jobs. Table in `docs/CONNECTOR-COMPARE.md`.
 > - **Verdict (efficiency criterion of the 07:00 note): not measurably more effective -> stock Trino stays the
 >   recommended deployment; no offline package with patched jars.** Full pushdown (stock `applyAggregation`) already
 >   lets the server return final groups; partial only adds per-endpoint state rows for Trino to merge. The patch series,
@@ -1762,3 +1763,10 @@ Kept up to date after every work session so work can be resumed from this reposi
   e2e 43826068308 (1 server): 22/22 + all checks OK except partialagg (grouping columns missing from the partial result;
   GROUP BY without aggregates lost pushdown) -> fixed a11a36c; rerun 43827577799 1 server green (3 servers running at
   session end). connector-compare input `patched-trino` (681cfc9); stock vs patched measurement run 43829210540 dispatched.
+- 2026-11-16 (cloud session 302, 08:51-09:55 UTC): patched Trino 483 measured. e2e patched 483 3 servers green
+  (43827577799) and `server-profile=speed` 1+3 servers green (43834715534). connector-compare TPC-H 43829210540 (4 jobs,
+  22/22): stock 483 = patched 483 (identical plans, rows read; no TPC-H scan aggregation is a partial candidate).
+  New connector-compare `query-set=agg` (e2e/compare/queries-agg, pass ours<v>pf = patched with partial off; fixes on
+  the way: DuckDB on SF1, statements need ';' - runs 43835156106 / 43835428715 failed/cancelled for that) -> run
+  43837898252 (4 jobs, 6/6): partial not faster than full pushdown, more bytes + Trino memory on high-cardinality GROUP BY.
+  Verdict: stock Trino stays recommended; Open question on keeping the series; next: 3-server agg check.
