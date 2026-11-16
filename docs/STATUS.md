@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `deafc861cce3` since session 135, `0e457de30f25` in session 95-134, `a9e43ca5e296` in session 87-94, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). Input `auth` (session 88, `e2e/ci/auth.sh`):
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `d2e27119fda4` since session 300, `deafc861cce3` in session 135-299, `0e457de30f25` in session 95-134, `a9e43ca5e296` in session 87-94, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). Input `auth` (session 88, `e2e/ci/auth.sh`):
   TLS + LDAP / JWT login check, default `auto` = at the end of 3-server runs. `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
@@ -59,6 +59,16 @@ Kept up to date after every work session so work can be resumed from this reposi
 ## Next steps
 
 > **Maintainer, 2026-11-16 06:40 - unblock.** Server for the before/after measurement: use **`server-1.0.0-d2e27119fda4`** (newest, 2c169a53db3b + kestrel items 49 / 50; egret HDFS acceptance SHIP) - now in this repo's test-assets release (jar, flight-plugins, flight-server-libs, flight-auth, SHA256SUMS); it replaces 2c169a53db3b in the earlier note. Rule: ours vs theirs per feature - read the upstream commits, compare with what this connector already does, adopt only what is missing or measured better on the same runner class (TPC-H answers unchanged, all 22 queries), never weaken our own features; native Arrow Flight path only (JDBC stays the baseline). Write `UPSTREAM 2026-11 DONE <sha>` or `UPSTREAM 2026-11 NOT NEEDED` with one line per upstream commit in the Log. **Answers (session 297 questions):** (1) the `{rule}` in the 2026-11-16 01:45 note was a placeholder my script failed to fill - the rule is the text above. (2) Patched Trino: **no** - production stays on stock Trino; close upstream's partial aggregation pushdown as `NOT APPLICABLE (needs a patched engine)`, keep any correctness fix you took from it (max(double), empty global aggregation row). Then finish the remaining part of the review (DuckDB result streaming / streaming buffer: server side, note only) and measure on the server above.
+
+> **Session 300 (2026-11-16 05:13- UTC): UPSTREAM 2026-11 NOT NEEDED (partial aggregation: NOT APPLICABLE, needs a
+> patched engine); server d2e27119fda4 checked and pinned.** Verdict per upstream commit in `docs/UPSTREAM-PARTIAL-AGG.md`
+> (f1bb88c / f121311 / c2d4093 / f96e771 / 398affc not applicable on stock Trino; their correctness notes kept as b6d92bf
+> and cd043ad; server streaming 821f627 / 2e86e98 already present in d2e27119fda4 as its own `duckDbStreamResults` /
+> `duckDbStreamingBufferSize`). e2e on d2e27119fda4, 1 + 3 servers, full suite: default profile 43808937358, `speed`
+> 43808940518 - green; pinned as default server. Before/after (connector-compare input `before-ref`, new; before =
+> 321baf4 = plugin without b6d92bf/cd043ad, same job, same runner), run 43808943657, sum of warm medians, 22/22 exact:
+> SF1 default 59.2 -> 53.6 s, SF1 speed 52.1 -> 51.8 s (noise: TPC-H has no DOUBLE max and no empty global aggregation,
+> plans identical); SF10: SF10_PLACEHOLDER
 
 > **Maintainer, 2026-11-16 01:45 - FIRST: UPSTREAM Trino partial aggregation pushdown.** upstream `VadimSurpin/arrow-flight-server` (read-only, never push there) branch `feat/trino-partial-aggregation-pushdown`: partial aggregation SPI patch (`f1bb88c7cc46`), partial count states pushed to Flight (`f12131169bce`), partial numeric aggregates (`c2d40930534f`), numeric min/max (`f96e771ac6e2`), count input types (`398affcf5c6c`); also DuckDB result streaming / streaming buffer on its server (`821f627ba757`, `2e86e98ad599`). {rule} Measure TPC-H SF1/SF10 before/after on `server-1.0.0-2c169a53db3b`, both server profiles.
 >
@@ -989,13 +999,6 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
-- **Upstream partial aggregation pushdown needs a patched Trino (session 297).** Upstream's feature (branch
-  `feat/trino-partial-aggregation-pushdown`) only works on a Trino built with its engine patch (`flight-connector.patch`,
-  base 446; applies cleanly to 455, not to 477/483). Should production move to a self-built Trino 455 with that patch? If
-  yes, the plugin would add `applyPartialAggregation` next to the stock `applyAggregation` path (kept for stock Trino),
-  and CI would build the patched Trino (~30+ min, cached). If no, the item is closed as "not applicable to stock Trino".
-  Also: the 2026-11-16 note contains an unfilled `{rule}` placeholder - what was meant there? And server
-  `server-1.0.0-2c169a53db3b` (for the before/after times) is not in `e2e-assets` yet.
 - **Server deafc861cce3: memory with `resourceProfile=speed` (session 135).** In connector-compare SF10 the server's
   peak memory was 3983 MB with `speed` vs 1558 MB on f06b5834e76e (default profile 1895 vs 1814 MB; SF1 speed 1126 vs
   983 MB), while the speed run was twice as fast. Expected from the new build (e.g. node-local copies / caching), or should
