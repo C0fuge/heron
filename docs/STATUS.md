@@ -1657,3 +1657,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   Defensive fix: pushed global aggregation returns its one row (count 0, rest NULL) when the server sends no endpoint/row
   (cd043ad + unit test + e2e block `emptyagg`). Runs: evidence (old plugin) 43779983103 green - not reachable with
   deafc861cce3; build 43780011533 and e2e 43780011459 (1 + 3 servers) green.
+- 2026-11-16 session 299 (03:51 UTC): upstream partial-agg item still blocked (no 2c169a53db3b in `e2e-assets`, newest
+  deafc861cce3; Open question unanswered). Checked upstream's last correctness note against ours: decimal footer extrema
+  cannot reach us (unfiltered min/max pushdown already gets `WHERE TRUE`, `ArrowFlightStatistics` ranges only integer/date),
+  REAL is not pushed at all, so no NaN issue there. No code change, no CI run.
