@@ -1809,3 +1809,4 @@ Kept up to date after every work session so work can be resumed from this reposi
   closed as runner variance; one watch left: SF10 default q01 13.5 vs 10.4/10.7 s. No plugin code change.
 - 2026-11-16 session 305: SF10 default q01 watch rerun, connector-compare 43870753170 (q01 q06, 5 rounds, ABA): q01 8.95 s
   d2e27119fda4 vs 8.91/8.83 s deafc861cce3, q06 10.82 vs 10.90/12.39 s; equal, watch closed. No plugin code change.
+- 2026-11-16 session 306: no new maintainer note; Next steps all wait on Open questions (patched-Trino freeze/remove). Last runs green (43870753170). No change, stopped early.
