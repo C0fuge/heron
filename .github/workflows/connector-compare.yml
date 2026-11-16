@@ -37,6 +37,9 @@ on:
       upstream:
         description: 'Also run the upstream connector (false = ours only, e.g. a server regression run)'
         default: 'true'
+      before-ref:
+        description: 'Also run ours built from this commit as pass "before" (before/after of a plugin change; empty = no)'
+        default: ''
 
 permissions:
   contents: read
@@ -60,8 +63,11 @@ jobs:
       PLANS: ${{ inputs.plans }}
       OURS446: ${{ inputs.ours446 }}
       UPSTREAM: ${{ inputs.upstream }}
+      BEFORE_REF: ${{ inputs.before-ref }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - name: Free disk
         if: matrix.sf != 1
         run: |
@@ -80,6 +86,13 @@ jobs:
           mvn -B -ntp -P trino-455 -DskipTests clean package
           cp trino-arrow-flight/target/trino-arrow-flight-*.zip "$RUNNER_TEMP/zips/ours.zip"
           echo "ours $(git rev-parse --short=12 HEAD)" | tee -a "$RUNNER_TEMP/versions.txt"
+      - name: Build this connector at before-ref (Trino 455)
+        if: inputs.before-ref != ''
+        run: |
+          git worktree add -q "$RUNNER_TEMP/before" "$BEFORE_REF"
+          (cd "$RUNNER_TEMP/before" && mvn -B -ntp -P trino-455 -DskipTests clean package)
+          cp "$RUNNER_TEMP"/before/trino-arrow-flight/target/trino-arrow-flight-*.zip "$RUNNER_TEMP/zips/before.zip"
+          echo "before $(git rev-parse --short=12 "$BEFORE_REF")" | tee -a "$RUNNER_TEMP/versions.txt"
       - name: Build this connector for Trino 446 (best effort)
         if: matrix.profile == 'default' && inputs.ours446 != 'false'
         continue-on-error: true
@@ -128,6 +141,7 @@ jobs:
         run: |
           cat "$RUNNER_TEMP/versions.txt"
           PASSES="ours:455:$RUNNER_TEMP/zips/ours.zip"
+          [ -n "$BEFORE_REF" ] && PASSES="$PASSES before:455:$RUNNER_TEMP/zips/before.zip"
           [ "$UPSTREAM" != false ] && PASSES="$PASSES up:446:$RUNNER_TEMP/zips/up.zip"
           [ "$PROFILE" = default ] && [ "$OURS446" != false ] && PASSES="$PASSES ours446:446:$RUNNER_TEMP/zips/ours446.zip"
           for v in $VARIANTS; do PASSES="$PASSES ${v%%:*}:455:$RUNNER_TEMP/zips/ours.zip:${v#*:}"; done
