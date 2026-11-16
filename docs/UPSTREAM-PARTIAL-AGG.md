@@ -50,7 +50,9 @@ min/max/count/sum on every DOUBLE column of schema `types`, which contains NaN a
 
 ## Verdict per upstream commit (session 300, 2026-11-16)
 
-Maintainer's answers (2026-11-16 06:40): production stays on **stock Trino**; the rule is "ours vs theirs per feature,
+**Superseded for the first five rows by the maintainer's 2026-11-16 07:00 correction: a patched Trino is allowed when
+measurably faster; these commits are to be ported as a patch series (STATUS Next steps).** Original basis - maintainer's
+answers (2026-11-16 06:40): production stays on **stock Trino**; the rule is "ours vs theirs per feature,
 adopt only what is missing or measured better, never weaken our own features". Hence:
 
 | upstream commit | what | verdict |

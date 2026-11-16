@@ -62,8 +62,9 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 > **Maintainer, 2026-11-16 06:40 - unblock.** Server for the before/after measurement: use **`server-1.0.0-d2e27119fda4`** (newest, 2c169a53db3b + kestrel items 49 / 50; egret HDFS acceptance SHIP) - now in this repo's test-assets release (jar, flight-plugins, flight-server-libs, flight-auth, SHA256SUMS); it replaces 2c169a53db3b in the earlier note. Rule: ours vs theirs per feature - read the upstream commits, compare with what this connector already does, adopt only what is missing or measured better on the same runner class (TPC-H answers unchanged, all 22 queries), never weaken our own features; native Arrow Flight path only (JDBC stays the baseline). Write `UPSTREAM 2026-11 DONE <sha>` or `UPSTREAM 2026-11 NOT NEEDED` with one line per upstream commit in the Log. **Answers (session 297 questions):** (1) the `{rule}` in the 2026-11-16 01:45 note was a placeholder my script failed to fill - the rule is the text above. (2) Patched Trino: **no** - production stays on stock Trino; close upstream's partial aggregation pushdown as `NOT APPLICABLE (needs a patched engine)`, keep any correctness fix you took from it (max(double), empty global aggregation row). Then finish the remaining part of the review (DuckDB result streaming / streaming buffer: server side, note only) and measure on the server above.
 
-> **Session 300 (2026-11-16 05:13- UTC): UPSTREAM 2026-11 NOT NEEDED (partial aggregation: NOT APPLICABLE, needs a
-> patched engine); server d2e27119fda4 checked and pinned.** Verdict per upstream commit in `docs/UPSTREAM-PARTIAL-AGG.md`
+> **Session 300 (2026-11-16 05:13-06:25 UTC): written under the 06:40 answer, i.e. before the 07:00 correction above:
+> partial aggregation verdict was NOT APPLICABLE; per the correction it is now TO ADOPT as a Trino patch series (next
+> step 1). Server d2e27119fda4 checked and pinned.** Verdict per upstream commit in `docs/UPSTREAM-PARTIAL-AGG.md`
 > (f1bb88c / f121311 / c2d4093 / f96e771 / 398affc not applicable on stock Trino; their correctness notes kept as b6d92bf
 > and cd043ad; server streaming 821f627 / 2e86e98 already present in d2e27119fda4 as its own `duckDbStreamResults` /
 > `duckDbStreamingBufferSize`). e2e on d2e27119fda4, 1 + 3 servers, full suite: default profile 43808937358, `speed`
@@ -77,9 +78,13 @@ Kept up to date after every work session so work can be resumed from this reposi
 > 39.1 -> 51.8) and SF10 default (273.4 -> 335.6), equal on SF10 speed (164.4 -> 167.7). Different runners, so no claim;
 > next step 1 measures both servers in one job.
 >
-> **Next steps (session 301):** (1) same-job server comparison deafc861cce3 vs d2e27119fda4 (connector-compare needs a
-> per-pass server build, e.g. input `before-server`; ours only, SF1 + SF10, both profiles) to confirm or clear the watch
-> above; report any regression >10 % to the maintainer. (2) Then the remaining older items below.
+> **Next steps (session 301):** (1) maintainer 07:00 item: start the patched-Trino series. First step: fetch Trino tag
+> 483, try `git apply --check` of upstream `flight-trino/trino-fork/flight-connector.patch` (fails at `PlanOptimizers.java`
+> ~989 and `ConnectorTableHandle.java`, session 297), port it into `trino-patches/483/*.patch` in this repo, add a CI
+> workflow that builds the patched Trino server tarball/image (cached by tag + patch hash); if 483 is not feasible try 477,
+> record why. Then plugin `applyPartialAggregation` behind the stock path, then stock vs patched TPC-H on d2e27119fda4.
+> (2) same-job server comparison deafc861cce3 vs d2e27119fda4 (connector-compare needs a per-pass server build) to confirm
+> or clear the watch above.
 
 > **Maintainer, 2026-11-16 01:45 - FIRST: UPSTREAM Trino partial aggregation pushdown.** upstream `VadimSurpin/arrow-flight-server` (read-only, never push there) branch `feat/trino-partial-aggregation-pushdown`: partial aggregation SPI patch (`f1bb88c7cc46`), partial count states pushed to Flight (`f12131169bce`), partial numeric aggregates (`c2d40930534f`), numeric min/max (`f96e771ac6e2`), count input types (`398affcf5c6c`); also DuckDB result streaming / streaming buffer on its server (`821f627ba757`, `2e86e98ad599`). {rule} Measure TPC-H SF1/SF10 before/after on `server-1.0.0-2c169a53db3b`, both server profiles.
 >
@@ -1677,8 +1682,9 @@ Kept up to date after every work session so work can be resumed from this reposi
   deafc861cce3; Open question unanswered). Checked upstream's last correctness note against ours: decimal footer extrema
   cannot reach us (unfiltered min/max pushdown already gets `WHERE TRUE`, `ArrowFlightStatistics` ranges only integer/date),
   REAL is not pushed at all, so no NaN issue there. No code change, no CI run.
-- 2026-11-16 session 300 (05:13-06:20 UTC): UPSTREAM 2026-11 NOT NEEDED - f1bb88c, f121311, c2d4093, f96e771, 398affc:
-  not applicable (patched engine; production stays stock Trino), their correctness notes kept (b6d92bf, cd043ad);
+- 2026-11-16 session 300 (05:13-06:25 UTC): upstream review per 06:40 answer - f1bb88c, f121311, c2d4093, f96e771, 398affc:
+  not applicable on stock Trino, their correctness notes kept (b6d92bf, cd043ad) - superseded by the maintainer's 07:00
+  correction (patched Trino allowed): these five become the patch-series item;
   821f627, 2e86e98: server side, already in d2e27119fda4. Server d2e27119fda4: e2e 43808937358 (default) and 43808940518
   (speed), 1 + 3 servers, green -> pinned. Before/after 321baf4 vs main, connector-compare 43808943657 (new input
   `before-ref`): 22/22 exact everywhere, no time change beyond noise. Watch: slower than session 135's deafc861cce3 numbers
