@@ -78,6 +78,12 @@ jobs:
           SELECT o.orderpriority, count(DISTINCT o.custkey) FROM tpch.tiny.orders o JOIN tpch.tiny.lineitem l ON l.orderkey = o.orderkey GROUP BY 1 ORDER BY 1
           SQL
           q trino "EXPLAIN SELECT returnflag, count(*) FROM tpch.tiny.lineitem GROUP BY returnflag" | head -30
+          # intermediate state types of this Trino version (the plugin must produce exactly these)
+          q trino "EXPLAIN (TYPE DISTRIBUTED) SELECT returnflag, count(*), count(partkey), sum(partkey), sum(quantity),
+            min(partkey), max(quantity), avg(partkey), avg(quantity), sum(CAST(quantity AS decimal(12,2))),
+            avg(CAST(quantity AS decimal(12,2))), avg(CAST(partkey AS integer)), sum(CAST(partkey AS integer)),
+            sum(CAST(quantity AS real)) FROM tpch.tiny.lineitem GROUP BY returnflag" |
+            sed 's/\\n/\n/g' | grep -E 'Aggregate\[type = PARTIAL|Layout:|:= ' | head -40
           [ $fail = 0 ]
       - name: Upload patched jars
         uses: actions/upload-artifact@v6
