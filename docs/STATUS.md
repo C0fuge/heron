@@ -56,6 +56,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 - Patched Trino (session 301): `trino-patches/<v>/*.patch`, built by `trino-patches/build-overlay.sh` (cached in CI);
   e2e input `patched-trino=1` (with `trino=483`) and connector-compare input `patched-trino=483` use image `trino-patched:483`.
 - connector-compare input `servers=3` (session 303): every pass on a fresh 3-server cluster (flight1..3, catalog at flight1).
+- connector-compare input `server-build2=<build>` (session 304): passes `old-<build>` / `old2-<build>` (same plugin zip) before
+  and after `ours` (server `server-build`), i.e. two server builds A/B in one job, ABA order; pass field 5 = server build.
 - Trino: `trinodb/trino:455` (and 477/483) image, plugin dir mounted at `/usr/lib/trino/plugin/arrow-flight`,
   catalog `connector.name=arrow_flight`, JVM flags from README.
 
