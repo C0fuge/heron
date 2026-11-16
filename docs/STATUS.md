@@ -159,9 +159,13 @@ Kept up to date after every work session so work can be resumed from this reposi
 > 10.7 s (execution 12.0 vs 9.0 / 9.1; fully pushed aggregation, i.e. server time; q06 13.3 vs 12.2 / 12.0), speed q01
 > equal (2.5 vs 2.4 / 2.5) - one pass, so a watch item, not a finding. Table in `docs/CONNECTOR-COMPARE.md`.
 >
-> **Next steps (session 305):** (1) SF10 default q01 watch: connector-compare `server-build2=deafc861cce3 sf=10
-> profiles=default queries="q01 q06" rounds=5`; if d2e27119fda4 stays >10 % slower on q01, write it to Open questions as a
-> server-side item (no plugin change possible: the whole aggregation runs in DuckDB). (2) Decimal SUM/AVG partial states:
+> **Session 305 (2026-11-16 12:53-13:25 UTC): q01 watch closed - no regression.** connector-compare run 43870753170
+> (`server-build2=deafc861cce3 sf=10 profiles=default queries="q01 q06" rounds=5`, ABA, 5/5 rounds exact): q01 warm median
+> 8.95 s on d2e27119fda4 vs 8.91 / 8.83 s on deafc861cce3, q06 10.82 vs 10.90 / 12.39 s; session 304's 13.5 s was a one-pass
+> outlier. Table in `docs/CONNECTOR-COMPARE.md`. No plugin change.
+>
+> **Next steps (session 306):** (1) nothing open that does not need the maintainer: the remaining items wait for the Open
+> questions (patched-Trino series freeze/remove). (2) Decimal SUM/AVG partial states:
 > dropped unless the maintainer answers the Open question otherwise. (3) If the maintainer says "remove" for the patched
 > series: delete `trino-patches/`, `patched-trino.yml`, the e2e `partialagg` block and `applyPartialAggregation` (+ its
 > tests) in one commit, e2e 455 + 483 green.
@@ -1803,3 +1807,5 @@ Kept up to date after every work session so work can be resumed from this reposi
   43852765801 (4 jobs, 22/22 exact in every pass): d2e27119fda4 = deafc861cce3 within noise (SF1 default 51.2 vs 51.6/51.3 s,
   SF1 speed 39.7 vs 39.5/40.0, SF10 default 343.0 vs 340.0/341.6, SF10 speed 139.8 vs 142.1/143.8); session-300 Watch
   closed as runner variance; one watch left: SF10 default q01 13.5 vs 10.4/10.7 s. No plugin code change.
+- 2026-11-16 session 305: SF10 default q01 watch rerun, connector-compare 43870753170 (q01 q06, 5 rounds, ABA): q01 8.95 s
+  d2e27119fda4 vs 8.91/8.83 s deafc861cce3, q06 10.82 vs 10.90/12.39 s; equal, watch closed. No plugin code change.

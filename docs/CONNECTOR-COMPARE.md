@@ -446,3 +446,16 @@ runner. The speed-profile server memory (~4.1 GB at SF10) is the same on both. S
 pushed aggregation, i.e. DuckDB time) 13.49 s on d2e27119fda4 vs 10.43 / 10.71 s (Trino execution 11.96 vs 9.04 / 9.13);
 with `speed` q01 is equal (2.46 vs 2.42 / 2.53). One pass only -> rerun with more rounds before calling it a regression.
 
+
+### q01 recheck (session 305, 2026-11-16)
+
+Run 43870753170: SF10, default profile, `queries="q01 q06"`, 5 rounds, same ABA order (old / ours / old2), 1 server, stock
+Trino 455, plugin main, every round exact. Warm median s (Trino execution s):
+
+| query | d2e27119fda4 | deafc861cce3 (old) | deafc861cce3 (old2) |
+|---|---|---|---|
+| q01 | 8.95 (8.07) | 8.91 (8.01) | 8.83 (7.94) |
+| q06 | 10.82 (9.96) | 10.90 (10.00) | 12.39 (11.52) |
+
+Server peak 446 vs 460 / 460 MB. q01 is equal on both builds; the session-304 13.5 s was a one-pass outlier. Watch closed:
+no server regression on d2e27119fda4.
