@@ -5,6 +5,7 @@ import io.trino.spi.Page;
 import io.trino.spi.TrinoException;
 import io.trino.spi.block.Block;
 import io.trino.spi.block.BlockBuilder;
+import io.trino.spi.block.RowBlock;
 import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Type;
 import org.apache.arrow.vector.FieldVector;
@@ -119,6 +120,65 @@ final class AggregationReader
             }
         }
         return new Page(raw.getPositionCount(), blocks);
+    }
+
+    /**
+     * Partial aggregation (patched Trino): raw page of one endpoint -> Trino's intermediate states of the requested
+     * columns, no merge. COUNT, SUM and MIN/MAX states are the raw values (BIGINT / DOUBLE / input type); the AVG state
+     * is ROW(DOUBLE sum, BIGINT count) with a NULL sum (no non-NULL input) as 0.0, as Trino's own partial AVG.
+     */
+    Page finishStates(Page raw, List<ArrowFlightColumnHandle> requested)
+    {
+        Block[] blocks = new Block[requested.size()];
+        for (int channel = 0; channel < requested.size(); channel++) {
+            ArrowFlightColumnHandle column = requested.get(channel);
+            AggregateColumn aggregate = aggregation.aggregateFor(column).orElse(null);
+            if (aggregate != null && aggregate.getFunction() == AggregateColumn.Function.AVG) {
+                blocks[channel] = averageState(raw, aggregate);
+            }
+            else if (aggregate != null && (aggregate.getFunction() == AggregateColumn.Function.COUNT
+                    || aggregate.getFunction() == AggregateColumn.Function.COUNT_STAR)) {
+                blocks[channel] = nullAsZero(raw.getBlock(rawIndex(column.getColumnName())), raw.getPositionCount());
+            }
+            else {
+                blocks[channel] = raw.getBlock(rawIndex(column.getColumnName()));
+            }
+        }
+        return new Page(raw.getPositionCount(), blocks);
+    }
+
+    private static Block nullAsZero(Block counts, int positions)
+    {
+        if (!counts.mayHaveNull()) {
+            return counts;
+        }
+        BlockBuilder builder = BIGINT.createBlockBuilder(null, positions);
+        for (int position = 0; position < positions; position++) {
+            BIGINT.writeLong(builder, counts.isNull(position) ? 0 : BIGINT.getLong(counts, position));
+        }
+        return builder.build();
+    }
+
+    private Block averageState(Page raw, AggregateColumn aggregate)
+    {
+        int sumIndex = rawIndex(aggregate.sumName());
+        int countIndex = rawIndex(aggregate.countName());
+        Type sumType = raws.get(sumIndex).type();
+        Block sums = raw.getBlock(sumIndex);
+        Block counts = raw.getBlock(countIndex);
+        int positions = raw.getPositionCount();
+        BlockBuilder sumBuilder = DOUBLE.createBlockBuilder(null, positions);
+        BlockBuilder countBuilder = BIGINT.createBlockBuilder(null, positions);
+        for (int position = 0; position < positions; position++) {
+            Object sum = readNativeValue(sumType, sums, position);
+            Object count = readNativeValue(BIGINT, counts, position);
+            double total = sum == null ? 0.0
+                    : sumType.equals(DOUBLE) ? (Double) sum
+                    : ArrowTypeConverter.decodeDecimal(sum, (DecimalType) sumType).doubleValue();
+            DOUBLE.writeDouble(sumBuilder, total);
+            BIGINT.writeLong(countBuilder, count == null ? 0 : (Long) count);
+        }
+        return RowBlock.fromFieldBlocks(positions, new Block[] {sumBuilder.build(), countBuilder.build()});
     }
 
     private Block average(Page raw, AggregateColumn aggregate)

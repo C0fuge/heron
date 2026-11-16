@@ -64,6 +64,7 @@ public class ArrowFlightConfig
     private int dynamicFilteringMaxValues = 1000;
     private int endpointReadParallelism = 1;
     private boolean aggregationSortedMergeEnabled = true;
+    private boolean partialAggregationPushdownEnabled = true;
     private boolean readAheadEnabled = true;
     private boolean endpointSplitsEnabled;
     // Off by default: every query's filter values differ, and the server keeps a prepared
@@ -531,6 +532,21 @@ public class ArrowFlightConfig
     public ArrowFlightConfig setAggregationSortedMergeEnabled(boolean aggregationSortedMergeEnabled)
     {
         this.aggregationSortedMergeEnabled = aggregationSortedMergeEnabled;
+        return this;
+    }
+
+    public boolean isPartialAggregationPushdownEnabled()
+    {
+        return partialAggregationPushdownEnabled;
+    }
+
+    @Config("arrow-flight.partial-aggregation-pushdown.enabled")
+    @ConfigDescription("On a Trino patched with trino-patches/ (SPI applyPartialAggregation): every split returns Trino's "
+            + "intermediate aggregation states and Trino's distributed FINAL aggregation merges them, instead of one "
+            + "split computing the whole aggregation. No effect on stock Trino")
+    public ArrowFlightConfig setPartialAggregationPushdownEnabled(boolean partialAggregationPushdownEnabled)
+    {
+        this.partialAggregationPushdownEnabled = partialAggregationPushdownEnabled;
         return this;
     }
 

@@ -49,3 +49,5 @@ arrow-flight.bearer-token=test-token
 # arrow-flight.endpoint-splits.enabled=false
 # Merge the partial groups of several Flight nodes as streams sorted by the server (ORDER BY the GROUP BY columns).
 # arrow-flight.aggregation-sorted-merge.enabled=true
+# Patched Trino only (trino-patches/): per-split partial aggregation states merged by Trino
+# arrow-flight.partial-aggregation-pushdown.enabled=true

@@ -5,7 +5,7 @@ Trino is allowed when it is more efficient; the stock-Trino path stays supported
 
 | version | series | status |
 |---|---|---|
-| 483 | `483/0001-partial-aggregation-pushdown.patch` | ported, compiles against Trino 483; plugin side not yet implemented |
+| 483 | `483/0001-partial-aggregation-pushdown.patch` | ported, compiles against Trino 483, smoke-tested; plugin side: `ArrowFlightMetadata.applyPartialAggregation` |
 
 ## 0001 partial aggregation pushdown
 

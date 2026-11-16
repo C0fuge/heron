@@ -245,7 +245,7 @@ public abstract class AbstractArrowFlightPageSource
         // Several endpoints each return their own partial groups. Sorted by the grouping columns they are merged
         // as streams; otherwise all groups are collected in a hash table first (slow and memory-hungry with
         // millions of groups, e.g. GROUP BY l_orderkey). The sort is skipped where one endpoint is expected.
-        boolean sortedGroups = aggregationReader != null && sortedAggregationMerge && aggregationReader.canMergeSorted()
+        boolean sortedGroups = aggregationReader != null && !partialStates() && sortedAggregationMerge && aggregationReader.canMergeSorted()
                 && client.expectsSeveralEndpoints();
         String sql = aggregationReader != null
                 ? SqlQueryBuilder.buildAggregationSql(table, extra, sortedGroups)
@@ -254,7 +254,7 @@ public abstract class AbstractArrowFlightPageSource
         FlightInfo info = client.getFlightInfo(sql);
         endpoints = info.getEndpoints();
         client.recordEndpointCount(endpoints.size());
-        if (aggregationReader != null && !sortedGroups && endpoints.size() > 1) {
+        if (aggregationReader != null && !partialStates() && !sortedGroups && endpoints.size() > 1) {
             log.info("Grouped aggregation from %s endpoints merged in memory (%s): %s", endpoints.size(),
                     !sortedAggregationMerge ? "sorted merge disabled"
                             : !aggregationReader.canMergeSorted() ? "GROUP BY types the server cannot order like Trino"
@@ -480,13 +480,25 @@ public abstract class AbstractArrowFlightPageSource
         if (exhausted && !aggregationRowSeen && aggregationReader.isGlobal()) {
             aggregationRowSeen = true;
             log.debug("Global aggregation of %s: no row from %s endpoint(s), returning the empty-input row", table, endpoints.size());
-            return aggregationReader.finish(aggregationReader.emptyGlobalRawPage(), columns);
+            // partial states: every split that saw no row sends the empty state row; Trino's FINAL merges them
+            Page empty = aggregationReader.emptyGlobalRawPage();
+            return partialStates() ? aggregationReader.finishStates(empty, columns) : aggregationReader.finish(empty, columns);
         }
         return null;
     }
 
+    private boolean partialStates()
+    {
+        return table.producesPartialAggregation();
+    }
+
     private Page nextServerAggregationPage()
     {
+        if (partialStates()) {
+            // Trino's FINAL aggregation merges the states of every endpoint and split: no merge here
+            VectorSchemaRoot root = nextBatch();
+            return root == null ? null : aggregationReader.finishStates(aggregationReader.rawPage(root), columns);
+        }
         if (sortedMerger != null) {
             Page raw = sortedMerger.nextPage();
             return raw == null ? null : aggregationReader.finish(raw, columns);

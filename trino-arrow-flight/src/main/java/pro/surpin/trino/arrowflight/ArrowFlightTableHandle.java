@@ -131,6 +131,15 @@ public final class ArrowFlightTableHandle
         return aggregation;
     }
 
+    /**
+     * Patched-Trino SPI ({@code ConnectorTableHandle.producesPartialAggregation}, trino-patches/): no {@code @Override}
+     * so that the plugin compiles against stock Trino too, where nothing calls it.
+     */
+    public boolean producesPartialAggregation()
+    {
+        return aggregation.map(Aggregation::isPartial).orElse(false);
+    }
+
     @JsonProperty
     public OptionalLong getLimit()
     {

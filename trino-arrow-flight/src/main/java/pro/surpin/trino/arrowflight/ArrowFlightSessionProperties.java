@@ -29,6 +29,7 @@ public final class ArrowFlightSessionProperties
     public static final String AGGREGATION_SORTED_MERGE_ENABLED = "aggregation_sorted_merge_enabled";
     public static final String READ_AHEAD_ENABLED = "read_ahead_enabled";
     public static final String ENDPOINT_SPLITS_ENABLED = "endpoint_splits_enabled";
+    public static final String PARTIAL_AGGREGATION_PUSHDOWN_ENABLED = "partial_aggregation_pushdown_enabled";
 
     private final List<PropertyMetadata<?>> properties;
 
@@ -62,7 +63,10 @@ public final class ArrowFlightSessionProperties
                         "Read the next Arrow batch of a scan while Trino processes the current page", config.isReadAheadEnabled(), false),
                 booleanProperty(ENDPOINT_SPLITS_ENABLED,
                         "One split per Flight endpoint of a plain scan (planned on the coordinator) instead of key-range splits",
-                        config.isEndpointSplitsEnabled(), false));
+                        config.isEndpointSplitsEnabled(), false),
+                booleanProperty(PARTIAL_AGGREGATION_PUSHDOWN_ENABLED,
+                        "Patched Trino only: splits return intermediate aggregation states, Trino merges them",
+                        config.isPartialAggregationPushdownEnabled(), false));
     }
 
     public List<PropertyMetadata<?>> getSessionProperties()
@@ -122,6 +126,11 @@ public final class ArrowFlightSessionProperties
     public static boolean isReadAheadEnabled(ConnectorSession session)
     {
         return session.getProperty(READ_AHEAD_ENABLED, Boolean.class);
+    }
+
+    public static boolean isPartialAggregationPushdownEnabled(ConnectorSession session)
+    {
+        return session.getProperty(PARTIAL_AGGREGATION_PUSHDOWN_ENABLED, Boolean.class);
     }
 
     public static boolean isEndpointSplitsEnabled(ConnectorSession session)

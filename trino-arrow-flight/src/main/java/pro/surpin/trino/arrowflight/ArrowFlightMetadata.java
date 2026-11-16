@@ -33,6 +33,7 @@ import io.trino.spi.expression.Call;
 import io.trino.spi.statistics.Estimate;
 import io.trino.spi.statistics.TableStatistics;
 import io.trino.spi.type.DecimalType;
+import io.trino.spi.type.RowType;
 import io.trino.spi.type.Type;
 import io.airlift.log.Logger;
 
@@ -318,6 +319,24 @@ public class ArrowFlightMetadata
         expression.getChildren().forEach(child -> collectVariables(child, out));
     }
 
+    /**
+     * True on a Trino patched with trino-patches/ (its SPI has {@code ConnectorMetadata.applyPartialAggregation}). Only
+     * then is a grouped/global aggregation left to the partial path; stock Trino keeps {@link #applyAggregation}.
+     */
+    static final boolean PARTIAL_AGGREGATION_SPI = hasPartialAggregationSpi();
+
+    private static boolean hasPartialAggregationSpi()
+    {
+        try {
+            ConnectorMetadata.class.getMethod("applyPartialAggregation", ConnectorSession.class, ConnectorTableHandle.class,
+                    List.class, Map.class, List.class, List.class);
+            return true;
+        }
+        catch (NoSuchMethodException e) {
+            return false;
+        }
+    }
+
     @Override
     public Optional<AggregationApplicationResult<ConnectorTableHandle>> applyAggregation(
             ConnectorSession session,
@@ -326,9 +345,104 @@ public class ArrowFlightMetadata
             Map<String, ColumnHandle> assignments,
             List<List<ColumnHandle>> groupingSets)
     {
-        ArrowFlightTableHandle handle = (ArrowFlightTableHandle) table;
+        return applyAggregation(session, table, aggregates, assignments, groupingSets, PARTIAL_AGGREGATION_SPI);
+    }
+
+    Optional<AggregationApplicationResult<ConnectorTableHandle>> applyAggregation(
+            ConnectorSession session,
+            ConnectorTableHandle table,
+            List<AggregateFunction> aggregates,
+            Map<String, ColumnHandle> assignments,
+            List<List<ColumnHandle>> groupingSets,
+            boolean partialSpi)
+    {
+        if (!ArrowFlightSessionProperties.isAggregationPushdownEnabled(session)) {
+            return Optional.empty();
+        }
+        Optional<Aggregation> aggregation = translateAggregation((ArrowFlightTableHandle) table, aggregates, assignments,
+                groupingSets, Optional.empty());
+        if (aggregation.isEmpty()) {
+            return Optional.empty();
+        }
+        if (partialSpi && ArrowFlightSessionProperties.isPartialAggregationPushdownEnabled(session) && partialCandidate(aggregation.get())) {
+            // Left to applyPartialAggregation, which the patched planner calls after splitting it into PARTIAL/FINAL
+            // (same aggregation over the same scan): Trino then merges per-split states in its distributed FINAL.
+            return Optional.empty();
+        }
+        return Optional.of(aggregationResult((ArrowFlightTableHandle) table, aggregation.get()));
+    }
+
+    /**
+     * Patched-Trino SPI (trino-patches/): the aggregation as Trino's intermediate states, per split. No {@code @Override}
+     * so that the plugin compiles against stock Trino, which never calls it. Declines (whole request) unless every
+     * aggregate has a state this connector produces exactly as {@code intermediateTypes} asks.
+     */
+    public Optional<AggregationApplicationResult<ConnectorTableHandle>> applyPartialAggregation(
+            ConnectorSession session,
+            ConnectorTableHandle table,
+            List<AggregateFunction> aggregates,
+            Map<String, ColumnHandle> assignments,
+            List<List<ColumnHandle>> groupingSets,
+            List<Type> intermediateTypes)
+    {
         if (!ArrowFlightSessionProperties.isAggregationPushdownEnabled(session)
-                || handle.getAggregation().isPresent() || handle.getLimit().isPresent() || handle.getTopN().isPresent()
+                || !ArrowFlightSessionProperties.isPartialAggregationPushdownEnabled(session)) {
+            return Optional.empty();
+        }
+        return translatePartialAggregation((ArrowFlightTableHandle) table, aggregates, assignments, groupingSets, intermediateTypes)
+                .map(aggregation -> aggregationResult((ArrowFlightTableHandle) table, aggregation));
+    }
+
+    static Optional<Aggregation> translatePartialAggregation(
+            ArrowFlightTableHandle handle,
+            List<AggregateFunction> aggregates,
+            Map<String, ColumnHandle> assignments,
+            List<List<ColumnHandle>> groupingSets,
+            List<Type> intermediateTypes)
+    {
+        if (aggregates.size() != intermediateTypes.size()) {
+            return Optional.empty();
+        }
+        return translateAggregation(handle, aggregates, assignments, groupingSets, Optional.of(intermediateTypes));
+    }
+
+    /** True if every aggregate has a partial state this connector produces (then the patched planner's rule takes it). */
+    static boolean partialCandidate(Aggregation aggregation)
+    {
+        return aggregation.getAggregates().stream().allMatch(a -> partialStateType(a).isPresent());
+    }
+
+    private static AggregationApplicationResult<ConnectorTableHandle> aggregationResult(ArrowFlightTableHandle handle, Aggregation aggregation)
+    {
+        ImmutableList.Builder<ConnectorExpression> projections = ImmutableList.builder();
+        ImmutableList.Builder<Assignment> resultAssignments = ImmutableList.builder();
+        for (AggregateColumn aggregate : aggregation.getAggregates()) {
+            ArrowFlightColumnHandle output = aggregate.getOutput();
+            projections.add(new Variable(output.getColumnName(), output.getColumnType()));
+            resultAssignments.add(new Assignment(output.getColumnName(), output, output.getColumnType()));
+        }
+        Map<ColumnHandle, ColumnHandle> groupingMapping = new LinkedHashMap<>();
+        aggregation.getGroupingColumns().forEach(column -> groupingMapping.put(column, column));
+        return new AggregationApplicationResult<>(
+                handle.withAggregation(aggregation),
+                projections.build(),
+                resultAssignments.build(),
+                groupingMapping,
+                false);
+    }
+
+    /**
+     * The pushed aggregation, or empty if any part cannot be pushed. {@code stateTypes} present = partial (patched
+     * Trino): the outputs are Trino's intermediate states and must have exactly these types.
+     */
+    static Optional<Aggregation> translateAggregation(
+            ArrowFlightTableHandle handle,
+            List<AggregateFunction> aggregates,
+            Map<String, ColumnHandle> assignments,
+            List<List<ColumnHandle>> groupingSets,
+            Optional<List<Type>> stateTypes)
+    {
+        if (handle.getAggregation().isPresent() || handle.getLimit().isPresent() || handle.getTopN().isPresent()
                 || groupingSets.size() != 1) {
             return Optional.empty();
         }
@@ -343,28 +457,41 @@ public class ArrowFlightMetadata
         }
 
         List<AggregateColumn> pushed = new ArrayList<>();
-        ImmutableList.Builder<ConnectorExpression> projections = ImmutableList.builder();
-        ImmutableList.Builder<Assignment> resultAssignments = ImmutableList.builder();
         for (int i = 0; i < aggregates.size(); i++) {
-            AggregateFunction aggregate = aggregates.get(i);
-            Optional<AggregateColumn> translated = translateAggregate(aggregate, assignments, "afagg" + i);
+            Optional<AggregateColumn> translated = translateAggregate(aggregates.get(i), assignments, "afagg" + i);
             if (translated.isEmpty()) {
                 return Optional.empty();
             }
-            ArrowFlightColumnHandle output = translated.get().getOutput();
-            pushed.add(translated.get());
-            projections.add(new Variable(output.getColumnName(), output.getColumnType()));
-            resultAssignments.add(new Assignment(output.getColumnName(), output, output.getColumnType()));
+            AggregateColumn aggregate = translated.get();
+            if (stateTypes.isPresent()) {
+                Optional<Type> state = partialStateType(aggregate);
+                if (state.isEmpty() || !state.get().equals(stateTypes.get().get(i))) {
+                    return Optional.empty();
+                }
+                aggregate = new AggregateColumn(aggregate.getFunction(), aggregate.getInput(),
+                        new ArrowFlightColumnHandle(aggregate.getOutput().getColumnName(), state.get()));
+            }
+            pushed.add(aggregate);
         }
+        return Optional.of(new Aggregation(groupBy, pushed, stateTypes.isPresent()));
+    }
 
-        Map<ColumnHandle, ColumnHandle> groupingMapping = new LinkedHashMap<>();
-        groupBy.forEach(column -> groupingMapping.put(column, column));
-        return Optional.of(new AggregationApplicationResult<>(
-                handle.withAggregation(new Aggregation(groupBy, pushed)),
-                projections.build(),
-                resultAssignments.build(),
-                groupingMapping,
-                false));
+    /**
+     * Trino's intermediate state type of a pushed aggregate, where this connector can produce it exactly from the
+     * server's answer: count -> BIGINT; sum over integers -> BIGINT, over DOUBLE -> DOUBLE; min/max -> the input type
+     * (the caller still compares with the engine's type);
+     * avg over integers or DOUBLE -> ROW(DOUBLE sum, BIGINT count). DECIMAL sum/avg states are Trino-internal
+     * VARBINARY: not produced (those stay on the stock path).
+     */
+    static Optional<Type> partialStateType(AggregateColumn aggregate)
+    {
+        Type output = aggregate.getOutput().getColumnType();
+        return switch (aggregate.getFunction()) {
+            case COUNT_STAR, COUNT -> Optional.of(BIGINT);
+            case SUM -> output.equals(BIGINT) || output.equals(DOUBLE) ? Optional.of(output) : Optional.empty();
+            case MIN, MAX -> Optional.of(output);
+            case AVG -> output.equals(DOUBLE) ? Optional.of(RowType.anonymous(List.of(DOUBLE, BIGINT))) : Optional.empty();
+        };
     }
 
     static Optional<AggregateColumn> translateAggregate(AggregateFunction aggregate, Map<String, ColumnHandle> assignments, String outputName)

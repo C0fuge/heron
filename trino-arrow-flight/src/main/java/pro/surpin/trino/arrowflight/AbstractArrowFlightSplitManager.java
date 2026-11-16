@@ -119,8 +119,9 @@ public abstract class AbstractArrowFlightSplitManager
     private Optional<List<ArrowFlightSplit>> rangeSplits(ConnectorSession session, ArrowFlightTableHandle handle)
     {
         int maxSplits = ArrowFlightSessionProperties.getSplitCount(session);
-        // An aggregation must see all rows of a group in one place; a LIMIT is cheap anyway.
-        if (maxSplits <= 1 || handle.getAggregation().isPresent() || handle.getLimit().isPresent()) {
+        // An aggregation must see all rows of a group in one place (unless every split returns partial states that
+        // Trino merges: patched Trino); a LIMIT is cheap anyway.
+        if (maxSplits <= 1 || handle.getAggregation().filter(a -> !a.isPartial()).isPresent() || handle.getLimit().isPresent()) {
             return Optional.empty();
         }
         Optional<ArrowFlightColumnHandle> column = splitColumn(handle);

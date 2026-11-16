@@ -618,6 +618,52 @@ SELECT count(*) FROM tpch.nation WHERE n_nationkey > 1000
 SQL
 cat "$OUT/emptyagg-summary.tsv"
 
+# Patched Trino (trino-patches/, e2e.yml input patched-trino): aggregations become per-split partial states that Trino's
+# FINAL merges. The plan must show the partial scan, and partial (default) / stock pushdown / Trino's own aggregation must
+# answer the same.
+case "$TRINO_IMAGE" in trinodb/trino:*) PARTIALAGG=0 ;; *) PARTIALAGG=1 ;; esac
+if [ "$PARTIALAGG" = 1 ]; then
+  log "partialagg: partial aggregation pushdown (patched Trino) vs stock pushdown vs Trino's own"
+  mkdir -p "$OUT/partialagg"
+  printf 'query\tresult\tdetail\n' > "$OUT/partialagg-summary.tsv"
+  docker exec trino trino --catalog flight --output-format TSV --execute \
+    "EXPLAIN SELECT l_returnflag, count(*), sum(l_orderkey), avg(l_suppkey) FROM tpch.lineitem GROUP BY 1" \
+    > "$OUT/partialagg/explain.txt" 2>&1 || true
+  if grep -q 'partial groupBy' "$OUT/partialagg/explain.txt"; then
+    printf 'EXPLAIN grouped\tOK\tpartial scan in the plan\n' >> "$OUT/partialagg-summary.tsv"
+  else
+    printf 'EXPLAIN grouped\tFAIL\tno partial scan: %s\n' "$(tr '\n' ' ' < "$OUT/partialagg/explain.txt" | head -c 300)" >> "$OUT/partialagg-summary.tsv"; status=1
+  fi
+  partialagg_n=0
+  while IFS= read -r sql; do
+    partialagg_n=$((partialagg_n + 1))
+    for mode in partial stock trino; do
+      case $mode in
+        partial) pa_args=(--session flight.partial_aggregation_pushdown_enabled=true) ;;
+        stock) pa_args=(--session flight.partial_aggregation_pushdown_enabled=false) ;;
+        trino) pa_args=(--session flight.aggregation_pushdown_enabled=false) ;;
+      esac
+      docker exec trino trino --catalog flight --output-format TSV "${pa_args[@]}" --execute "$sql" \
+        > "$OUT/partialagg/$partialagg_n.$mode.tsv" 2> "$OUT/partialagg/$partialagg_n.$mode.err" \
+        || echo "ERROR $(grep -v 'jline\|dumb terminal' "$OUT/partialagg/$partialagg_n.$mode.err" | head -c 200)" >> "$OUT/partialagg/$partialagg_n.$mode.tsv"
+    done
+    a="$(tr '\n' ' ' < "$OUT/partialagg/$partialagg_n.partial.tsv")"; b="$(tr '\n' ' ' < "$OUT/partialagg/$partialagg_n.stock.tsv")"
+    c="$(tr '\n' ' ' < "$OUT/partialagg/$partialagg_n.trino.tsv")"
+    if [ "$a" = "$c" ] && [ "$b" = "$c" ] && [ -n "$c" ] && ! grep -q ERROR "$OUT/partialagg/$partialagg_n.trino.tsv"; then
+      printf '%s\tOK\t%s\n' "$sql" "${c:0:200}"
+    else
+      printf '%s\tFAIL\tpartial: [%s] | stock: [%s] | trino: [%s]\n' "$sql" "${a:0:200}" "${b:0:200}" "${c:0:200}"; status=1
+    fi >> "$OUT/partialagg-summary.tsv"
+  done <<'SQL'
+SELECT l_returnflag, l_linestatus, count(*), count(l_comment), sum(l_orderkey), min(l_shipdate), max(l_partkey), round(avg(l_suppkey), 6), round(avg(l_partkey * 1e0), 6) FROM tpch.lineitem GROUP BY 1, 2 ORDER BY 1, 2
+SELECT count(*), sum(c), max(c), min(s) FROM (SELECT l_orderkey, count(*) c, sum(l_linenumber) s FROM tpch.lineitem GROUP BY l_orderkey)
+SELECT count(*), sum(l_partkey), min(l_orderkey), max(l_orderkey), round(avg(l_orderkey), 6) FROM tpch.lineitem
+SELECT count(*), sum(l_partkey), max(l_orderkey), avg(l_orderkey) FROM tpch.lineitem WHERE l_orderkey < 0
+SELECT o_orderstatus, count(*), min(o_orderdate), max(o_custkey) FROM tpch.orders WHERE o_orderdate >= DATE '1995-01-01' GROUP BY 1 ORDER BY 1
+SQL
+  cat "$OUT/partialagg-summary.tsv"
+fi
+
 if [ "$ICEBERG" = 1 ]; then
   iceberg_check
   save_logs
