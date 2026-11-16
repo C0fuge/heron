@@ -53,6 +53,8 @@ Kept up to date after every work session so work can be resumed from this reposi
   (throwaway, generated in the job), auth `FLIGHT_ALLOW_INSECURE=true` or
   `FLIGHT_AUTH_PROVIDER=token FLIGHT_AUTH_TOKEN=<t>`, `-DresultMode=partial|complete`. Two or three servers
   (`--hosts a,b,c`) form a cluster with backup locations.
+- Patched Trino (session 301): `trino-patches/<v>/*.patch`, built by `trino-patches/build-overlay.sh` (cached in CI);
+  e2e input `patched-trino=1` (with `trino=483`) and connector-compare input `patched-trino=483` use image `trino-patched:483`.
 - Trino: `trinodb/trino:455` (and 477/483) image, plugin dir mounted at `/usr/lib/trino/plugin/arrow-flight`,
   catalog `connector.name=arrow_flight`, JVM flags from README.
 
@@ -78,13 +80,41 @@ Kept up to date after every work session so work can be resumed from this reposi
 > 39.1 -> 51.8) and SF10 default (273.4 -> 335.6), equal on SF10 speed (164.4 -> 167.7). Different runners, so no claim;
 > next step 1 measures both servers in one job.
 >
-> **Next steps (session 301):** (1) maintainer 07:00 item: start the patched-Trino series. First step: fetch Trino tag
-> 483, try `git apply --check` of upstream `flight-trino/trino-fork/flight-connector.patch` (fails at `PlanOptimizers.java`
-> ~989 and `ConnectorTableHandle.java`, session 297), port it into `trino-patches/483/*.patch` in this repo, add a CI
-> workflow that builds the patched Trino server tarball/image (cached by tag + patch hash); if 483 is not feasible try 477,
-> record why. Then plugin `applyPartialAggregation` behind the stock path, then stock vs patched TPC-H on d2e27119fda4.
-> (2) same-job server comparison deafc861cce3 vs d2e27119fda4 (connector-compare needs a per-pass server build) to confirm
-> or clear the watch above.
+> **Session 301 (2026-11-16 06:51-08:20 UTC): patched-Trino series started - Trino 483 patch ported, built, active in
+> CI; plugin side implemented; first e2e on the patched engine found and fixed two plugin bugs.**
+> - `trino-patches/483/0001-partial-aggregation-pushdown.patch` = upstream `f1bb88c` ported to Trino tag 483 (2 hunks
+>   rebased, 5 API changes: see `trino-patches/README.md`). Built by `trino-patches/build-overlay.sh`: recompiles only
+>   the 9 touched sources against the published 483 jars and replaces those 12 classes in stock trino-spi/trino-main
+>   (no 30+ min Trino build); image = `FROM trinodb/trino:483` + the two jars. CI `patched-trino.yml` (cached; smoke test:
+>   patched SPI resolved by the server, stock aggregations equal to the stock image; prints 483's intermediate state
+>   types: count/sum(int)->bigint, sum(double/real)->double, min/max->input, avg(int/double)->row(double, bigint),
+>   decimal sum/avg->varbinary). **Pitfall found:** the server's jars are `lib/io.trino_trino-{spi,main}-483.jar`; a copy
+>   under the plain name loses to the stock jar on `lib/*` (run 43825546546) - so e2e runs 43820665934 / 43821804213 /
+>   43823907130 ran **stock** classes, not the patch; fixed in 1827529 (Containerfile overwrites the real names, smoke
+>   test asserts the SPI method is visible), green 43825784443.
+> - Plugin (one build for stock and patched Trino): `ArrowFlightMetadata.applyPartialAggregation` (no `@Override`, uses
+>   only stock SPI types); `applyAggregation` declines only when the SPI is present (reflection, logged at startup),
+>   session `partial_aggregation_pushdown_enabled` (config `arrow-flight.partial-aggregation-pushdown.enabled`, default
+>   true) is on and every aggregate has a producible state (count, sum int/double, min/max, avg int/double; not decimal
+>   sum/avg, not max(double)); page source emits per-endpoint states without merge (AVG = ROW(DOUBLE, BIGINT), NULL sum ->
+>   0.0, empty-split global row = identity states); partial aggregations may use key-range splits. Stock Trino:
+>   unchanged (unit test `stockTrinoHasNoPartialSpi`; stock e2e 455 run 43823901886 green).
+> - e2e block `partialagg` (only on the patched image): plan must show the partial scan; partial vs stock pushdown vs
+>   Trino's own on 5 queries. First real patched run 43826068308 (1 server): **TPC-H 22/22, types, nanagg, emptyagg,
+>   failover-free checks all OK**, but grouped partial aggregation failed the query ("Partial aggregation did not return
+>   a grouping column": the patched rule builds the scan only from the result's assignments) and a GROUP BY without
+>   aggregates lost its pushdown (patched rule skips it). Both fixed in a11a36c (+2 unit tests); rerun: see Log.
+> - connector-compare input `patched-trino=483` (passes ours483 = stock image, ours483p = patched image, same zip).
+>
+> **Next steps (session 302):** (1) check the e2e run on a11a36c (`gh run list --workflow e2e.yml`, inputs trino=483
+> patched-trino=1, 1 + 3 servers): `partialagg-summary` all OK incl. "EXPLAIN grouped OK", 22/22; fix what fails. Also
+> run it with `server-profile=speed`. (2) Measure: connector-compare `sf=both profiles=both upstream=false ours446=false
+> patched-trino=483` (passes ours=455 stock, ours483 stock, ours483p patched) on d2e27119fda4; 22/22 equal required;
+> compare ours483 vs ours483p per query (q01/q06 are decimal sums -> stock path; partial helps grouped
+> count/min/max/int sums, e.g. q04/q13/q18 sub-aggregations, and key-range splits for aggregations on 1 server). Use
+> `plans=` to confirm which queries take the partial path. (3) If patched wins: decimal SUM/AVG states (Trino's
+> VARBINARY LongDecimalWithOverflow(AndLong)State layout) are the next big gain for TPC-H (q01, q18 use decimal sums);
+> then offline package with the patched jars. (4) old item: same-job server comparison deafc861cce3 vs d2e27119fda4.
 
 > **Maintainer, 2026-11-16 01:45 - FIRST: UPSTREAM Trino partial aggregation pushdown.** upstream `VadimSurpin/arrow-flight-server` (read-only, never push there) branch `feat/trino-partial-aggregation-pushdown`: partial aggregation SPI patch (`f1bb88c7cc46`), partial count states pushed to Flight (`f12131169bce`), partial numeric aggregates (`c2d40930534f`), numeric min/max (`f96e771ac6e2`), count input types (`398affcf5c6c`); also DuckDB result streaming / streaming buffer on its server (`821f627ba757`, `2e86e98ad599`). {rule} Measure TPC-H SF1/SF10 before/after on `server-1.0.0-2c169a53db3b`, both server profiles.
 >
@@ -1015,6 +1045,11 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **Patched Trino version (session 301).** The partial-aggregation patch series exists for Trino **483** (the maintainer's
+  order: 483 first). Production runs Trino **455**. If the measurement shows patched 483 faster, is moving production to
+  a patched 483 acceptable, or is a 455 port wanted too (upstream's 446 patch applies to 455 with `git apply --check`; the
+  overlay build would work the same way)? Deployment = overwrite `lib/io.trino_trino-spi-483.jar` and
+  `lib/io.trino_trino-main-483.jar` on every node (exact names, see `trino-patches/README.md`).
 - **Server deafc861cce3: memory with `resourceProfile=speed` (session 135).** In connector-compare SF10 the server's
   peak memory was 3983 MB with `speed` vs 1558 MB on f06b5834e76e (default profile 1895 vs 1814 MB; SF1 speed 1126 vs
   983 MB), while the speed run was twice as fast. Expected from the new build (e.g. node-local copies / caching), or should
@@ -1689,3 +1724,11 @@ Kept up to date after every work session so work can be resumed from this reposi
   (speed), 1 + 3 servers, green -> pinned. Before/after 321baf4 vs main, connector-compare 43808943657 (new input
   `before-ref`): 22/22 exact everywhere, no time change beyond noise. Watch: slower than session 135's deafc861cce3 numbers
   on another runner; same-job check is next.
+- 2026-11-16 (cloud session 301, 06:51-08:20 UTC): maintainer 07:00 item (patched Trino) started. Upstream f1bb88c engine
+  patch ported to Trino 483 (`trino-patches/483/`), overlay build + CI `patched-trino.yml` (43820415045 green, later
+  43825784443 green after the jar-name fix 1827529: earlier "patched" e2e 43820665934/43821804213/43823907130 ran stock
+  classes). Plugin `applyPartialAggregation` + states + range splits for partial aggregations (c0a7da3), stock path
+  unchanged: build 43821798143 / 43823901886 (stock e2e 455) green, stock 483 e2e 43820670408 green. First real patched
+  e2e 43826068308 (1 server): 22/22 + all checks OK except partialagg (grouping columns missing from the partial result;
+  GROUP BY without aggregates lost pushdown) -> fixed a11a36c, rerun dispatched (see Next steps). connector-compare input
+  `patched-trino` added (681cfc9), not run yet.
