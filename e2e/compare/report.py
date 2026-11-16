@@ -62,7 +62,7 @@ def main():
     passes = sorted(d for d in os.listdir(out) if os.path.isfile(os.path.join(out, d, "meta.txt")))
     order = {"ours": 0, "up": 1, "ours446": 2}
     passes.sort(key=lambda p: (order.get(p, 9), p))
-    queries = sorted(f[:-4] for f in os.listdir(ref) if re.fullmatch(r"q\d\d\.tsv", f))
+    queries = sorted(f[:-4] for f in os.listdir(ref) if re.fullmatch(r"qa?\d\d\.tsv", f))
     refsum = {r[0]: r[1:] for r in (l.rstrip("\n").split("\t") for l in open(os.path.join(out, "reference-sums.tsv")))}
     data = {}
     for p in passes:

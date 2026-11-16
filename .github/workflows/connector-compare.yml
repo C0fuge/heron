@@ -43,6 +43,9 @@ on:
       patched-trino:
         description: 'Trino version with a patch series (trino-patches/): adds passes ours<v> (stock image) and ours<v>p (patched image); empty = no'
         default: ''
+      query-set:
+        description: 'tpch = TPC-H q01..q22; agg = e2e/compare/queries-agg (non-decimal scan aggregations; with patched-trino adds pass ours<v>pf = patched image, partial pushdown off)'
+        default: 'tpch'
 
 permissions:
   contents: read
@@ -68,6 +71,7 @@ jobs:
       UPSTREAM: ${{ inputs.upstream }}
       BEFORE_REF: ${{ inputs.before-ref }}
       PATCHED_TRINO: ${{ inputs.patched-trino }}
+      QUERY_SET: ${{ inputs.query-set }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -167,6 +171,7 @@ jobs:
           if [ -n "$PATCHED_TRINO" ]; then
             V="$PATCHED_TRINO"
             PASSES="$PASSES ours$V:$V:$RUNNER_TEMP/zips/ours$V.zip ours${V}p:${V}p:$RUNNER_TEMP/zips/ours$V.zip"
+            [ "$QUERY_SET" != agg ] || PASSES="$PASSES ours${V}pf:${V}p:$RUNNER_TEMP/zips/ours$V.zip:partial_aggregation_pushdown_enabled=false"
           fi
           if [ -n "$PLANS" ]; then export EXPLAIN_QUERIES="$PLANS" PLAN_LOG=1; fi
           echo "passes: $PASSES"

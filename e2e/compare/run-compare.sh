@@ -4,7 +4,12 @@
 #
 #   ASSETS=<e2e-assets dir> WORK=<dir> OUT=<dir> SF=1|10 PROFILE=default|speed \
 #   PASSES="ours:455:<zip> up:446:<zip> [ours446:446:<zip>] [name:455:<zip>:prop=value,prop=value] [p:483p:<zip>]" \
-#   [QUERIES="q03 q10"] e2e/compare/run-compare.sh
+#   [QUERIES="q03 q10"] [QUERY_SET=tpch|agg] e2e/compare/run-compare.sh
+#
+# QUERY_SET=agg times e2e/compare/queries-agg/qa*.sql instead of TPC-H: non-decimal count/sum/min/max/avg directly over
+# a scan, i.e. the aggregations the patched Trino's partial aggregation pushdown takes (TPC-H's scan aggregations are all
+# decimal or have no aggregates, so its plans are the same on stock and patched Trino). Their DuckDB reference is
+# generated in the job from the same Parquet files; EXPLAIN_QUERIES defaults to all of them.
 #
 # A 4th pass field sets catalog session properties for every query of that pass (e.g. ours-nostats with
 # statistics_enabled=false); a pass whose name starts with "up" uses the upstream catalog properties. QUERIES limits the
@@ -24,11 +29,16 @@ ASSETS="${ASSETS:?}"; WORK="${WORK:?}"; OUT="${OUT:?}"; SF="${SF:-1}"; PROFILE="
 PASSES="${PASSES:?}"; SERVER_BUILD="${SERVER_BUILD:-d2e27119fda4}"; ROUNDS="${ROUNDS:-3}"
 TRINO_XMX="${TRINO_XMX:-8G}"; TRINO_QUERY_MEM="${TRINO_QUERY_MEM:-4GB}"; SERVER_HEAP="${SERVER_HEAP:-3g}"
 QUERY_TIMEOUT="${QUERY_TIMEOUT:-900}"  # seconds per query
-EXPLAIN_QUERIES="${EXPLAIN_QUERIES:-q01 q03 q06 q14 q18}"
+QUERY_SET="${QUERY_SET:-tpch}"
+if [ "$QUERY_SET" = agg ]; then
+  EXPLAIN_QUERIES="${EXPLAIN_QUERIES:-qa01 qa02 qa03 qa04 qa05 qa06}"
+else
+  EXPLAIN_QUERIES="${EXPLAIN_QUERIES:-q01 q03 q06 q14 q18}"
+fi
 QUERIES="${QUERIES:-}"; PLAN_LOG="${PLAN_LOG:-0}"
 DATA_CACHE="${DATA_CACHE:-$WORK/tpch-sf$SF}"   # SF10: Parquet + reference (cached by the workflow)
 NET=afcmp
-QDIR="$REPO/e2e/ci/queries"
+QDIR="$REPO/e2e/ci/queries"; [ "$QUERY_SET" != agg ] || QDIR="$REPO/e2e/compare/queries-agg"
 mkdir -p "$OUT" "$WORK"
 log() { echo "== $(date -u +%T) $*"; }
 S3_KEY="ci$(openssl rand -hex 8)"; S3_SECRET="$(openssl rand -hex 24)"; TOKEN="$(openssl rand -hex 24)"
@@ -51,12 +61,15 @@ if [ "$SF" = 1 ]; then
 else
   if [ ! -f "$DATA_CACHE/ref/MANIFEST.tsv" ]; then
     python3 "$REPO/e2e/compare/tpch_data.py" gen "$SF" "$DATA_CACHE/tpch"
-    python3 "$REPO/e2e/compare/tpch_data.py" ref "$DATA_CACHE/tpch" "$QDIR" "$DATA_CACHE/ref"
+    python3 "$REPO/e2e/compare/tpch_data.py" ref "$DATA_CACHE/tpch" "$REPO/e2e/ci/queries" "$DATA_CACHE/ref"
   fi
   cp -al "$DATA_CACHE/tpch" "$WORK/s3/lake/parquet/tpch" 2>/dev/null || cp -r "$DATA_CACHE/tpch" "$WORK/s3/lake/parquet/tpch"
   REF="$DATA_CACHE/ref"
 fi
 du -sh "$WORK/s3/lake/parquet/tpch"/* | tee "$OUT/data-sizes.txt"
+if [ "$QUERY_SET" = agg ]; then
+  REF="$WORK/ref-agg"; python3 "$REPO/e2e/compare/tpch_data.py" ref "$WORK/s3/lake/parquet/tpch" "$QDIR" "$REF"
+fi
 python3 "$REPO/e2e/compare/tpch_data.py" sum "$QDIR" "$REF" > "$OUT/reference-sums.tsv"
 
 docker network create $NET >/dev/null
