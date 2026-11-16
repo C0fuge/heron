@@ -62,6 +62,15 @@ jobs:
           done
           q() { docker exec "$1" trino --output-format TSV --execute "$2"; }
           q trino "SELECT node_version FROM system.runtime.nodes"
+          # what the server's classpath resolves (a plugin sees io.trino.spi through the server class loader)
+          docker exec trino sh -c 'ls -la /usr/lib/trino/lib | grep -iE "spi|trino-main"; tr "\0" " " < /proc/1/cmdline | head -c 1500; echo'
+          printf '%s\n' 'public class P { public static void main(String[] a) throws Exception {' \
+            '  Class<?> c = Class.forName("io.trino.spi.connector.ConnectorMetadata");' \
+            '  System.out.println("ConnectorMetadata from " + c.getProtectionDomain().getCodeSource().getLocation());' \
+            '  System.out.println("applyPartialAggregation: " + java.util.Arrays.stream(c.getMethods()).anyMatch(m -> m.getName().equals("applyPartialAggregation")));' \
+            '} }' > "$RUNNER_TEMP/P.java"
+          docker cp "$RUNNER_TEMP/P.java" trino:/tmp/P.java
+          docker exec trino sh -c 'cd /tmp && java -cp "/usr/lib/trino/lib/*" P.java' || true
           # the jars in the image are the patched ones
           cmp <(docker exec trino cat /usr/lib/trino/lib/trino-spi-$TRINO_VERSION.jar) "$D/trino-spi-$TRINO_VERSION.jar"
           cmp <(docker exec trino cat /usr/lib/trino/lib/trino-main-$TRINO_VERSION.jar) "$D/trino-main-$TRINO_VERSION.jar"
