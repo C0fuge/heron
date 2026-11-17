@@ -65,6 +65,16 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 > **Maintainer, 2026-11-16 18:45 - answer: FREEZE the patched Trino series** (keep trino-patches/, the patched-trino CI and `applyPartialAggregation` as they are; stock path stays the default). Measured stock vs patched 483: no gain, more transfer and up to 1.2 GB more Trino memory - not adopted by the efficiency criterion. No 455 port, no decimal states. Close the upstream review (`UPSTREAM 2026-11 DONE` with the per-commit lines) and go back to finish mode.
 
+> **Session 310 (2026-11-17 03:50-04:10 UTC): SF1 default watch from session 309 cleared - runner noise, not a server
+> regression.** connector-compare 44013068299 (`sf=1 profiles=default server-build2=d2e27119fda4 upstream=false
+> ours446=false rounds=5`, ABA, 1 server, 22/22 exact and checksums = reference in every round): sum of warm medians
+> 6f0aa5a026fa 41.9 s vs d2e27119fda4 43.4 / 42.6 s (cold 54.5 vs 51.6 / 53.0); per query within +-0.2 s (q03/q05/q07/q08/q20
+> from session 309 all equal now); server peak 1137 vs 1208 / 1095 MB. Pin 6f0aa5a026fa stays. No code change.
+>
+> **Next steps (session 310): finish mode** - (1) nothing open from the maintainer's notes; the routine only keeps CI green
+> and answers new maintainer notes (a new server build -> pin + full regression + A/B as in session 309). (2)-(3) as in
+> session 307 below.
+
 > **Session 309 (2026-11-16 20:50-22:10 UTC): new server build 6f0aa5a026fa (in e2e-assets since 15:37, no maintainer
 > note) regression-tested and pinned as default** (e2e.yml, connector-compare.yml, run-e2e.sh, run-compare.sh; commit
 > 13c7acc). e2e full suite 1 + 3 servers (types, failover, auth, Iceberg): default profile 43954114349, `speed` 43954119852 -
@@ -1841,3 +1851,4 @@ Kept up to date after every work session so work can be resumed from this reposi
   removed; Next steps = finish mode. No code change, no CI run.
 - 2026-11-16 (cloud session 308, 19:51 UTC): idle - finish mode, no new maintainer note since the 18:45 freeze, last runs green (build 43835428997, connector-compare 43870753170). No code change, no CI run.
 - 2026-11-16 (cloud session 309, 20:50-22:10 UTC): new server build 6f0aa5a026fa pinned (13c7acc) after e2e 43954114349 (default) / 43954119852 (speed), 1 + 3 servers, green; A/B vs d2e27119fda4 connector-compare 43954195113 (22/22 exact): SF1 default 66.5 vs 58.7/55.3 s (watch), SF1 speed 38.4 vs 38.4/38.2, SF10 default 339.8 vs 336.5/338.5, SF10 speed 175.7 vs 170.3/171.1. No plugin code change.
+- 2026-11-17 (cloud session 310, 03:50-04:10 UTC): re-check of SF1 default on pin 6f0aa5a026fa, connector-compare 44013068299 (5 rounds, ABA vs d2e27119fda4, 22/22 exact): warm sum 41.9 vs 43.4/42.6 s - session 309's +16% was runner noise; watch closed, pin kept. No code change.
