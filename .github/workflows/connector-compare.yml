@@ -15,7 +15,7 @@ on:
         default: 'both'
       server-build:
         description: 'Flight server build from e2e-assets'
-        default: '6f0aa5a026fa'
+        default: '36f3302321ba'
       server-build2:
         description: 'Second Flight server build: adds passes old-<build> before and old2-<build> after ours (same plugin zip; A/B of two servers in one job, ABA order); empty = no'
         default: ''

@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `6f0aa5a026fa` since session 309, `d2e27119fda4` in session 300-308, `deafc861cce3` in session 135-299, `0e457de30f25` in session 95-134, `a9e43ca5e296` in session 87-94, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). Input `auth` (session 88, `e2e/ci/auth.sh`):
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `36f3302321ba` since session 331, `6f0aa5a026fa` in session 309-330, `d2e27119fda4` in session 300-308, `deafc861cce3` in session 135-299, `0e457de30f25` in session 95-134, `a9e43ca5e296` in session 87-94, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). Input `auth` (session 88, `e2e/ci/auth.sh`):
   TLS + LDAP / JWT login check, default `auto` = at the end of 3-server runs. `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
@@ -64,6 +64,23 @@ Kept up to date after every work session so work can be resumed from this reposi
 ## Next steps
 
 > **Maintainer, 2026-11-18 12:20 - NEW SERVER BUILD `server-1.0.0-36f3302321ba` (kestrel items 49-56: memory budget + caps, balanced shared DuckDB, distributed big aggregates / GROUP BY, dc tails and scan stream limit, balanced no insertion order on remote dirs; egret HDFS acceptance SHIP) is in this repo's test assets.** Run the full regression on it (as for the last default switch; CI tiers: fast while iterating, full at the end), compare times with the current default server on the same runner class, and if 22/22 everywhere with no regression > 10 %, make it the default server. Report pass/fail per check and any wrong answer (critical).
+
+> **Session 331 (2026-11-18 09:18-10:40 UTC): maintainer note of 12:20 done - server 36f3302321ba regression-tested and
+> pinned as default** (e2e.yml, connector-compare.yml, run-e2e.sh, run-compare.sh). Pass/fail per check: e2e full suite
+> (TPC-H 22/22 vs reference, types, failover, auth TLS/LDAP/JWT incl. expired/forged refused, Iceberg) default profile run
+> 44274803788 - 1 server PASS, 3 servers PASS; `speed` profile run 44274809554 - 1 server PASS, 3 servers PASS. **No wrong
+> answer anywhere.** A/B vs current default 6f0aa5a026fa (connector-compare 44274814805, `server-build2=6f0aa5a026fa`, ABA on
+> one runner, stock Trino 455, 3 rounds, 22/22 exact and checksums = reference in every pass), sum of warm medians new vs
+> old/old2: SF1 default 39.0 vs 38.8/40.6 s, SF1 speed 35.2 vs 34.6/34.2, SF10 default 333.2 vs 332.1/329.0, SF10 speed
+> 133.0 vs 132.4/131.2 - all within +3% (criterion: no regression > 10%). Server peak MB: SF1 default 972 vs 1027/1076,
+> SF1 speed 1118 vs 1168/1132, SF10 default 2012 vs 2201/1906, SF10 speed 4092 vs 3992/4091. Rows/MB read identical on
+> every query, plans identical. **Watch (per query, SF10 default only):** q05 21.8 vs 18.6/18.2 s and q07 21.9 vs 17.5/17.4
+> s warm (execution, not planning), but cold only +3-4% and the same queries are within 2% / +6% in SF10 speed, q15/q18/q19
+> are faster by similar amounts - likely runner noise; next step 1 re-checks it.
+>
+> **Next steps (session 331): finish mode** - (1) re-check SF10 default q05/q07 on the new pin: connector-compare
+> `sf=10 profiles=default server-build2=6f0aa5a026fa upstream=false ours446=false rounds=5 queries="q05 q07"` (space-separated); if ours stays >10% slower in ABA, put it in Open questions as a
+> server-side regression for the maintainer (plugin unchanged). (2)-(3) as in session 307 below.
 
 > **Maintainer, 2026-11-16 18:45 - answer: FREEZE the patched Trino series** (keep trino-patches/, the patched-trino CI and `applyPartialAggregation` as they are; stock path stays the default). Measured stock vs patched 483: no gain, more transfer and up to 1.2 GB more Trino memory - not adopted by the efficiency criterion. No 455 port, no decimal states. Close the upstream review (`UPSTREAM 2026-11 DONE` with the per-commit lines) and go back to finish mode.
 
@@ -1874,3 +1891,4 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-11-18 (cloud session 328, 06:51 UTC): idle - finish mode, no new maintainer note, no new server build in e2e-assets (newest 6f0aa5a026fa, pinned), last runs green (connector-compare 44013068299, e2e 43954114349 / 43954119852). No code change, no CI run.
 - 2026-11-18 (cloud session 329, 07:51 UTC): idle - finish mode, no new maintainer note, no new server build in e2e-assets (newest 6f0aa5a026fa, pinned), last runs green (connector-compare 44013068299, e2e 43954114349 / 43954119852). No code change, no CI run.
 - 2026-11-18 (cloud session 330, 08:51 UTC): idle - finish mode, no new maintainer note, no new server build in e2e-assets (newest 6f0aa5a026fa, pinned), last runs green (connector-compare 44013068299, e2e 43954114349 / 43954119852). No code change, no CI run.
+- 2026-11-18 (cloud session 331, 09:18-10:40 UTC): maintainer note 12:20 - server 36f3302321ba pinned as default after e2e 44274803788 (default) / 44274809554 (speed), 1 + 3 servers, all checks PASS, no wrong answer; A/B vs 6f0aa5a026fa connector-compare 44274814805 (ABA, 22/22 exact): SF1 default 39.0 vs 38.8/40.6 s, SF1 speed 35.2 vs 34.6/34.2, SF10 default 333.2 vs 332.1/329.0, SF10 speed 133.0 vs 132.4/131.2; watch SF10 default q05/q07 (+18/+25% warm, cold +3%). No plugin code change.
