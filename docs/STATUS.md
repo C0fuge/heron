@@ -65,6 +65,23 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 > **Maintainer, 2026-11-18 17:20 - NEW SERVER BUILD `server-1.0.0-06d6468b17c5` (kestrel item 57: balanced keeps the file order on remote data dirs again - the q14 regression found here; otherwise = 36f3302321ba) is in this repo's test assets.** Confirm q14 / q15 / q04 in the default profile against 6f0aa5a026fa (same-CPU pairs) and run the full regression; if 22/22 everywhere with no regression > 10 %, make it the default server.
 
+> **Session 335 (2026-11-18 16:50-17:35 UTC): session-334 watch closed - no server regression; failover check made robust.**
+> Re-check connector-compare 44338448083 (SF10 default, 5 rounds, ABA vs 6f0aa5a026fa, 3/3 exact): warm median ours vs
+> old/old2 q09 16.64 vs 16.52/16.38 s, q10 15.21 vs 15.38/15.23, q12 15.03 vs 14.96/15.13 - parity. SF1 speed q21
+> (connector-compare 44352121022, 5 rounds): 4.77 vs 5.06/4.79 - parity. The session-334 numbers were runner noise; pin
+> 06d6468b17c5 stays. The push e2e on the pin commit (44342675554) failed only on `failover: flight3 killed during a read
+> (schema tpch)` - the same coverage miss as session 334 attempt 1 (q18 exact 57 rows on all 4 attempts; q18 takes only
+> ~2.5 s end to end, so the fixed delays 2 1 4 6 s missed the ~1 s window in which flight3 serves its streams). Fix in
+> `e2e/ci/run-e2e.sh` (`kill_during`): after 2 s and 1 s, kill at 0.5/0.35/0.65/0.8/0.2 x the shortest missed q18 time
+> (min 0.3 s); `KILL_DURING_DELAYS` still forces a fixed list; attempts.tsv has a q18_s column. Push e2e 44352452531 green
+> (1 + 3 servers; hit on attempt 1, so the adaptive path was not exercised yet - check attempts.tsv when a miss recurs).
+> No plugin code change.
+>
+> **Next steps (session 335): finish mode** - (1) nothing open from the maintainer's notes; keep CI green and answer new
+> maintainer notes (a new server build -> pin + full regression + A/B as in session 334). If the "killed during a read"
+> check misses again on all 7 attempts, look at the q18_s column and the flight3 server log before widening further.
+> (2)-(3) as in session 307 below.
+
 > **Session 334 (2026-11-18 14:30-16:10 UTC): maintainer note of 17:20 done - server 06d6468b17c5 regression-tested and
 > pinned as default** (e2e.yml, connector-compare.yml, run-e2e.sh, run-compare.sh). Pass/fail per check: e2e full suite
 > (TPC-H 22/22 vs reference, types, splits, concurrent, iceberg, failover, auth TLS/LDAP/JWT incl. expired/forged refused)
@@ -1938,3 +1955,4 @@ Kept up to date after every work session so work can be resumed from this reposi
   than the pinned 36f3302321ba (latest assets 09:17 UTC); maintainer's 12:20 note already done (sessions 331/332); last
   runs all green (build 44286304809, e2e 44286304779, connector-compare 44289327005). No CI run, no code change.
 - 2026-11-18 (cloud session 334, 14:30-16:10 UTC): maintainer note 17:20 - server 06d6468b17c5 pinned as default after e2e 44325118274 (default) / 44325124291 (speed; 3-server attempt 1 failover-timing miss, no wrong answer, attempt 2 green), all checks PASS; q04/q14/q15 at parity vs 6f0aa5a026fa (44325137640) and 36f3302321ba (44325216870); full A/B 44325131523 22/22 exact, sums within criterion (SF10 default 320.0 vs 301.9/321.4 s); watch SF10 default q09/q10/q12 - re-check 44338448083 dispatched. No plugin code change.
+- 2026-11-18 (cloud session 335, 16:50-17:35 UTC): session-334 watch closed (q09/q10/q12 SF10 default 44338448083, q21 SF1 speed 44352121022 at parity vs 6f0aa5a026fa); push e2e 44342675554 failed only on the flight3-kill-during-read coverage miss (no wrong answer) -> adaptive kill delays in run-e2e.sh, push e2e 44352452531 green. No plugin change.
