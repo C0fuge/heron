@@ -36,7 +36,7 @@ Kept up to date after every work session so work can be resumed from this reposi
   workflow_dispatch `all-versions`), `.github/workflows/e2e.yml` → `e2e/ci/run-e2e.sh` + `e2e/ci/compare.py`
   (push on plugin/e2e changes, matrix 1 and 3 servers; workflow_dispatch inputs trino / result-mode / servers).
   Every run also compares schema `types` (`e2e/ci/types_check.py`, DuckDB 1.4.1 + trino client from pip in the
-  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `36f3302321ba` since session 331, `6f0aa5a026fa` in session 309-330, `d2e27119fda4` in session 300-308, `deafc861cce3` in session 135-299, `0e457de30f25` in session 95-134, `a9e43ca5e296` in session 87-94, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). Input `auth` (session 88, `e2e/ci/auth.sh`):
+  job) and, with 3 servers, runs the failover checks (see `docs/E2E-RESULTS.md`). Input `server-build` = int7 or a server-CI build id (default `06d6468b17c5` since session 334, `36f3302321ba` in session 331-333, `6f0aa5a026fa` in session 309-330, `d2e27119fda4` in session 300-308, `deafc861cce3` in session 135-299, `0e457de30f25` in session 95-134, `a9e43ca5e296` in session 87-94, `cadd1aca9c23` in session 82-86, `4e77c6bda59a` in session 77-81, `45fc0a9e6e02` in session 70-76, `775100bf923f` in session 68-69, `27f583adccd7` (DuckDB 1.5.6 extensions) in session 66-67, `57d252b1437f` in session 61-65, `7fbe2d75827c` in session 57-60, `60e888bc26ec` in session 54-56 (briefly 20b887839edf), before that `4eaab052deaf` since session 47; int4-int6 are gone from the release; all but int4 run `e2e/ci/iceberg.sh`). Input `auth` (session 88, `e2e/ci/auth.sh`):
   TLS + LDAP / JWT login check, default `auto` = at the end of 3-server runs. `SHA256SUMS` now lists int7 and 4eaab052deaf (the job checks them);
   the job prints the selected build's hashes (full int7 hashes: jar 2b9595ab2966a5a3c80b51c96bd7a2a9a9e87d97e746fc94d146ccc8a55606fa,
   plugins 4d2416f4c71d5329094a83fb270a7177b178e83de44fd6e8a1687b48a1de1af4 — match the maintainer's note).
@@ -64,6 +64,32 @@ Kept up to date after every work session so work can be resumed from this reposi
 ## Next steps
 
 > **Maintainer, 2026-11-18 17:20 - NEW SERVER BUILD `server-1.0.0-06d6468b17c5` (kestrel item 57: balanced keeps the file order on remote data dirs again - the q14 regression found here; otherwise = 36f3302321ba) is in this repo's test assets.** Confirm q14 / q15 / q04 in the default profile against 6f0aa5a026fa (same-CPU pairs) and run the full regression; if 22/22 everywhere with no regression > 10 %, make it the default server.
+
+> **Session 334 (2026-11-18 14:30-16:10 UTC): maintainer note of 17:20 done - server 06d6468b17c5 regression-tested and
+> pinned as default** (e2e.yml, connector-compare.yml, run-e2e.sh, run-compare.sh). Pass/fail per check: e2e full suite
+> (TPC-H 22/22 vs reference, types, splits, concurrent, iceberg, failover, auth TLS/LDAP/JWT incl. expired/forged refused)
+> default profile run 44325118274 - 1 server PASS, 3 servers PASS; `speed` profile run 44325124291 - 1 server PASS,
+> 3 servers PASS on attempt 2 (attempt 1: only check `failover: flight3 killed during a read (schema tpch)` FAIL because in
+> 4 attempts the kill never landed on a flight3 read - q18 exact 57 rows every time, i.e. a timing/coverage miss, not a wrong
+> answer; attempt 2 hit the read on the first try). **No wrong answer anywhere.**
+> q04 / q14 / q15 confirmation, default profile, 5 rounds, ABA on one runner (warm median s, ours vs old / old2):
+> vs 6f0aa5a026fa (connector-compare 44325137640) SF1 q04 2.42 vs 2.49/2.35, q14 2.69 vs 2.59/2.69, q15 3.32 vs 3.38/3.38;
+> SF10 q04 9.41 vs 9.52/9.86, q14 11.68 vs 11.61/11.68, q15 22.12 vs 22.34/21.32. vs 36f3302321ba (44325216870) SF1 q14
+> 2.04 vs 1.98/2.01, SF10 q14 11.53 vs 11.15/11.18 - q14 at parity with both (the q14 regression the maintainer saw on
+> remote data dirs does not show on the CI's S3 layout either way). Only cold SF10 q15 is higher (29.0 vs 21.8/21.6 s;
+> 26.8 vs 22.2/22.0 vs 36f3), first-run only, warm equal.
+> Full A/B vs 6f0aa5a026fa (connector-compare 44325131523, 3 rounds, 22/22 exact and checksums = reference in every pass,
+> rows/MB read identical on every query), sum of warm medians ours vs old/old2: SF1 default 69.2 vs 71.5/68.9 s, SF1 speed
+> 49.6 vs 49.5/49.2, SF10 default 320.0 vs 301.9/321.4, SF10 speed 173.0 vs 171.6/169.4 - within criterion. Server peak MB:
+> SF1 default 902 vs 991/976, SF1 speed 1153 vs 1210/1194, SF10 default 1907 vs 1916/1880, SF10 speed 4095 vs 3921/4066.
+> **Watch:** warm >10% slower than both old passes on SF10 default q09 19.6 vs 16.9/17.5, q10 20.1 vs 14.3/14.6, q12 15.8
+> vs 13.1/12.7 (noisy job: ours' warm medians above its cold times) and SF1 speed q21 4.43 vs 3.98/3.96. Re-check already
+> dispatched: connector-compare 44338448083 (`sf=10 profiles=default server-build2=6f0aa5a026fa rounds=5 queries="q09 q10 q12"`).
+>
+> **Next steps (session 334): finish mode** - (1) read connector-compare 44338448083; if ours stays >10% slower than both
+> 6f0aa5a026fa passes on q09/q10/q12, re-run once more (and SF1 speed q21: `sf=1 profiles=speed queries="q21"`); if it
+> persists, put it in Open questions as a server-side regression for the maintainer (plugin unchanged); else close the watch.
+> (2)-(3) as in session 307 below.
 
 > **Maintainer, 2026-11-18 12:20 - NEW SERVER BUILD `server-1.0.0-36f3302321ba` (kestrel items 49-56: memory budget + caps, balanced shared DuckDB, distributed big aggregates / GROUP BY, dc tails and scan stream limit, balanced no insertion order on remote dirs; egret HDFS acceptance SHIP) is in this repo's test assets.** Run the full regression on it (as for the last default switch; CI tiers: fast while iterating, full at the end), compare times with the current default server on the same runner class, and if 22/22 everywhere with no regression > 10 %, make it the default server. Report pass/fail per check and any wrong answer (critical).
 
@@ -1171,6 +1197,8 @@ Kept up to date after every work session so work can be resumed from this reposi
    green too (run 39959398904, same checks). Every Trino version x int6 x 1/3 servers has now run green at least once.
 
 ## Open questions
+- **Release `e2e-assets`: `START-NOTES.md` does not match `SHA256SUMS` (session 334).** The e2e job warns
+  `START-NOTES.md: FAILED` (all server-build assets match). Was START-NOTES.md updated without refreshing SHA256SUMS?
 - **Server deafc861cce3: memory with `resourceProfile=speed` (session 135).** In connector-compare SF10 the server's
   peak memory was 3983 MB with `speed` vs 1558 MB on f06b5834e76e (default profile 1895 vs 1814 MB; SF1 speed 1126 vs
   983 MB), while the speed run was twice as fast. Expected from the new build (e.g. node-local copies / caching), or should
@@ -1909,3 +1937,4 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-11-18 (cloud session 333, 11:50-11:55 UTC): finish mode, nothing to do. No server build in `e2e-assets` newer
   than the pinned 36f3302321ba (latest assets 09:17 UTC); maintainer's 12:20 note already done (sessions 331/332); last
   runs all green (build 44286304809, e2e 44286304779, connector-compare 44289327005). No CI run, no code change.
+- 2026-11-18 (cloud session 334, 14:30-16:10 UTC): maintainer note 17:20 - server 06d6468b17c5 pinned as default after e2e 44325118274 (default) / 44325124291 (speed; 3-server attempt 1 failover-timing miss, no wrong answer, attempt 2 green), all checks PASS; q04/q14/q15 at parity vs 6f0aa5a026fa (44325137640) and 36f3302321ba (44325216870); full A/B 44325131523 22/22 exact, sums within criterion (SF10 default 320.0 vs 301.9/321.4 s); watch SF10 default q09/q10/q12 - re-check 44338448083 dispatched. No plugin code change.

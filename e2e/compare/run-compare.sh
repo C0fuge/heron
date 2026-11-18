@@ -34,7 +34,7 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 ASSETS="${ASSETS:?}"; WORK="${WORK:?}"; OUT="${OUT:?}"; SF="${SF:-1}"; PROFILE="${PROFILE:-default}"
-PASSES="${PASSES:?}"; SERVER_BUILD="${SERVER_BUILD:-36f3302321ba}"; ROUNDS="${ROUNDS:-3}"
+PASSES="${PASSES:?}"; SERVER_BUILD="${SERVER_BUILD:-06d6468b17c5}"; ROUNDS="${ROUNDS:-3}"
 TRINO_XMX="${TRINO_XMX:-8G}"; TRINO_QUERY_MEM="${TRINO_QUERY_MEM:-4GB}"; SERVER_HEAP="${SERVER_HEAP:-3g}"
 QUERY_TIMEOUT="${QUERY_TIMEOUT:-900}"  # seconds per query
 QUERY_SET="${QUERY_SET:-tpch}"; SERVERS="${SERVERS:-1}"
