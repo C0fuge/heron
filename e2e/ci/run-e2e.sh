@@ -746,11 +746,25 @@ if [ "$SERVERS" -ge 3 ]; then
     for h in flight2 flight3; do wait_server "$h"; done
     sleep 5
   }
+  # Delays: KILL_DURING_DELAYS if set (fixed list), else 2 s and 1 s, then fractions of the shortest
+  # q18 time seen in a missed attempt (0.3 s minimum). q18 on SF1 can finish in ~2.5 s end to end
+  # (server 06d6468b17c5, run 44342675554), so flight3 serves its streams for about 1 s only and the
+  # old fixed 2 1 4 6 missed that window on every attempt (twice in session 334).
   kill_during() {  # schema out-name; flight3 must be running
-    local schema=$1 name=$2 attempt=0 hit=no delay dir result evidence
+    local schema=$1 name=$2 attempt=0 hit=no delay dir result evidence el min_el="" max
+    local fixed=(${KILL_DURING_DELAYS:-2 1}) fracs=(0.5 0.35 0.65 0.8 0.2)
+    [ -n "${KILL_DURING_DELAYS:-}" ] && fracs=()
+    max=$(( ${#fixed[@]} + ${#fracs[@]} ))
     log "failover: flight3 killed during a read (schema $schema)"
-    printf 'attempt\tdelay_s\tq18\tflight3_hit\n' > "$OUT/$name-attempts.tsv"
-    for delay in ${KILL_DURING_DELAYS:-2 1 4 6}; do
+    printf 'attempt\tdelay_s\tq18\tflight3_hit\tq18_s\n' > "$OUT/$name-attempts.tsv"
+    while [ "$attempt" -lt "$max" ]; do
+      if [ "$attempt" -lt "${#fixed[@]}" ]; then
+        delay=${fixed[$attempt]}
+      else
+        [ -n "$min_el" ] || break
+        delay=$(awk -v e="$min_el" -v f="${fracs[$((attempt - ${#fixed[@]}))]}" \
+          'BEGIN { d = e * f; if (d < 0.3) d = 0.3; printf "%.2f", d }')
+      fi
       attempt=$((attempt + 1))
       dir="$OUT/$name/$attempt"; mkdir -p "$dir"
       [ "$attempt" -gt 1 ] && restart_lost
@@ -761,10 +775,14 @@ if [ "$SERVERS" -ge 3 ]; then
       wait
       check_exact_or_error "$dir" "$dir/summary.tsv" q18
       result=$([ -f "$dir/q18.tsv" ] && echo answer || echo error)
+      el=$(tail -1 "$OUT/times.tsv" | cut -f3)
       log_since_mark | grep -E 'flight3' > "$dir/flight3-lines.txt" || true
       if [ "$result" = error ] || grep -qE "$FAILOVER_MARKER" "$dir/flight3-lines.txt"; then hit=yes; fi
+      if [ "$hit" = no ] && [ "$result" = answer ]; then
+        min_el=$(awk -v a="$min_el" -v b="$el" 'BEGIN { if (a == "" || b + 0 < a + 0) print b; else print a }')
+      fi
       head -5 "$dir/flight3-lines.txt" | cut -c1-400
-      printf '%s\t%s\t%s\t%s\n' "$attempt" "$delay" "$result" "$hit" | tee -a "$OUT/$name-attempts.tsv"
+      printf '%s\t%s\t%s\t%s\t%s\n' "$attempt" "$delay" "$result" "$hit" "$el" | tee -a "$OUT/$name-attempts.tsv"
       [ "$hit" = yes ] && break
     done
     evidence=$([ "$hit" = yes ] && echo OK ||
