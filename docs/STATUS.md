@@ -63,6 +63,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Maintainer, 2026-11-18 17:20 - NEW SERVER BUILD `server-1.0.0-06d6468b17c5` (kestrel item 57: balanced keeps the file order on remote data dirs again - the q14 regression found here; otherwise = 36f3302321ba) is in this repo's test assets.** Confirm q14 / q15 / q04 in the default profile against 6f0aa5a026fa (same-CPU pairs) and run the full regression; if 22/22 everywhere with no regression > 10 %, make it the default server.
+
 > **Maintainer, 2026-11-18 12:20 - NEW SERVER BUILD `server-1.0.0-36f3302321ba` (kestrel items 49-56: memory budget + caps, balanced shared DuckDB, distributed big aggregates / GROUP BY, dc tails and scan stream limit, balanced no insertion order on remote dirs; egret HDFS acceptance SHIP) is in this repo's test assets.** Run the full regression on it (as for the last default switch; CI tiers: fast while iterating, full at the end), compare times with the current default server on the same runner class, and if 22/22 everywhere with no regression > 10 %, make it the default server. Report pass/fail per check and any wrong answer (critical).
 
 > **Session 332 (2026-11-18 10:51-11:25 UTC): SF10 default q05/q07 watch from session 331 cleared - runner noise, not a
