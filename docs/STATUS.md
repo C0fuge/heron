@@ -63,6 +63,8 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 ## Next steps
 
+> **Maintainer, 2026-11-18 12:20 - NEW SERVER BUILD `server-1.0.0-36f3302321ba` (kestrel items 49-56: memory budget + caps, balanced shared DuckDB, distributed big aggregates / GROUP BY, dc tails and scan stream limit, balanced no insertion order on remote dirs; egret HDFS acceptance SHIP) is in this repo's test assets.** Run the full regression on it (as for the last default switch; CI tiers: fast while iterating, full at the end), compare times with the current default server on the same runner class, and if 22/22 everywhere with no regression > 10 %, make it the default server. Report pass/fail per check and any wrong answer (critical).
+
 > **Maintainer, 2026-11-16 18:45 - answer: FREEZE the patched Trino series** (keep trino-patches/, the patched-trino CI and `applyPartialAggregation` as they are; stock path stays the default). Measured stock vs patched 483: no gain, more transfer and up to 1.2 GB more Trino memory - not adopted by the efficiency criterion. No 455 port, no decimal states. Close the upstream review (`UPSTREAM 2026-11 DONE` with the per-commit lines) and go back to finish mode.
 
 > **Session 310 (2026-11-17 03:50-04:10 UTC): SF1 default watch from session 309 cleared - runner noise, not a server
