@@ -65,6 +65,17 @@ Kept up to date after every work session so work can be resumed from this reposi
 
 > **Maintainer, 2026-11-18 12:20 - NEW SERVER BUILD `server-1.0.0-36f3302321ba` (kestrel items 49-56: memory budget + caps, balanced shared DuckDB, distributed big aggregates / GROUP BY, dc tails and scan stream limit, balanced no insertion order on remote dirs; egret HDFS acceptance SHIP) is in this repo's test assets.** Run the full regression on it (as for the last default switch; CI tiers: fast while iterating, full at the end), compare times with the current default server on the same runner class, and if 22/22 everywhere with no regression > 10 %, make it the default server. Report pass/fail per check and any wrong answer (critical).
 
+> **Session 332 (2026-11-18 10:51-11:25 UTC): SF10 default q05/q07 watch from session 331 cleared - runner noise, not a
+> server regression.** connector-compare 44289327005 (`sf=10 profiles=default server-build2=6f0aa5a026fa upstream=false
+> ours446=false rounds=5 queries="q05 q07"`, ABA, 1 server, 2/2 exact and checksums = reference in every pass): warm median
+> 36f3302321ba vs 6f0aa5a026fa / old2: q05 16.41 vs 16.43 / 17.72 s, q07 15.75 vs 15.00 / 15.03 s (+5%, under the 10%
+> criterion); cold q05 21.5 vs 21.1 / 25.0, q07 16.3 vs 15.1 / 19.1; rows/MB read identical; server peak 940 vs 983 / 961 MB.
+> Push e2e on the pin commit 44286304779 green. Pin 36f3302321ba stays. No code change.
+>
+> **Next steps (session 332): finish mode** - (1) nothing open from the maintainer's notes; the routine only keeps CI green
+> and answers new maintainer notes (a new server build -> pin + full regression + A/B as in session 331). (2)-(3) as in
+> session 307 below.
+
 > **Session 331 (2026-11-18 09:18-10:40 UTC): maintainer note of 12:20 done - server 36f3302321ba regression-tested and
 > pinned as default** (e2e.yml, connector-compare.yml, run-e2e.sh, run-compare.sh). Pass/fail per check: e2e full suite
 > (TPC-H 22/22 vs reference, types, failover, auth TLS/LDAP/JWT incl. expired/forged refused, Iceberg) default profile run
@@ -1892,3 +1903,4 @@ Kept up to date after every work session so work can be resumed from this reposi
 - 2026-11-18 (cloud session 329, 07:51 UTC): idle - finish mode, no new maintainer note, no new server build in e2e-assets (newest 6f0aa5a026fa, pinned), last runs green (connector-compare 44013068299, e2e 43954114349 / 43954119852). No code change, no CI run.
 - 2026-11-18 (cloud session 330, 08:51 UTC): idle - finish mode, no new maintainer note, no new server build in e2e-assets (newest 6f0aa5a026fa, pinned), last runs green (connector-compare 44013068299, e2e 43954114349 / 43954119852). No code change, no CI run.
 - 2026-11-18 (cloud session 331, 09:18-10:40 UTC): maintainer note 12:20 - server 36f3302321ba pinned as default after e2e 44274803788 (default) / 44274809554 (speed), 1 + 3 servers, all checks PASS, no wrong answer; A/B vs 6f0aa5a026fa connector-compare 44274814805 (ABA, 22/22 exact): SF1 default 39.0 vs 38.8/40.6 s, SF1 speed 35.2 vs 34.6/34.2, SF10 default 333.2 vs 332.1/329.0, SF10 speed 133.0 vs 132.4/131.2; watch SF10 default q05/q07 (+18/+25% warm, cold +3%). No plugin code change.
+- 2026-11-18 (cloud session 332, 10:51-11:25 UTC): next step 1 of session 331 - SF10 default q05/q07 re-check on pin 36f3302321ba vs 6f0aa5a026fa, connector-compare 44289327005 (ABA, 5 rounds, 2/2 exact): warm q05 16.41 vs 16.43/17.72 s, q07 15.75 vs 15.00/15.03 s - within 10%, runner noise, watch closed; push e2e 44286304779 green. No code change.
